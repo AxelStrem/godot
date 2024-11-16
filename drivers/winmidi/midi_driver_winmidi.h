@@ -43,6 +43,7 @@
 
 class MIDIDriverWinMidi : public MIDIDriver {
 	Vector<HMIDIIN> connected_sources;
+	PackedStringArray source_names;
 
 	static void CALLBACK read(HMIDIIN hMidiIn, UINT wMsg, DWORD_PTR dwInstance, DWORD_PTR dwParam1, DWORD_PTR dwParam2);
 
