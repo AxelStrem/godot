@@ -510,6 +510,7 @@ public:
 class InputEventMIDI : public InputEvent {
 	GDCLASS(InputEventMIDI, InputEvent);
 
+	int midi_input = 0;
 	int channel = 0;
 	MIDIMessage message = MIDIMessage::NONE;
 	int pitch = 0;
@@ -523,6 +524,9 @@ protected:
 	static void _bind_methods();
 
 public:
+	void set_midi_input(const int p_midi_input);
+	int get_midi_input() const;
+
 	void set_channel(const int p_channel);
 	int get_channel() const;
 
