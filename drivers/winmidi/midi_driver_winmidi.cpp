@@ -67,6 +67,15 @@ Error MIDIDriverWinMidi::open() {
 			sz++;
 		} else {
 			midiInReset(midi_in);
+			//char err[256];
+			//midiInGetErrorText(res, err, 256);
+			//ERR_PRINT("midiInOpen error: " + String(err));
+
+			//MIDIINCAPS caps;
+			//res = midiInGetDevCaps(i, &caps, sizeof(MIDIINCAPS));
+			//if (res == MMSYSERR_NOERROR) {
+			//	ERR_PRINT("Can't open MIDI device \"" + String(caps.szPname) + "\", is it being used by another application?");
+			//}
 		}
 	}
 	return OK;
