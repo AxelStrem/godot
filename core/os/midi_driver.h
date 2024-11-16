@@ -108,7 +108,16 @@ public:
 	virtual Error open() = 0;
 	virtual void close() = 0;
 
+<<<<<<< HEAD
 	PackedStringArray get_connected_inputs() const;
+=======
+	virtual PackedStringArray get_connected_inputs();
+
+	static void receive_input_packet(int midi_input, uint64_t timestamp, uint8_t *data, uint32_t length);
+
+	MIDIDriver();
+	virtual ~MIDIDriver() {}
+>>>>>>> 15c7d83b05 (tweaked midi support)
 };
 
 #endif // MIDI_DRIVER_H
