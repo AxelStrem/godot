@@ -42,7 +42,6 @@ MIDIDriver::MIDIDriver() {
 	singleton = this;
 }
 
-<<<<<<< HEAD
 
 MIDIDriver::MessageCategory MIDIDriver::Parser::category(uint8_t p_midi_fragment) {
 	if (p_midi_fragment >= 0xf8) {
@@ -65,9 +64,6 @@ MIDIDriver::MessageCategory MIDIDriver::Parser::category(uint8_t p_midi_fragment
 
 void MIDIDriver::receive_input_packet(int midi_input, uint64_t timestamp, uint8_t *data, uint32_t length)
 {
-=======
-void MIDIDriver::receive_input_packet(int midi_input, uint64_t timestamp, uint8_t *data, uint32_t length) {
->>>>>>> 15c7d83b05fee429509d83f3ccc60143e55d8453
 	Ref<InputEventMIDI> event;
 	event.instantiate();
 	event->set_midi_input(midi_input);

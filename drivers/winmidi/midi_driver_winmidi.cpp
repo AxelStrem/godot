@@ -38,10 +38,6 @@ void MIDIDriverWinMidi::read(HMIDIIN hMidiIn, UINT wMsg, DWORD_PTR dwInstance, D
 	if (wMsg == MIM_DATA) {
 		int midi_input = dynamic_cast<MIDIDriverWinMidi*>(get_singleton())->connected_sources.find(hMidiIn);
 		receive_input_packet(midi_input, (uint64_t)dwParam2, (uint8_t *)&dwParam1, 3);
-<<<<<<< HEAD
-=======
-
->>>>>>> 15c7d83b05fee429509d83f3ccc60143e55d8453
 	}
 }
 
@@ -71,18 +67,6 @@ Error MIDIDriverWinMidi::open() {
 			sz++;
 		} else {
 			midiInReset(midi_in);
-<<<<<<< HEAD
-=======
-			//char err[256];
-			//midiInGetErrorText(res, err, 256);
-			//ERR_PRINT("midiInOpen error: " + String(err));
-
-			//MIDIINCAPS caps;
-			//res = midiInGetDevCaps(i, &caps, sizeof(MIDIINCAPS));
-			//if (res == MMSYSERR_NOERROR) {
-			//	ERR_PRINT("Can't open MIDI device \"" + String(caps.szPname) + "\", is it being used by another application?");
-			//}
->>>>>>> 15c7d83b05fee429509d83f3ccc60143e55d8453
 		}
 	}
 	return OK;
