@@ -51,8 +51,9 @@ class MIDIDriverWinMidi : public MIDIDriver {
 public:
 	virtual Error open() override;
 	virtual void close() override;
+	virtual PackedStringArray get_connected_inputs() const override;
 
-	MIDIDriverWinMidi() = default;
+	MIDIDriverWinMidi();
 	virtual ~MIDIDriverWinMidi();
 };
 
