@@ -67,6 +67,9 @@ private:
 	AABB aabb;
 
 	mutable Ref<TriangleMesh> triangle_mesh;
+	PackedVector3Array glyph_positions;
+	PackedVector3Array glyph_sizes;
+
 	RID mesh;
 	struct SurfaceData {
 		PackedVector3Array mesh_vertices;
@@ -146,7 +149,7 @@ private:
 	bool dirty_font = true;
 	bool dirty_text = true;
 
-	void _generate_glyph_surfaces(const Glyph &p_glyph, Vector2 &r_offset, const Color &p_modulate, int p_priority = 0, int p_outline_size = 0);
+	void _generate_glyph_surfaces(const Glyph &p_glyph, Vector2 &r_offset, Vector2 &g_size, const Color &p_modulate, int p_priority = 0, int p_outline_size = 0);
 
 protected:
 	GDVIRTUAL2RC(TypedArray<Vector3i>, _structured_text_parser, Array, String)
@@ -257,6 +260,9 @@ public:
 
 	virtual AABB get_aabb() const override;
 	virtual Ref<TriangleMesh> generate_triangle_mesh() const override;
+
+	PackedVector3Array generate_glyph_positions() const;
+	PackedVector3Array generate_glyph_sizes() const;
 
 	Label3D();
 	~Label3D();
