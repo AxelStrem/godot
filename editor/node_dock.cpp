@@ -31,7 +31,6 @@
 #include "node_dock.h"
 
 #include "editor/connections_dialog.h"
-#include "editor/editor_node.h"
 #include "editor/themes/editor_scale.h"
 
 void NodeDock::show_groups() {
@@ -94,7 +93,7 @@ NodeDock::NodeDock() {
 	mode_hb->hide();
 
 	connections_button = memnew(Button);
-	connections_button->set_theme_type_variation("FlatButton");
+	connections_button->set_theme_type_variation(SceneStringName(FlatButton));
 	connections_button->set_text(TTR("Signals"));
 	connections_button->set_toggle_mode(true);
 	connections_button->set_pressed(true);
@@ -104,7 +103,7 @@ NodeDock::NodeDock() {
 	connections_button->connect(SceneStringName(pressed), callable_mp(this, &NodeDock::show_connections));
 
 	groups_button = memnew(Button);
-	groups_button->set_theme_type_variation("FlatButton");
+	groups_button->set_theme_type_variation(SceneStringName(FlatButton));
 	groups_button->set_text(TTR("Groups"));
 	groups_button->set_toggle_mode(true);
 	groups_button->set_pressed(false);

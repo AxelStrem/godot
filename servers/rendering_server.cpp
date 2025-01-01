@@ -32,9 +32,7 @@
 #include "rendering_server.compat.inc"
 
 #include "core/config/project_settings.h"
-#include "core/object/worker_thread_pool.h"
 #include "core/variant/typed_array.h"
-#include "servers/rendering/rendering_server_globals.h"
 #include "servers/rendering/shader_language.h"
 #include "servers/rendering/shader_warnings.h"
 
@@ -1868,6 +1866,8 @@ int RenderingServer::global_shader_uniform_type_get_shader_datatype(GlobalShader
 			return ShaderLanguage::TYPE_SAMPLER3D;
 		case RS::GLOBAL_VAR_TYPE_SAMPLERCUBE:
 			return ShaderLanguage::TYPE_SAMPLERCUBE;
+		case RS::GLOBAL_VAR_TYPE_SAMPLEREXT:
+			return ShaderLanguage::TYPE_SAMPLEREXT;
 		default:
 			return ShaderLanguage::TYPE_MAX; // Invalid or not found.
 	}
@@ -2047,6 +2047,12 @@ Dictionary RenderingServer::_mesh_get_surface(RID p_mesh, int p_idx) {
 TypedArray<Dictionary> RenderingServer::_instance_geometry_get_shader_parameter_list(RID p_instance) const {
 	List<PropertyInfo> params;
 	instance_geometry_get_shader_parameter_list(p_instance, &params);
+	return convert_property_list(&params);
+}
+
+TypedArray<Dictionary> RenderingServer::_canvas_item_get_instance_shader_parameter_list(RID p_instance) const {
+	List<PropertyInfo> params;
+	canvas_item_get_instance_shader_parameter_list(p_instance, &params);
 	return convert_property_list(&params);
 }
 
@@ -2346,6 +2352,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("mesh_get_surface_count", "mesh"), &RenderingServer::mesh_get_surface_count);
 	ClassDB::bind_method(D_METHOD("mesh_set_custom_aabb", "mesh", "aabb"), &RenderingServer::mesh_set_custom_aabb);
 	ClassDB::bind_method(D_METHOD("mesh_get_custom_aabb", "mesh"), &RenderingServer::mesh_get_custom_aabb);
+	ClassDB::bind_method(D_METHOD("mesh_surface_remove", "mesh", "surface"), &RenderingServer::mesh_surface_remove);
 	ClassDB::bind_method(D_METHOD("mesh_clear", "mesh"), &RenderingServer::mesh_clear);
 
 	ClassDB::bind_method(D_METHOD("mesh_surface_update_vertex_region", "mesh", "surface", "offset", "data"), &RenderingServer::mesh_surface_update_vertex_region);
@@ -2452,6 +2459,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("multimesh_set_visible_instances", "multimesh", "visible"), &RenderingServer::multimesh_set_visible_instances);
 	ClassDB::bind_method(D_METHOD("multimesh_get_visible_instances", "multimesh"), &RenderingServer::multimesh_get_visible_instances);
 	ClassDB::bind_method(D_METHOD("multimesh_set_buffer", "multimesh", "buffer"), &RenderingServer::multimesh_set_buffer);
+	ClassDB::bind_method(D_METHOD("multimesh_get_buffer_rd_rid", "multimesh"), &RenderingServer::multimesh_get_buffer_rd_rid);
 	ClassDB::bind_method(D_METHOD("multimesh_get_buffer", "multimesh"), &RenderingServer::multimesh_get_buffer);
 
 	ClassDB::bind_method(D_METHOD("multimesh_set_buffer_interpolated", "multimesh", "buffer", "buffer_previous"), &RenderingServer::multimesh_set_buffer_interpolated);
@@ -2568,6 +2576,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("reflection_probe_create"), &RenderingServer::reflection_probe_create);
 	ClassDB::bind_method(D_METHOD("reflection_probe_set_update_mode", "probe", "mode"), &RenderingServer::reflection_probe_set_update_mode);
 	ClassDB::bind_method(D_METHOD("reflection_probe_set_intensity", "probe", "intensity"), &RenderingServer::reflection_probe_set_intensity);
+	ClassDB::bind_method(D_METHOD("reflection_probe_set_blend_distance", "probe", "blend_distance"), &RenderingServer::reflection_probe_set_blend_distance);
 	ClassDB::bind_method(D_METHOD("reflection_probe_set_ambient_mode", "probe", "mode"), &RenderingServer::reflection_probe_set_ambient_mode);
 	ClassDB::bind_method(D_METHOD("reflection_probe_set_ambient_color", "probe", "color"), &RenderingServer::reflection_probe_set_ambient_color);
 	ClassDB::bind_method(D_METHOD("reflection_probe_set_ambient_energy", "probe", "energy"), &RenderingServer::reflection_probe_set_ambient_energy);
@@ -2804,6 +2813,7 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("viewport_set_scaling_3d_scale", "viewport", "scale"), &RenderingServer::viewport_set_scaling_3d_scale);
 	ClassDB::bind_method(D_METHOD("viewport_set_fsr_sharpness", "viewport", "sharpness"), &RenderingServer::viewport_set_fsr_sharpness);
 	ClassDB::bind_method(D_METHOD("viewport_set_texture_mipmap_bias", "viewport", "mipmap_bias"), &RenderingServer::viewport_set_texture_mipmap_bias);
+	ClassDB::bind_method(D_METHOD("viewport_set_anisotropic_filtering_level", "viewport", "anisotropic_filtering_level"), &RenderingServer::viewport_set_anisotropic_filtering_level);
 	ClassDB::bind_method(D_METHOD("viewport_set_update_mode", "viewport", "update_mode"), &RenderingServer::viewport_set_update_mode);
 	ClassDB::bind_method(D_METHOD("viewport_get_update_mode", "viewport"), &RenderingServer::viewport_get_update_mode);
 	ClassDB::bind_method(D_METHOD("viewport_set_clear_mode", "viewport", "clear_mode"), &RenderingServer::viewport_set_clear_mode);
@@ -2890,6 +2900,13 @@ void RenderingServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(VIEWPORT_MSAA_4X);
 	BIND_ENUM_CONSTANT(VIEWPORT_MSAA_8X);
 	BIND_ENUM_CONSTANT(VIEWPORT_MSAA_MAX);
+
+	BIND_ENUM_CONSTANT(VIEWPORT_ANISOTROPY_DISABLED);
+	BIND_ENUM_CONSTANT(VIEWPORT_ANISOTROPY_2X);
+	BIND_ENUM_CONSTANT(VIEWPORT_ANISOTROPY_4X);
+	BIND_ENUM_CONSTANT(VIEWPORT_ANISOTROPY_8X);
+	BIND_ENUM_CONSTANT(VIEWPORT_ANISOTROPY_16X);
+	BIND_ENUM_CONSTANT(VIEWPORT_ANISOTROPY_MAX);
 
 	BIND_ENUM_CONSTANT(VIEWPORT_SCREEN_SPACE_AA_DISABLED);
 	BIND_ENUM_CONSTANT(VIEWPORT_SCREEN_SPACE_AA_FXAA);
@@ -3287,6 +3304,11 @@ void RenderingServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("canvas_item_set_material", "item", "material"), &RenderingServer::canvas_item_set_material);
 	ClassDB::bind_method(D_METHOD("canvas_item_set_use_parent_material", "item", "enabled"), &RenderingServer::canvas_item_set_use_parent_material);
 
+	ClassDB::bind_method(D_METHOD("canvas_item_set_instance_shader_parameter", "instance", "parameter", "value"), &RenderingServer::canvas_item_set_instance_shader_parameter);
+	ClassDB::bind_method(D_METHOD("canvas_item_get_instance_shader_parameter", "instance", "parameter"), &RenderingServer::canvas_item_get_instance_shader_parameter);
+	ClassDB::bind_method(D_METHOD("canvas_item_get_instance_shader_parameter_default_value", "instance", "parameter"), &RenderingServer::canvas_item_get_instance_shader_parameter_default_value);
+	ClassDB::bind_method(D_METHOD("canvas_item_get_instance_shader_parameter_list", "instance"), &RenderingServer::_canvas_item_get_instance_shader_parameter_list);
+
 	ClassDB::bind_method(D_METHOD("canvas_item_set_visibility_notifier", "item", "enable", "area", "enter_callable", "exit_callable"), &RenderingServer::canvas_item_set_visibility_notifier);
 	ClassDB::bind_method(D_METHOD("canvas_item_set_canvas_group_mode", "item", "mode", "clear_margin", "fit_empty", "fit_margin", "blur_mipmaps"), &RenderingServer::canvas_item_set_canvas_group_mode, DEFVAL(5.0), DEFVAL(false), DEFVAL(0.0), DEFVAL(false));
 
@@ -3583,7 +3605,7 @@ void RenderingServer::init() {
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/2d/shadow_atlas/size", PROPERTY_HINT_RANGE, "128,16384"), 2048);
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/2d/batching/item_buffer_size", PROPERTY_HINT_RANGE, "128,1048576,1"), 16384);
-	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/2d/batching/uniform_set_cache_size", PROPERTY_HINT_RANGE, "256,1048576,1"), 256);
+	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/2d/batching/uniform_set_cache_size", PROPERTY_HINT_RANGE, "256,1048576,1"), 4096);
 
 	// Number of commands that can be drawn per frame.
 	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/gl_compatibility/item_buffer_size", PROPERTY_HINT_RANGE, "128,1048576,1"), 16384);
@@ -3616,7 +3638,7 @@ void RenderingServer::init() {
 	GLOBAL_DEF_RST("rendering/driver/depth_prepass/disable_for_vendors", "PowerVR,Mali,Adreno,Apple");
 
 	GLOBAL_DEF_RST("rendering/textures/default_filters/use_nearest_mipmap_filter", false);
-	GLOBAL_DEF_RST(PropertyInfo(Variant::INT, "rendering/textures/default_filters/anisotropic_filtering_level", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2× (Faster),4× (Fast),8× (Average),16× (Slow)")), 2);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/textures/default_filters/anisotropic_filtering_level", PROPERTY_HINT_ENUM, String::utf8("Disabled (Fastest),2× (Faster),4× (Fast),8× (Average),16× (Slow)")), 2);
 
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/camera/depth_of_field/depth_of_field_bokeh_shape", PROPERTY_HINT_ENUM, "Box (Fast),Hexagon (Average),Circle (Slowest)"), 1);
 	GLOBAL_DEF(PropertyInfo(Variant::INT, "rendering/camera/depth_of_field/depth_of_field_bokeh_quality", PROPERTY_HINT_ENUM, "Very Low (Fastest),Low (Fast),Medium (Average),High (Slow)"), 1);

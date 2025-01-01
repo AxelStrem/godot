@@ -171,8 +171,9 @@ Error store_string_at_path(const String &p_path, const String &p_data) {
 // This method will be called ONLY when gradle build is enabled.
 Error rename_and_store_file_in_gradle_project(void *p_userdata, const String &p_path, const Vector<uint8_t> &p_data, int p_file, int p_total, const Vector<String> &p_enc_in_filters, const Vector<String> &p_enc_ex_filters, const Vector<uint8_t> &p_key, uint64_t p_seed) {
 	CustomExportData *export_data = static_cast<CustomExportData *>(p_userdata);
-	String dst_path = p_path.replace_first("res://", export_data->assets_directory + "/");
-	print_verbose("Saving project files from " + p_path + " into " + dst_path);
+	const String path = ResourceUID::ensure_path(p_path);
+	const String dst_path = path.replace_first("res://", export_data->assets_directory + "/");
+	print_verbose("Saving project files from " + path + " into " + dst_path);
 	Error err = store_file_at_path(dst_path, p_data);
 	return err;
 }
@@ -196,7 +197,7 @@ String _android_xml_escape(const String &p_string) {
 Error _create_project_name_strings_files(const Ref<EditorExportPreset> &p_preset, const String &project_name, const String &p_gradle_build_dir) {
 	print_verbose("Creating strings resources for supported locales for project " + project_name);
 	// Stores the string into the default values directory.
-	String processed_default_xml_string = vformat(godot_project_name_xml_string, _android_xml_escape(project_name));
+	String processed_default_xml_string = vformat(GODOT_PROJECT_NAME_XML_STRING, _android_xml_escape(project_name));
 	store_string_at_path(p_gradle_build_dir.path_join("res/values/godot_project_name_string.xml"), processed_default_xml_string);
 
 	// Searches the Gradle project res/ directory to find all supported locales
@@ -222,7 +223,7 @@ Error _create_project_name_strings_files(const Ref<EditorExportPreset> &p_preset
 		String locale_directory = p_gradle_build_dir.path_join("res/" + file + "/godot_project_name_string.xml");
 		if (appnames.has(locale)) {
 			String locale_project_name = appnames[locale];
-			String processed_xml_string = vformat(godot_project_name_xml_string, _android_xml_escape(locale_project_name));
+			String processed_xml_string = vformat(GODOT_PROJECT_NAME_XML_STRING, _android_xml_escape(locale_project_name));
 			print_verbose("Storing project name for locale " + locale + " under " + locale_directory);
 			store_string_at_path(locale_directory, processed_xml_string);
 		} else {

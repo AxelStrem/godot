@@ -96,7 +96,7 @@ void SceneDebugger::deinitialize() {
 #ifdef DEBUG_ENABLED
 void SceneDebugger::_handle_input(const Ref<InputEvent> &p_event, const Ref<Shortcut> &p_shortcut) {
 	Ref<InputEventKey> k = p_event;
-	if (k.is_valid() && k->is_pressed() && !k->is_echo() && p_shortcut->matches_event(k)) {
+	if (p_shortcut.is_valid() && k.is_valid() && k->is_pressed() && !k->is_echo() && p_shortcut->matches_event(k)) {
 		EngineDebugger::get_singleton()->send_message("request_quit", Array());
 	}
 }
@@ -555,7 +555,7 @@ void SceneDebuggerObject::serialize(Array &r_arr, int p_max_size) {
 
 		PropertyHint hint = pi.hint;
 		String hint_string = pi.hint_string;
-		if (!res.is_null() && !res->get_path().is_empty()) {
+		if (res.is_valid() && !res->get_path().is_empty()) {
 			var = res->get_path();
 		} else { //only send information that can be sent..
 			int len = 0; //test how big is this to encode
@@ -793,7 +793,7 @@ void LiveEditor::_node_set_func(int p_id, const StringName &p_prop, const Varian
 
 void LiveEditor::_node_set_res_func(int p_id, const StringName &p_prop, const String &p_value) {
 	Ref<Resource> r = ResourceLoader::load(p_value);
-	if (!r.is_valid()) {
+	if (r.is_null()) {
 		return;
 	}
 	_node_set_func(p_id, p_prop, r);
@@ -875,7 +875,7 @@ void LiveEditor::_res_set_func(int p_id, const StringName &p_prop, const Variant
 	}
 
 	Ref<Resource> r = ResourceCache::get_ref(resp);
-	if (!r.is_valid()) {
+	if (r.is_null()) {
 		return;
 	}
 
@@ -884,7 +884,7 @@ void LiveEditor::_res_set_func(int p_id, const StringName &p_prop, const Variant
 
 void LiveEditor::_res_set_res_func(int p_id, const StringName &p_prop, const String &p_value) {
 	Ref<Resource> r = ResourceLoader::load(p_value);
-	if (!r.is_valid()) {
+	if (r.is_null()) {
 		return;
 	}
 	_res_set_func(p_id, p_prop, r);
@@ -902,7 +902,7 @@ void LiveEditor::_res_call_func(int p_id, const StringName &p_method, const Vari
 	}
 
 	Ref<Resource> r = ResourceCache::get_ref(resp);
-	if (!r.is_valid()) {
+	if (r.is_null()) {
 		return;
 	}
 
@@ -961,7 +961,7 @@ void LiveEditor::_instance_node_func(const NodePath &p_parent, const String &p_p
 
 	Ref<PackedScene> ps = ResourceLoader::load(p_path);
 
-	if (!ps.is_valid()) {
+	if (ps.is_null()) {
 		return;
 	}
 
@@ -1242,13 +1242,6 @@ void RuntimeNodeSelect::_setup(const Dictionary &p_settings) {
 	root->connect(SceneStringName(window_input), callable_mp(this, &RuntimeNodeSelect::_root_window_input));
 	root->connect("size_changed", callable_mp(this, &RuntimeNodeSelect::_queue_selection_update), CONNECT_DEFERRED);
 
-	selection_list = memnew(PopupMenu);
-	selection_list->set_theme(ThemeDB::get_singleton()->get_default_theme());
-	selection_list->set_auto_translate_mode(Node::AUTO_TRANSLATE_MODE_DISABLED);
-	selection_list->set_force_native(true);
-	selection_list->connect("index_pressed", callable_mp(this, &RuntimeNodeSelect::_items_popup_index_pressed).bind(selection_list));
-	selection_list->connect("popup_hide", callable_mp(Object::cast_to<Node>(root), &Node::remove_child).bind(selection_list));
-
 	panner.instantiate();
 	panner->set_callbacks(callable_mp(this, &RuntimeNodeSelect::_pan_callback), callable_mp(this, &RuntimeNodeSelect::_zoom_callback));
 
@@ -1257,8 +1250,8 @@ void RuntimeNodeSelect::_setup(const Dictionary &p_settings) {
 	int pan_speed = p_settings.get("editors/panning/2d_editor_pan_speed", 20);
 	Array keys = p_settings.get("canvas_item_editor/pan_view", Array()).operator Array();
 	panner->setup(panning_scheme, DebuggerMarshalls::deserialize_key_shortcut(keys), simple_panning);
+	panner->setup_warped_panning(root, p_settings.get("editors/panning/warped_mouse_panning", true));
 	panner->set_scroll_speed(pan_speed);
-	warped_panning = p_settings.get("editors/panning/warped_mouse_panning", false);
 
 	/// 2D Selection Box Generation
 
@@ -1356,9 +1349,9 @@ void RuntimeNodeSelect::_set_camera_override_enabled(bool p_enabled) {
 
 void RuntimeNodeSelect::_root_window_input(const Ref<InputEvent> &p_event) {
 	Window *root = SceneTree::get_singleton()->get_root();
-	if (node_select_type == NODE_TYPE_NONE || selection_list->is_visible()) {
+	if (node_select_type == NODE_TYPE_NONE || (selection_list && selection_list->is_visible())) {
 		// Workaround for platforms that don't allow subwindows.
-		if (selection_list->is_visible() && selection_list->is_embedded()) {
+		if (selection_list && selection_list->is_visible() && selection_list->is_embedded()) {
 			root->set_disable_input_override(false);
 			selection_list->push_input(p_event);
 			callable_mp(root->get_viewport(), &Viewport::set_disable_input_override).call_deferred(true);
@@ -1369,7 +1362,7 @@ void RuntimeNodeSelect::_root_window_input(const Ref<InputEvent> &p_event) {
 
 	if (camera_override) {
 		if (node_select_type == NODE_TYPE_2D) {
-			if (panner->gui_input(p_event, warped_panning ? Rect2(Vector2(), root->get_size()) : Rect2())) {
+			if (panner->gui_input(p_event, Rect2(Vector2(), root->get_size()))) {
 				return;
 			}
 		} else if (node_select_type == NODE_TYPE_3D) {
@@ -1382,7 +1375,7 @@ void RuntimeNodeSelect::_root_window_input(const Ref<InputEvent> &p_event) {
 	}
 
 	Ref<InputEventMouseButton> b = p_event;
-	if (!b.is_valid() || !b->is_pressed()) {
+	if (b.is_null() || !b->is_pressed()) {
 		return;
 	}
 
@@ -1530,21 +1523,9 @@ void RuntimeNodeSelect::_click_point() {
 		message.append(items[0].item->get_instance_id());
 		EngineDebugger::get_singleton()->send_message("remote_node_clicked", message);
 	} else if (list_shortcut_pressed || node_select_mode == SELECT_MODE_LIST) {
-		if (!selection_list->is_inside_tree()) {
-			root->add_child(selection_list);
+		if (!selection_list) {
+			_open_selection_list(items, pos);
 		}
-
-		selection_list->clear();
-		for (const SelectResult &I : items) {
-			selection_list->add_item(I.item->get_name());
-			selection_list->set_item_metadata(-1, I.item);
-		}
-
-		selection_list->set_position(selection_list->is_embedded() ? pos : selection_position + root->get_position());
-		selection_list->reset_size();
-		selection_list->popup();
-		// FIXME: Ugly hack that stops the popup from hiding when the button is released.
-		selection_list->call_deferred(SNAME("set_position"), selection_list->get_position() + Point2(1, 0));
 	}
 }
 
@@ -1734,6 +1715,35 @@ void RuntimeNodeSelect::_clear_selection() {
 		RS::get_singleton()->free(sbox_3d_instance_xray_ofs);
 	}
 #endif // _3D_DISABLED
+}
+
+void RuntimeNodeSelect::_open_selection_list(const Vector<SelectResult> &p_items, const Point2 &p_pos) {
+	Window *root = SceneTree::get_singleton()->get_root();
+
+	selection_list = memnew(PopupMenu);
+	selection_list->set_theme(ThemeDB::get_singleton()->get_default_theme());
+	selection_list->set_auto_translate_mode(Node::AUTO_TRANSLATE_MODE_DISABLED);
+	selection_list->set_force_native(true);
+	selection_list->connect("index_pressed", callable_mp(this, &RuntimeNodeSelect::_items_popup_index_pressed).bind(selection_list));
+	selection_list->connect("popup_hide", callable_mp(this, &RuntimeNodeSelect::_close_selection_list));
+
+	root->add_child(selection_list);
+
+	for (const SelectResult &I : p_items) {
+		selection_list->add_item(I.item->get_name());
+		selection_list->set_item_metadata(-1, I.item);
+	}
+
+	selection_list->set_position(selection_list->is_embedded() ? p_pos : selection_position + root->get_position());
+	selection_list->reset_size();
+	selection_list->popup();
+	// FIXME: Ugly hack that stops the popup from hiding when the button is released.
+	selection_list->call_deferred(SNAME("set_position"), selection_list->get_position() + Point2(1, 0));
+}
+
+void RuntimeNodeSelect::_close_selection_list() {
+	selection_list->queue_free();
+	selection_list = nullptr;
 }
 
 void RuntimeNodeSelect::_set_selection_visible(bool p_visible) {

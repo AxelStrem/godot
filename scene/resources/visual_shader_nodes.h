@@ -31,7 +31,6 @@
 #ifndef VISUAL_SHADER_NODES_H
 #define VISUAL_SHADER_NODES_H
 
-#include "scene/resources/compressed_texture.h"
 #include "scene/resources/curve_texture.h"
 #include "scene/resources/visual_shader.h"
 
@@ -1353,6 +1352,8 @@ public:
 		FUNC_HSV2RGB,
 		FUNC_RGB2HSV,
 		FUNC_SEPIA,
+		FUNC_LINEAR_TO_SRGB,
+		FUNC_SRGB_TO_LINEAR,
 		FUNC_MAX,
 	};
 

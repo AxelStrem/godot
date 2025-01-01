@@ -94,7 +94,7 @@ void NavigationObstacle3D::_notification(int p_what) {
 			}
 			// need to trigger map controlled agent assignment somehow for the fake_agent since obstacles use no callback like regular agents
 			NavigationServer3D::get_singleton()->obstacle_set_avoidance_enabled(obstacle, avoidance_enabled);
-			_update_position(get_global_position());
+			_update_transform();
 			set_physics_process_internal(true);
 #ifdef DEBUG_ENABLED
 			_update_debug();
@@ -153,7 +153,7 @@ void NavigationObstacle3D::_notification(int p_what) {
 
 		case NOTIFICATION_INTERNAL_PHYSICS_PROCESS: {
 			if (is_inside_tree()) {
-				_update_position(get_global_position());
+				_update_transform();
 
 				if (velocity_submitted) {
 					velocity_submitted = false;
@@ -258,7 +258,24 @@ NavigationObstacle3D::~NavigationObstacle3D() {
 void NavigationObstacle3D::set_vertices(const Vector<Vector3> &p_vertices) {
 	vertices = p_vertices;
 
-	NavigationServer3D::get_singleton()->obstacle_set_vertices(obstacle, vertices);
+	Vector<Vector2> vertices_2d;
+	vertices_2d.resize(vertices.size());
+
+	const Vector3 *vertices_ptr = vertices.ptr();
+	Vector2 *vertices_2d_ptrw = vertices_2d.ptrw();
+
+	for (int i = 0; i < vertices.size(); i++) {
+		vertices_2d_ptrw[i] = Vector2(vertices_ptr[i].x, vertices_ptr[i].z);
+	}
+
+	vertices_are_clockwise = !Geometry2D::is_polygon_clockwise(vertices_2d); // Geometry2D is inverted.
+	vertices_are_valid = !Geometry2D::triangulate_polygon(vertices_2d).is_empty();
+
+	const Basis basis = is_inside_tree() ? get_global_basis() : get_basis();
+	const float rotation_y = is_inside_tree() ? get_global_rotation().y : get_rotation().y;
+	const Vector3 safe_scale = basis.get_scale().abs().maxf(0.001);
+	const Transform3D safe_transform = Transform3D(Basis().scaled(safe_scale).rotated(Vector3(0.0, 1.0, 0.0), rotation_y), Vector3());
+	NavigationServer3D::get_singleton()->obstacle_set_vertices(obstacle, safe_transform.xform(vertices));
 #ifdef DEBUG_ENABLED
 	_update_static_obstacle_debug();
 	update_gizmos();
@@ -289,7 +306,10 @@ void NavigationObstacle3D::set_radius(real_t p_radius) {
 	}
 
 	radius = p_radius;
-	NavigationServer3D::get_singleton()->obstacle_set_radius(obstacle, radius);
+
+	// Prevent non-positive or non-uniform scaling of dynamic obstacle radius.
+	const Vector3 safe_scale = (is_inside_tree() ? get_global_basis() : get_basis()).get_scale().abs().maxf(0.001);
+	NavigationServer3D::get_singleton()->obstacle_set_radius(obstacle, safe_scale[safe_scale.max_axis_index()] * radius);
 
 #ifdef DEBUG_ENABLED
 	_update_fake_agent_radius_debug();
@@ -304,7 +324,8 @@ void NavigationObstacle3D::set_height(real_t p_height) {
 	}
 
 	height = p_height;
-	NavigationServer3D::get_singleton()->obstacle_set_height(obstacle, height);
+	const float scale_factor = MAX(Math::abs((is_inside_tree() ? get_global_basis() : get_basis()).get_scale().y), 0.001);
+	NavigationServer3D::get_singleton()->obstacle_set_height(obstacle, scale_factor * height);
 
 #ifdef DEBUG_ENABLED
 	_update_static_obstacle_debug();
@@ -405,6 +426,20 @@ void NavigationObstacle3D::_update_map(RID p_map) {
 
 void NavigationObstacle3D::_update_position(const Vector3 p_position) {
 	NavigationServer3D::get_singleton()->obstacle_set_position(obstacle, p_position);
+}
+
+void NavigationObstacle3D::_update_transform() {
+	_update_position(get_global_position());
+
+	// Prevent non-positive or non-uniform scaling of dynamic obstacle radius.
+	const Vector3 safe_scale = get_global_basis().get_scale().abs().maxf(0.001);
+	const float scaling_max_value = safe_scale[safe_scale.max_axis_index()];
+	NavigationServer3D::get_singleton()->obstacle_set_radius(obstacle, scaling_max_value * radius);
+
+	// Apply modified node transform which only takes y-axis rotation into account to vertices.
+	const Transform3D safe_transform = Transform3D(Basis().scaled(safe_scale).rotated(Vector3(0.0, 1.0, 0.0), get_global_rotation().y), Vector3());
+	NavigationServer3D::get_singleton()->obstacle_set_vertices(obstacle, safe_transform.xform(vertices));
+	NavigationServer3D::get_singleton()->obstacle_set_height(obstacle, safe_scale.y * height);
 }
 
 void NavigationObstacle3D::_update_use_3d_avoidance(bool p_use_3d_avoidance) {
@@ -582,21 +617,12 @@ void NavigationObstacle3D::_update_static_obstacle_debug() {
 
 	rs->mesh_add_surface_from_arrays(static_obstacle_debug_mesh_rid, RS::PRIMITIVE_LINES, edge_mesh_array);
 
-	Vector<Vector2> polygon_2d_vertices;
-	polygon_2d_vertices.resize(vertex_count);
-	for (int i = 0; i < vertex_count; i++) {
-		const Vector3 &vert = vertices[i];
-		polygon_2d_vertices.write[i] = Vector2(vert.x, vert.z);
-	}
-
-	Vector<int> triangulated_polygon_2d_indices = Geometry2D::triangulate_polygon(polygon_2d_vertices);
-
 	Ref<StandardMaterial3D> edge_material;
 
-	if (triangulated_polygon_2d_indices.is_empty()) {
-		edge_material = ns3d->get_debug_navigation_avoidance_static_obstacle_pushin_edge_material();
-	} else {
+	if (are_vertices_valid()) {
 		edge_material = ns3d->get_debug_navigation_avoidance_static_obstacle_pushout_edge_material();
+	} else {
+		edge_material = ns3d->get_debug_navigation_avoidance_static_obstacle_pushin_edge_material();
 	}
 
 	rs->instance_set_surface_override_material(static_obstacle_debug_instance_rid, 0, edge_material->get_rid());

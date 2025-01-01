@@ -10,26 +10,63 @@ from collections import OrderedDict
 from enum import Enum
 from io import StringIO, TextIOWrapper
 from pathlib import Path
-from typing import Generator, List, Optional, Union, cast
+from typing import Final, Generator, List, Optional, Union, cast
 
 # Get the "Godot" folder name ahead of time
 base_folder_path = str(os.path.abspath(Path(__file__).parent)) + "/"
 base_folder_only = os.path.basename(os.path.normpath(base_folder_path))
-# Listing all the folders we have converted
-# for SCU in scu_builders.py
-_scu_folders = set()
+
+################################################################################
+# COLORIZE
+################################################################################
+
+IS_CI: Final[bool] = bool(os.environ.get("CI"))
+IS_TTY: Final[bool] = bool(sys.stdout.isatty())
+
+
+def _color_supported() -> bool:
+    """
+    Enables ANSI escape code support on Windows 10 and later (for colored console output).
+    See here: https://github.com/python/cpython/issues/73245
+    """
+    if sys.platform == "win32" and IS_TTY:
+        try:
+            from ctypes import WinError, byref, windll  # type: ignore
+            from ctypes.wintypes import DWORD  # type: ignore
+
+            stdout_handle = windll.kernel32.GetStdHandle(DWORD(-11))
+            mode = DWORD(0)
+            if not windll.kernel32.GetConsoleMode(stdout_handle, byref(mode)):
+                raise WinError()
+            mode = DWORD(mode.value | 4)
+            if not windll.kernel32.SetConsoleMode(stdout_handle, mode):
+                raise WinError()
+        except (TypeError, OSError) as e:
+            print(f"Failed to enable ANSI escape code support, disabling color output.\n{e}", file=sys.stderr)
+            return False
+
+    return IS_TTY or IS_CI
+
+
 # Colors are disabled in non-TTY environments such as pipes. This means
 # that if output is redirected to a file, it won't contain color codes.
 # Colors are always enabled on continuous integration.
-_colorize = bool(sys.stdout.isatty() or os.environ.get("CI"))
+COLOR_SUPPORTED: Final[bool] = _color_supported()
+_can_color: bool = COLOR_SUPPORTED
 
 
-def set_scu_folders(scu_folders):
-    global _scu_folders
-    _scu_folders = scu_folders
+def toggle_color(value: Optional[bool] = None) -> None:
+    """
+    Explicitly toggle color codes, regardless of support.
+
+    - `value`: An optional boolean to explicitly set the color
+    state instead of toggling.
+    """
+    global _can_color
+    _can_color = value if value is not None else not _can_color
 
 
-class ANSI(Enum):
+class Ansi(Enum):
     """
     Enum class for adding ansi colorcodes directly into strings.
     Automatically converts values to strings representing their
@@ -39,6 +76,7 @@ class ANSI(Enum):
     RESET = "\x1b[0m"
 
     BOLD = "\x1b[1m"
+    DIM = "\x1b[2m"
     ITALIC = "\x1b[3m"
     UNDERLINE = "\x1b[4m"
     STRIKETHROUGH = "\x1b[9m"
@@ -53,24 +91,49 @@ class ANSI(Enum):
     CYAN = "\x1b[36m"
     WHITE = "\x1b[37m"
 
-    PURPLE = "\x1b[38;5;93m"
-    PINK = "\x1b[38;5;206m"
-    ORANGE = "\x1b[38;5;214m"
-    GRAY = "\x1b[38;5;244m"
+    LIGHT_BLACK = "\x1b[90m"
+    LIGHT_RED = "\x1b[91m"
+    LIGHT_GREEN = "\x1b[92m"
+    LIGHT_YELLOW = "\x1b[93m"
+    LIGHT_BLUE = "\x1b[94m"
+    LIGHT_MAGENTA = "\x1b[95m"
+    LIGHT_CYAN = "\x1b[96m"
+    LIGHT_WHITE = "\x1b[97m"
+
+    GRAY = LIGHT_BLACK if IS_CI else BLACK
+    """
+    Special case. GitHub Actions doesn't convert `BLACK` to gray as expected, but does convert `LIGHT_BLACK`.
+    By implementing `GRAY`, we handle both cases dynamically, while still allowing for explicit values if desired.
+    """
 
     def __str__(self) -> str:
-        global _colorize
-        return str(self.value) if _colorize else ""
+        global _can_color
+        return str(self.value) if _can_color else ""
+
+
+def print_info(*values: object) -> None:
+    """Prints a informational message with formatting."""
+    print(f"{Ansi.GRAY}{Ansi.BOLD}INFO:{Ansi.REGULAR}", *values, Ansi.RESET)
 
 
 def print_warning(*values: object) -> None:
     """Prints a warning message with formatting."""
-    print(f"{ANSI.YELLOW}{ANSI.BOLD}WARNING:{ANSI.REGULAR}", *values, ANSI.RESET, file=sys.stderr)
+    print(f"{Ansi.YELLOW}{Ansi.BOLD}WARNING:{Ansi.REGULAR}", *values, Ansi.RESET, file=sys.stderr)
 
 
 def print_error(*values: object) -> None:
     """Prints an error message with formatting."""
-    print(f"{ANSI.RED}{ANSI.BOLD}ERROR:{ANSI.REGULAR}", *values, ANSI.RESET, file=sys.stderr)
+    print(f"{Ansi.RED}{Ansi.BOLD}ERROR:{Ansi.REGULAR}", *values, Ansi.RESET, file=sys.stderr)
+
+
+# Listing all the folders we have converted
+# for SCU in scu_builders.py
+_scu_folders = set()
+
+
+def set_scu_folders(scu_folders):
+    global _scu_folders
+    _scu_folders = scu_folders
 
 
 def add_source_files_orig(self, sources, files, allow_gen=False):
@@ -102,6 +165,7 @@ def add_source_files_scu(self, sources, files, allow_gen=False):
         subdir = os.path.dirname(files)
         subdir = subdir if subdir == "" else subdir + "/"
         section_name = self.Dir(subdir).tpath
+        section_name = section_name.replace("\\", "/")  # win32
         # if the section name is in the hash table?
         # i.e. is it part of the SCU build?
         global _scu_folders
@@ -129,9 +193,10 @@ def disable_warnings(self):
     if self.msvc and not using_clang(self):
         # We have to remove existing warning level defines before appending /w,
         # otherwise we get: "warning D9025 : overriding '/W3' with '/w'"
-        self["CCFLAGS"] = [x for x in self["CCFLAGS"] if not (x.startswith("/W") or x.startswith("/w"))]
-        self["CFLAGS"] = [x for x in self["CFLAGS"] if not (x.startswith("/W") or x.startswith("/w"))]
-        self["CXXFLAGS"] = [x for x in self["CXXFLAGS"] if not (x.startswith("/W") or x.startswith("/w"))]
+        WARN_FLAGS = ["/Wall", "/W4", "/W3", "/W2", "/W1", "/W0"]
+        self["CCFLAGS"] = [x for x in self["CCFLAGS"] if x not in WARN_FLAGS]
+        self["CFLAGS"] = [x for x in self["CFLAGS"] if x not in WARN_FLAGS]
+        self["CXXFLAGS"] = [x for x in self["CXXFLAGS"] if x not in WARN_FLAGS]
         self.AppendUnique(CCFLAGS=["/w"])
     else:
         self.AppendUnique(CCFLAGS=["-w"])
@@ -162,7 +227,7 @@ def get_version_info(module_version_string="", silent=False):
     if os.getenv("BUILD_NAME") is not None:
         build_name = str(os.getenv("BUILD_NAME"))
         if not silent:
-            print(f"Using custom build name: '{build_name}'.")
+            print_info(f"Using custom build name: '{build_name}'.")
 
     import version
 
@@ -184,7 +249,7 @@ def get_version_info(module_version_string="", silent=False):
     if os.getenv("GODOT_VERSION_STATUS") is not None:
         version_info["status"] = str(os.getenv("GODOT_VERSION_STATUS"))
         if not silent:
-            print(f"Using version status '{version_info['status']}', overriding the original '{version.status}'.")
+            print_info(f"Using version status '{version_info['status']}', overriding the original '{version.status}'.")
 
     # Parse Git hash if we're in a Git repo.
     githash = ""
@@ -440,7 +505,7 @@ def use_windows_spawn_fix(self, platform=None):
 
 
 def no_verbose(env):
-    colors = [ANSI.BLUE, ANSI.BOLD, ANSI.REGULAR, ANSI.RESET]
+    colors = [Ansi.BLUE, Ansi.BOLD, Ansi.REGULAR, Ansi.RESET]
 
     # There is a space before "..." to ensure that source file names can be
     # Ctrl + clicked in the VS Code terminal.
@@ -655,12 +720,14 @@ def detect_darwin_sdk_path(platform, env):
 
 
 def is_apple_clang(env):
+    import shlex
+
     if env["platform"] not in ["macos", "ios"]:
         return False
     if not using_clang(env):
         return False
     try:
-        version = subprocess.check_output([env.subst(env["CXX"]), "--version"]).strip().decode("utf-8")
+        version = subprocess.check_output(shlex.split(env.subst(env["CXX"])) + ["--version"]).strip().decode("utf-8")
     except (subprocess.CalledProcessError, OSError):
         print_warning("Couldn't parse CXX environment variable to infer compiler version.")
         return False
@@ -675,6 +742,8 @@ def get_compiler_version(env):
     - metadata1, metadata2: Extra information
     - date: Date of the build
     """
+    import shlex
+
     ret = {
         "major": -1,
         "minor": -1,
@@ -725,7 +794,7 @@ def get_compiler_version(env):
     # Clang used to return hardcoded 4.2.1: # https://reviews.llvm.org/D56803
     try:
         version = subprocess.check_output(
-            [env.subst(env["CXX"]), "--version"], shell=(os.name == "nt"), encoding="utf-8"
+            shlex.split(env.subst(env["CXX"])) + ["--version"], shell=(os.name == "nt"), encoding="utf-8"
         ).strip()
     except (subprocess.CalledProcessError, OSError):
         print_warning("Couldn't parse CXX environment variable to infer compiler version.")
@@ -788,10 +857,8 @@ def using_emcc(env):
 
 
 def show_progress(env):
-    # Progress reporting is not available in non-TTY environments since it messes with the output
-    # (for example, when writing to a file). Ninja has its own progress/tracking tool that clashes
-    # with ours.
-    if not env["progress"] or not sys.stdout.isatty() or env["ninja"]:
+    # Ninja has its own progress/tracking tool that clashes with ours.
+    if env["ninja"]:
         return
 
     NODE_COUNT_FILENAME = f"{base_folder_path}.scons_node_count"
@@ -808,30 +875,33 @@ def show_progress(env):
             if self.max == 0:
                 print("NOTE: Performing initial build, progress percentage unavailable!")
 
+            # Progress reporting is not available in non-TTY environments since it
+            # messes with the output (for example, when writing to a file).
+            self.display = cast(bool, self.max and env["progress"] and IS_TTY)
+
         def __call__(self, node, *args, **kw):
             self.count += 1
-            if self.max != 0:
+            if self.display:
                 percent = int(min(self.count * 100 / self.max, 100))
                 sys.stdout.write(f"\r[{percent:3d}%] ")
                 sys.stdout.flush()
 
     from SCons.Script import Progress
+    from SCons.Script.Main import GetBuildFailures
 
     progressor = ShowProgress()
     Progress(progressor)
 
-    def progress_finish(target, source, env):
+    def progress_finish():
+        if len(GetBuildFailures()):
+            return
         try:
             with open(NODE_COUNT_FILENAME, "w", encoding="utf-8", newline="\n") as f:
                 f.write(f"{progressor.count}\n")
         except OSError:
             pass
 
-    env.AlwaysBuild(
-        env.CommandNoCache(
-            "progress_finish", [], env.Action(progress_finish, "Building node count database .scons_node_count")
-        )
-    )
+    atexit.register(progress_finish)
 
 
 def convert_size(size_bytes: int) -> str:
@@ -863,16 +933,21 @@ def clean_cache(cache_path: str, cache_limit: int, verbose: bool):
     texts = []
     stats = []
     for file in files:
-        # Failing a utf-8 decode is the easiest way to determine if a file is binary.
         try:
-            with open(file, encoding="utf-8") as out:
-                out.read(1024)
-        except UnicodeDecodeError:
-            stats.append((file, *os.stat(file)[6:8]))
+            # Save file stats to rewrite after modifying.
+            tmp_stat = os.stat(file)
+            # Failing a utf-8 decode is the easiest way to determine if a file is binary.
+            try:
+                with open(file, encoding="utf-8") as out:
+                    out.read(1024)
+            except UnicodeDecodeError:
+                stats.append((file, *tmp_stat[6:8]))
+                # Restore file stats after reading.
+                os.utime(file, (tmp_stat[7], tmp_stat[8]))
+            else:
+                texts.append(file)
         except OSError:
             print_error(f'Failed to access cache file "{file}"; skipping.')
-        else:
-            texts.append(file)
 
     if texts:
         count = len(texts)
@@ -1012,6 +1087,30 @@ def generate_vs_project(env, original_args, project_name="godot"):
             return v[0] if len(v) == 1 else f"{v[0]}={v[1]}"
         return v
 
+    def get_dependencies(file, env, exts, headers, sources, others):
+        for child in file.children():
+            if isinstance(child, str):
+                child = env.File(x)
+            fname = ""
+            try:
+                fname = child.path
+            except AttributeError:
+                # It's not a file.
+                pass
+
+            if fname:
+                parts = os.path.splitext(fname)
+                if len(parts) > 1:
+                    ext = parts[1].lower()
+                    if ext in exts["sources"]:
+                        sources += [fname]
+                    elif ext in exts["headers"]:
+                        headers += [fname]
+                    elif ext in exts["others"]:
+                        others += [fname]
+
+            get_dependencies(child, env, exts, headers, sources, others)
+
     filtered_args = original_args.copy()
 
     # Ignore the "vsproj" option to not regenerate the VS project on every build
@@ -1073,26 +1172,28 @@ def generate_vs_project(env, original_args, project_name="godot"):
         sys.path.remove(tmppath)
         sys.modules.pop("msvs")
 
+    extensions = {}
+    extensions["headers"] = [".h", ".hh", ".hpp", ".hxx", ".inc"]
+    extensions["sources"] = [".c", ".cc", ".cpp", ".cxx", ".m", ".mm", ".java"]
+    extensions["others"] = [".natvis", ".glsl", ".rc"]
+
     headers = []
     headers_dirs = []
-    for file in glob_recursive_2("*.h", headers_dirs):
-        headers.append(str(file).replace("/", "\\"))
-    for file in glob_recursive_2("*.hpp", headers_dirs):
-        headers.append(str(file).replace("/", "\\"))
+    for ext in extensions["headers"]:
+        for file in glob_recursive_2("*" + ext, headers_dirs):
+            headers.append(str(file).replace("/", "\\"))
 
     sources = []
     sources_dirs = []
-    for file in glob_recursive_2("*.cpp", sources_dirs):
-        sources.append(str(file).replace("/", "\\"))
-    for file in glob_recursive_2("*.c", sources_dirs):
-        sources.append(str(file).replace("/", "\\"))
+    for ext in extensions["sources"]:
+        for file in glob_recursive_2("*" + ext, sources_dirs):
+            sources.append(str(file).replace("/", "\\"))
 
     others = []
     others_dirs = []
-    for file in glob_recursive_2("*.natvis", others_dirs):
-        others.append(str(file).replace("/", "\\"))
-    for file in glob_recursive_2("*.glsl", others_dirs):
-        others.append(str(file).replace("/", "\\"))
+    for ext in extensions["others"]:
+        for file in glob_recursive_2("*" + ext, others_dirs):
+            others.append(str(file).replace("/", "\\"))
 
     skip_filters = False
     import hashlib
@@ -1156,58 +1257,13 @@ def generate_vs_project(env, original_args, project_name="godot"):
         with open(f"{project_name}.vcxproj.filters", "w", encoding="utf-8", newline="\r\n") as f:
             f.write(filters_template)
 
-    envsources = []
-
-    envsources += env.core_sources
-    envsources += env.drivers_sources
-    envsources += env.main_sources
-    envsources += env.modules_sources
-    envsources += env.scene_sources
-    envsources += env.servers_sources
-    if env.editor_build:
-        envsources += env.editor_sources
-    envsources += env.platform_sources
-
     headers_active = []
     sources_active = []
     others_active = []
-    for x in envsources:
-        fname = ""
-        if isinstance(x, str):
-            fname = env.File(x).path
-        else:
-            # Some object files might get added directly as a File object and not a list.
-            try:
-                fname = env.File(x)[0].path
-            except Exception:
-                fname = x.path
-                pass
 
-        if fname:
-            fname = fname.replace("\\\\", "/")
-            parts = os.path.splitext(fname)
-            basename = parts[0]
-            ext = parts[1]
-            idx = fname.find(env["OBJSUFFIX"])
-            if ext in [".h", ".hpp"]:
-                headers_active += [fname]
-            elif ext in [".c", ".cpp"]:
-                sources_active += [fname]
-            elif idx > 0:
-                basename = fname[:idx]
-                if os.path.isfile(basename + ".h"):
-                    headers_active += [basename + ".h"]
-                elif os.path.isfile(basename + ".hpp"):
-                    headers_active += [basename + ".hpp"]
-                elif basename.endswith(".gen") and os.path.isfile(basename[:-4] + ".h"):
-                    headers_active += [basename[:-4] + ".h"]
-                if os.path.isfile(basename + ".c"):
-                    sources_active += [basename + ".c"]
-                elif os.path.isfile(basename + ".cpp"):
-                    sources_active += [basename + ".cpp"]
-            else:
-                fname = os.path.relpath(os.path.abspath(fname), env.Dir("").abspath)
-                others_active += [fname]
+    get_dependencies(
+        env.File(f"#bin/godot{env['PROGSUFFIX']}"), env, extensions, headers_active, sources_active, others_active
+    )
 
     all_items = []
     properties = []
@@ -1493,7 +1549,7 @@ def generate_copyright_header(filename: str) -> str:
 """
     filename = filename.split("/")[-1].ljust(MARGIN)
     if len(filename) > MARGIN:
-        print(f'WARNING: Filename "{filename}" too large for copyright header.')
+        print_warning(f'Filename "{filename}" too large for copyright header.')
     return TEMPLATE % filename
 
 

@@ -657,6 +657,21 @@ bool DisplayServer::get_swap_cancel_ok() {
 void DisplayServer::enable_for_stealing_focus(OS::ProcessID pid) {
 }
 
+Error DisplayServer::embed_process(WindowID p_window, OS::ProcessID p_pid, const Rect2i &p_rect, bool p_visible, bool p_grab_focus) {
+	WARN_PRINT("Embedded process not supported by this display server.");
+	return ERR_UNAVAILABLE;
+}
+
+Error DisplayServer::remove_embedded_process(OS::ProcessID p_pid) {
+	WARN_PRINT("Embedded process not supported by this display server.");
+	return ERR_UNAVAILABLE;
+}
+
+OS::ProcessID DisplayServer::get_focused_process_id() {
+	WARN_PRINT("Embedded process not supported by this display server.");
+	return 0;
+}
+
 Error DisplayServer::dialog_show(String p_title, String p_description, Vector<String> p_buttons, const Callable &p_callback) {
 	WARN_PRINT("Native dialogs not supported by this display server.");
 	return ERR_UNAVAILABLE;
@@ -675,6 +690,9 @@ Error DisplayServer::file_dialog_show(const String &p_title, const String &p_cur
 Error DisplayServer::file_dialog_with_options_show(const String &p_title, const String &p_current_directory, const String &p_root, const String &p_filename, bool p_show_hidden, FileDialogMode p_mode, const Vector<String> &p_filters, const TypedArray<Dictionary> &p_options, const Callable &p_callback) {
 	WARN_PRINT("Native dialogs not supported by this display server.");
 	return ERR_UNAVAILABLE;
+}
+
+void DisplayServer::beep() const {
 }
 
 int DisplayServer::keyboard_get_layout_count() const {
@@ -900,6 +918,7 @@ void DisplayServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("screen_get_refresh_rate", "screen"), &DisplayServer::screen_get_refresh_rate, DEFVAL(SCREEN_OF_MAIN_WINDOW));
 	ClassDB::bind_method(D_METHOD("screen_get_pixel", "position"), &DisplayServer::screen_get_pixel);
 	ClassDB::bind_method(D_METHOD("screen_get_image", "screen"), &DisplayServer::screen_get_image, DEFVAL(SCREEN_OF_MAIN_WINDOW));
+	ClassDB::bind_method(D_METHOD("screen_get_image_rect", "rect"), &DisplayServer::screen_get_image_rect);
 
 	ClassDB::bind_method(D_METHOD("screen_set_orientation", "orientation", "screen"), &DisplayServer::screen_set_orientation, DEFVAL(SCREEN_OF_MAIN_WINDOW));
 	ClassDB::bind_method(D_METHOD("screen_get_orientation", "screen"), &DisplayServer::screen_get_orientation, DEFVAL(SCREEN_OF_MAIN_WINDOW));
@@ -972,6 +991,8 @@ void DisplayServer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("window_maximize_on_title_dbl_click"), &DisplayServer::window_maximize_on_title_dbl_click);
 	ClassDB::bind_method(D_METHOD("window_minimize_on_title_dbl_click"), &DisplayServer::window_minimize_on_title_dbl_click);
 
+	ClassDB::bind_method(D_METHOD("window_start_drag", "window_id"), &DisplayServer::window_start_drag, DEFVAL(MAIN_WINDOW_ID));
+
 	ClassDB::bind_method(D_METHOD("ime_get_selection"), &DisplayServer::ime_get_selection);
 	ClassDB::bind_method(D_METHOD("ime_get_text"), &DisplayServer::ime_get_text);
 
@@ -995,6 +1016,8 @@ void DisplayServer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("file_dialog_show", "title", "current_directory", "filename", "show_hidden", "mode", "filters", "callback"), &DisplayServer::file_dialog_show);
 	ClassDB::bind_method(D_METHOD("file_dialog_with_options_show", "title", "current_directory", "root", "filename", "show_hidden", "mode", "filters", "options", "callback"), &DisplayServer::file_dialog_with_options_show);
+
+	ClassDB::bind_method(D_METHOD("beep"), &DisplayServer::beep);
 
 	ClassDB::bind_method(D_METHOD("keyboard_get_layout_count"), &DisplayServer::keyboard_get_layout_count);
 	ClassDB::bind_method(D_METHOD("keyboard_get_current_layout"), &DisplayServer::keyboard_get_current_layout);
@@ -1057,6 +1080,9 @@ void DisplayServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(FEATURE_NATIVE_DIALOG_INPUT);
 	BIND_ENUM_CONSTANT(FEATURE_NATIVE_DIALOG_FILE);
 	BIND_ENUM_CONSTANT(FEATURE_NATIVE_DIALOG_FILE_EXTRA);
+	BIND_ENUM_CONSTANT(FEATURE_WINDOW_DRAG);
+	BIND_ENUM_CONSTANT(FEATURE_SCREEN_EXCLUDE_FROM_CAPTURE);
+	BIND_ENUM_CONSTANT(FEATURE_WINDOW_EMBEDDING);
 
 	BIND_ENUM_CONSTANT(MOUSE_MODE_VISIBLE);
 	BIND_ENUM_CONSTANT(MOUSE_MODE_HIDDEN);
@@ -1130,6 +1156,7 @@ void DisplayServer::_bind_methods() {
 	BIND_ENUM_CONSTANT(WINDOW_FLAG_EXTEND_TO_TITLE);
 	BIND_ENUM_CONSTANT(WINDOW_FLAG_MOUSE_PASSTHROUGH);
 	BIND_ENUM_CONSTANT(WINDOW_FLAG_SHARP_CORNERS);
+	BIND_ENUM_CONSTANT(WINDOW_FLAG_EXCLUDE_FROM_CAPTURE);
 	BIND_ENUM_CONSTANT(WINDOW_FLAG_MAX);
 
 	BIND_ENUM_CONSTANT(WINDOW_EVENT_MOUSE_ENTER);
@@ -1207,9 +1234,9 @@ Vector<String> DisplayServer::get_create_function_rendering_drivers(int p_index)
 	return server_create_functions[p_index].get_rendering_drivers_function();
 }
 
-DisplayServer *DisplayServer::create(int p_index, const String &p_rendering_driver, WindowMode p_mode, VSyncMode p_vsync_mode, uint32_t p_flags, const Vector2i *p_position, const Vector2i &p_resolution, int p_screen, Context p_context, Error &r_error) {
+DisplayServer *DisplayServer::create(int p_index, const String &p_rendering_driver, WindowMode p_mode, VSyncMode p_vsync_mode, uint32_t p_flags, const Vector2i *p_position, const Vector2i &p_resolution, int p_screen, Context p_context, int64_t p_parent_window, Error &r_error) {
 	ERR_FAIL_INDEX_V(p_index, server_create_count, nullptr);
-	return server_create_functions[p_index].create_function(p_rendering_driver, p_mode, p_vsync_mode, p_flags, p_position, p_resolution, p_screen, p_context, r_error);
+	return server_create_functions[p_index].create_function(p_rendering_driver, p_mode, p_vsync_mode, p_flags, p_position, p_resolution, p_screen, p_context, p_parent_window, r_error);
 }
 
 void DisplayServer::_input_set_mouse_mode(Input::MouseMode p_mode) {

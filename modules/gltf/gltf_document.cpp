@@ -30,6 +30,7 @@
 
 #include "gltf_document.h"
 
+#include "extensions/gltf_document_extension_convert_importer_mesh.h"
 #include "extensions/gltf_spec_gloss.h"
 #include "gltf_state.h"
 #include "skin_tool.h"
@@ -44,12 +45,14 @@
 #include "core/io/stream_peer.h"
 #include "core/object/object_id.h"
 #include "core/version.h"
+#include "scene/2d/node_2d.h"
 #include "scene/3d/bone_attachment_3d.h"
 #include "scene/3d/camera_3d.h"
 #include "scene/3d/importer_mesh_instance_3d.h"
 #include "scene/3d/light_3d.h"
 #include "scene/3d/mesh_instance_3d.h"
 #include "scene/3d/multimesh_instance_3d.h"
+#include "scene/animation/animation_player.h"
 #include "scene/resources/3d/skin.h"
 #include "scene/resources/image_texture.h"
 #include "scene/resources/portable_compressed_texture.h"
@@ -689,7 +692,7 @@ void GLTFDocument::_compute_node_heights(Ref<GLTFState> p_state) {
 }
 
 static Vector<uint8_t> _parse_base64_uri(const String &p_uri) {
-	int start = p_uri.find(",");
+	int start = p_uri.find_char(',');
 	ERR_FAIL_COND_V(start == -1, Vector<uint8_t>());
 
 	CharString substr = p_uri.substr(start + 1).ascii();
@@ -3150,7 +3153,7 @@ Error GLTFDocument::_serialize_meshes(Ref<GLTFState> p_state) {
 				v = instance_materials.get(surface_i);
 			}
 			Ref<Material> mat = v;
-			if (!mat.is_valid()) {
+			if (mat.is_null()) {
 				mat = import_mesh->get_surface_material(surface_i);
 			}
 			if (mat.is_valid()) {
@@ -4078,7 +4081,7 @@ Error GLTFDocument::_parse_images(Ref<GLTFState> p_state, const String &p_base_p
 			if (uri.begins_with("data:")) { // Embedded data using base64.
 				data = _parse_base64_uri(uri);
 				// mimeType is optional, but if we have it defined in the URI, let's use it.
-				if (mime_type.is_empty() && uri.contains(";")) {
+				if (mime_type.is_empty() && uri.contains_char(';')) {
 					// Trim "data:" prefix which is 5 characters long, and end at ";base64".
 					mime_type = uri.substr(5, uri.find(";base64") - 5);
 				}
@@ -8467,6 +8470,11 @@ Node *GLTFDocument::generate_scene(Ref<GLTFState> p_state, float p_bake_fps, boo
 			err = ext->import_node(p_state, gltf_node, node_json, E.value);
 			ERR_CONTINUE(err != OK);
 		}
+	}
+	ImporterMeshInstance3D *root_importer_mesh = Object::cast_to<ImporterMeshInstance3D>(root);
+	if (unlikely(root_importer_mesh)) {
+		root = GLTFDocumentExtensionConvertImporterMesh::convert_importer_mesh_instance_3d(root_importer_mesh);
+		memdelete(root_importer_mesh);
 	}
 	for (Ref<GLTFDocumentExtension> ext : document_extensions) {
 		ERR_CONTINUE(ext.is_null());

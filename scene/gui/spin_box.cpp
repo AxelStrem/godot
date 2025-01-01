@@ -68,6 +68,10 @@ void SpinBox::_update_text(bool p_keep_line_edit) {
 }
 
 void SpinBox::_text_submitted(const String &p_string) {
+	if (p_string.is_empty()) {
+		return;
+	}
+
 	Ref<Expression> expr;
 	expr.instantiate();
 
@@ -284,8 +288,8 @@ void SpinBox::_line_edit_editing_toggled(bool p_toggled_on) {
 			line_edit->select_all();
 		}
 	} else {
-		// Discontinue because the focus_exit was caused by canceling.
-		if (Input::get_singleton()->is_action_pressed("ui_cancel")) {
+		// Discontinue because the focus_exit was caused by canceling or the text is empty.
+		if (Input::get_singleton()->is_action_pressed("ui_cancel") || line_edit->get_text().is_empty()) {
 			_update_text();
 			return;
 		}
@@ -545,6 +549,12 @@ void SpinBox::_set_step_no_signal(double p_step) {
 	set_block_signals(false);
 }
 
+void SpinBox::_validate_property(PropertyInfo &p_property) const {
+	if (p_property.name == "exp_edit") {
+		p_property.usage = PROPERTY_USAGE_NONE;
+	}
+}
+
 void SpinBox::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_horizontal_alignment", "alignment"), &SpinBox::set_horizontal_alignment);
 	ClassDB::bind_method(D_METHOD("get_horizontal_alignment"), &SpinBox::get_horizontal_alignment);
@@ -619,7 +629,7 @@ SpinBox::SpinBox() {
 	line_edit->set_mouse_filter(MOUSE_FILTER_PASS);
 	line_edit->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_LEFT);
 
-	line_edit->connect("text_submitted", callable_mp(this, &SpinBox::_text_submitted), CONNECT_DEFERRED);
+	line_edit->connect(SceneStringName(text_submitted), callable_mp(this, &SpinBox::_text_submitted), CONNECT_DEFERRED);
 	line_edit->connect("editing_toggled", callable_mp(this, &SpinBox::_line_edit_editing_toggled), CONNECT_DEFERRED);
 	line_edit->connect(SceneStringName(gui_input), callable_mp(this, &SpinBox::_line_edit_input));
 

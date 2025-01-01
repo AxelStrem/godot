@@ -39,7 +39,6 @@
 #include "scene/resources/3d/capsule_shape_3d.h"
 #include "scene/resources/3d/cylinder_shape_3d.h"
 #include "scene/resources/3d/importer_mesh.h"
-#include "scene/resources/3d/skin.h"
 #include "scene/resources/3d/sphere_shape_3d.h"
 #include "scene/resources/animation.h"
 #include "scene/resources/mesh.h"
@@ -236,6 +235,7 @@ class ResourceImporterScene : public ResourceImporter {
 	};
 
 	void _optimize_track_usage(AnimationPlayer *p_player, AnimationImportTracks *p_track_actions);
+	void _generate_editor_preview_for_scene(const String &p_path, Node *p_scene);
 
 	String _scene_import_type = "PackedScene";
 
