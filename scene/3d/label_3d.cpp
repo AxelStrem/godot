@@ -541,8 +541,7 @@ void Label3D::_shape() {
 			case TextServer::AUTOWRAP_OFF:
 				break;
 		}
-		autowrap_flags = autowrap_flags | autowrap_flags_trim;
-
+		autowrap_flags = autowrap_flags ;//| autowrap_flags_trim;
 		PackedInt32Array line_breaks = TS->shaped_text_get_line_breaks(text_rid, width, 0, autowrap_flags);
 		float max_line_w = 0.0;
 		for (int i = 0; i < line_breaks.size(); i = i + 2) {
