@@ -39,6 +39,7 @@
 #include "core/string/print_string.h"
 #include "core/string/translation_server.h"
 #include "core/variant/typed_array.h"
+#include "scene/animation/tweak.h"
 
 #ifdef DEBUG_ENABLED
 
@@ -265,6 +266,14 @@ void Object::_get_valid_parents_static(List<String> *p_parents) {
 }
 
 void Object::set(const StringName &p_name, const Variant &p_value, bool *r_valid) {
+	if(object_tweaker)
+	{
+		return set_direct(p_name, object_tweaker->set_base(p_name, p_value), r_valid);
+	}
+	return set_direct(p_name, p_value, r_valid);
+}
+
+void Object::set_direct(const StringName &p_name, const Variant &p_value, bool *r_valid) {
 #ifdef TOOLS_ENABLED
 
 	_edited = true;
@@ -965,6 +974,13 @@ void Object::set_script_and_instance(const Variant &p_script, ScriptInstance *p_
 
 	script = p_script;
 	script_instance = p_instance;
+}
+
+void Object::set_object_tweaker(ObjectTweaker *p_obj_tweaker) {
+	ERR_FAIL_NULL(p_obj_tweaker);
+	ERR_FAIL_COND(object_tweaker!=nullptr);
+	object_tweaker = p_obj_tweaker;
+	object_tweaker->set_owning_object(this);
 }
 
 void Object::set_script(const Variant &p_script) {
@@ -2147,6 +2163,12 @@ Object::~Object() {
 		memdelete(script_instance);
 	}
 	script_instance = nullptr;
+
+	if(object_tweaker)
+	{
+		memdelete(object_tweaker);
+	}
+	object_tweaker = nullptr;
 
 	if (_extension) {
 #ifdef TOOLS_ENABLED

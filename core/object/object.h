@@ -564,6 +564,7 @@ public:                                              \
 private:
 
 class ScriptInstance;
+class ObjectTweaker;
 
 class Object {
 public:
@@ -631,6 +632,7 @@ private:
 	HashSet<String> editor_section_folding;
 #endif
 	ScriptInstance *script_instance = nullptr;
+	ObjectTweaker *object_tweaker = nullptr;
 	Variant script; // Reference does not exist yet, store it in a Variant.
 	HashMap<StringName, Variant> metadata;
 	HashMap<StringName, Variant *> metadata_properties;
@@ -844,6 +846,7 @@ public:
 	/* IAPI */
 
 	void set(const StringName &p_name, const Variant &p_value, bool *r_valid = nullptr);
+	void set_direct(const StringName &p_name, const Variant &p_value, bool *r_valid = nullptr);
 	Variant get(const StringName &p_name, bool *r_valid = nullptr) const;
 	void set_indexed(const Vector<StringName> &p_names, const Variant &p_value, bool *r_valid = nullptr);
 	Variant get_indexed(const Vector<StringName> &p_names, bool *r_valid = nullptr) const;
@@ -910,6 +913,9 @@ public:
 
 	// Some script languages can't control instance creation, so this function eases the process.
 	void set_script_and_instance(const Variant &p_script, ScriptInstance *p_instance);
+
+	_FORCE_INLINE_ ObjectTweaker *get_object_tweaker() const { return object_tweaker; }
+	void set_object_tweaker(ObjectTweaker *p_obj_tweaker);	
 
 	void add_user_signal(const MethodInfo &p_signal);
 
