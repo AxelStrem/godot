@@ -42,6 +42,7 @@ MIDIDriver::MIDIDriver() {
 	singleton = this;
 }
 
+
 MIDIDriver::MessageCategory MIDIDriver::Parser::category(uint8_t p_midi_fragment) {
 	if (p_midi_fragment >= 0xf8) {
 		return MessageCategory::RealTime;
