@@ -75,6 +75,33 @@ Tweak::Tweak(Object* p_object, const StringName& p_property, const Variant &p_va
 	valid = true;
 }
 
+Tweak::Tweak(Object *p_object, const StringName &p_property, Object *p_source, const StringName &p_source_property, Tweak::ActionType action, int priority) :
+	Tweak(p_object, p_property, Variant{}, action, priority) {
+		if(valid)
+		{
+			ObjectTweaker* p_obj_tweaker = p_source->get_object_tweaker();
+			if(p_obj_tweaker == nullptr)
+			{
+				p_obj_tweaker = memnew(ObjectTweaker);
+				p_source->set_object_tweaker(p_obj_tweaker);
+			}
+
+			PropertyTweaker* p_prop_tweaker = p_obj_tweaker->get_property_tweaker(p_source_property);
+			if(p_prop_tweaker == nullptr)
+			{
+				valid = false;
+				return;
+			}
+
+			TweakMonitor* pMonitor = memnew(TweakMonitor);
+			pMonitor->set_priority(INT32_MAX);
+			pMonitor->set_observer(pImpl);
+			p_prop_tweaker->add_tweak(pMonitor);
+
+			pImpl->set_monitor(pMonitor);
+		}
+}
+
 void Tweak::set_owning_tweaker(PropertyTweaker *p_tweaker) {
 	pImpl->p_owner = p_tweaker;
 }
@@ -187,11 +214,38 @@ void TweakImpl::set_order(int _order) {
 	order = _order;
 }
 
-TweakImpl::~TweakImpl() {
+void TweakImpl::set_value(const Variant &val) {
+	tweak_value = val;
+	if(p_owner!=nullptr)
+	{
+		p_owner->recalculate();
+	}
+}
+
+void TweakImpl::set_priority(int p)
+{
+	priority = p;
+}
+
+void TweakImpl::set_monitor(TweakMonitor *pM) {
+	pMonitor = pM;
+}
+
+void TweakImpl::disconnect() {
 	if(p_owner)
 	{
 		p_owner->remove_tweak(this);
+		p_owner = nullptr;
 	}
+}
+
+TweakImpl::~TweakImpl() {
+	if(pMonitor)
+	{
+		pMonitor->set_observer(nullptr);
+		memdelete(pMonitor);
+	}
+	disconnect();
 }
 
 Variant TweakAdd::apply(const Variant &value) const {
@@ -208,4 +262,24 @@ Variant TweakMultiply::apply(const Variant &value) const {
 
 Variant TweakDivide::apply(const Variant &value) const {
 	return Variant::evaluate(Variant::Operator::OP_DIVIDE, value, tweak_value);
+}
+
+Variant TweakMonitor::apply(const Variant &value) const {
+	if(pObserver != nullptr)
+	{
+		pObserver->set_value(value);
+	}
+	return value;
+}
+
+TweakMonitor::~TweakMonitor() {
+	if(pObserver != nullptr)
+	{
+		pObserver->disconnect();
+	}
+	disconnect();
+}
+
+void TweakMonitor::set_observer(TweakImpl *pTweak) {
+	pObserver = pTweak;
 }

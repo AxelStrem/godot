@@ -36,6 +36,7 @@
 class Tweak;
 class PropertyTweaker;
 class ObjectTweaker;
+class TweakMonitor;
 
 class TweakImpl
 {
@@ -45,6 +46,7 @@ protected:
 
 	PropertyTweaker* p_owner;
 	Variant tweak_value;
+	TweakMonitor* pMonitor = nullptr;
 public:
 	virtual Variant apply(const Variant& value) const;
 
@@ -53,9 +55,13 @@ public:
 
 	void set_owning_tweaker(PropertyTweaker* p_tweaker);
 	void set_order(int order);
+	void set_value(const Variant& val);
+	void set_monitor(TweakMonitor* pM);
+	void set_priority(int p);
 
 	friend class Tweak;
 
+	void disconnect();
 	virtual ~TweakImpl();
 };
 
@@ -81,6 +87,16 @@ class TweakDivide : public TweakImpl
 {
 public:
 	virtual Variant apply(const Variant& value) const;
+};
+
+class TweakMonitor : public TweakImpl
+{
+	TweakImpl* pObserver;
+public:
+	virtual Variant apply(const Variant& value) const;
+	virtual ~TweakMonitor();
+
+	void set_observer(TweakImpl* pTweak);
 };
 
 class PropertyTweaker
@@ -130,6 +146,7 @@ enum ActionType {
 
 	Tweak();
 	Tweak(Object* p_object, const StringName& p_property, const Variant &p_value, Tweak::ActionType action, int priority);
+	Tweak(Object* p_object, const StringName& p_property, Object* p_source, const StringName& p_source_property, Tweak::ActionType action, int priority);
 
 	void set_owning_tweaker(PropertyTweaker* p_tweaker);
 	void set_order(int order);

@@ -2579,6 +2579,12 @@ Ref<Tweak> Node::create_tweak(Object* p_owner, const StringName& p_property,  co
 	return tweak;	
 }
 
+Ref<Tweak> Node::create_tweak_dynamic(Object *p_owner, const StringName &p_property, Object *p_source, const StringName &p_source_property, Tweak::ActionType action, int priority) {
+	ERR_THREAD_GUARD_V(Ref<Tweak>());
+	Ref<Tweak> tweak;
+	tweak.instantiate(p_owner, p_property, p_source, p_source_property, action, priority);
+	return tweak;	
+}
 
 void Node::set_scene_file_path(const String &p_scene_file_path) {
 	ERR_THREAD_GUARD
@@ -3706,6 +3712,7 @@ void Node::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("create_tween"), &Node::create_tween);
 
 	ClassDB::bind_method(D_METHOD("create_tweak", "object", "property_path", "value", "action", "priority"), &Node::create_tweak, DEFVAL(Tweak::ACTION_SET), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("create_tweak_dynamic", "object", "property_path", "source_object", "source_property", "action", "priority"), &Node::create_tweak_dynamic, DEFVAL(Tweak::ACTION_SET), DEFVAL(0));
 
 	ClassDB::bind_method(D_METHOD("duplicate", "flags"), &Node::duplicate, DEFVAL(DUPLICATE_USE_INSTANTIATION | DUPLICATE_SIGNALS | DUPLICATE_GROUPS | DUPLICATE_SCRIPTS));
 	ClassDB::bind_method(D_METHOD("replace_by", "node", "keep_groups"), &Node::replace_by, DEFVAL(false));
