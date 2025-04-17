@@ -89,6 +89,19 @@ public:
 	virtual Variant apply(const Variant& value) const;
 };
 
+class TweakLogicalAnd : public TweakImpl
+{
+public:
+	virtual Variant apply(const Variant& value) const;
+};
+
+class TweakLogicalOr : public TweakImpl
+{
+public:
+	virtual Variant apply(const Variant& value) const;
+};
+
+
 class TweakMonitor : public TweakImpl
 {
 	TweakImpl* pObserver;
@@ -115,6 +128,8 @@ public:
 	void add_tweak(TweakImpl* p_tweak);
 	void remove_tweak(TweakImpl* p_tweak);
 
+	Variant get_tweaked(const Variant& add_to_base);
+
 	PropertyTweaker(Object* p_object, const StringName& p_property);
 };
 
@@ -127,6 +142,7 @@ public:
 
 	PropertyTweaker* get_property_tweaker(const StringName& property);
 	void set_owning_object(Object* p_object);
+	Variant get_tweaked(const StringName& property, const Variant& add_to_base);
 };
 
 
@@ -141,7 +157,9 @@ enum ActionType {
 	ACTION_ADD,
 	ACTION_SUBTRACT,
 	ACTION_MULTIPLY,
-	ACTION_DIVIDE
+	ACTION_DIVIDE,
+	ACTION_AND,
+	ACTION_OR
 };
 
 	Tweak();

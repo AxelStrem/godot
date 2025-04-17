@@ -850,6 +850,7 @@ public:
 	Variant get(const StringName &p_name, bool *r_valid = nullptr) const;
 	void set_indexed(const Vector<StringName> &p_names, const Variant &p_value, bool *r_valid = nullptr);
 	Variant get_indexed(const Vector<StringName> &p_names, bool *r_valid = nullptr) const;
+	Variant get_tweaked(const StringName &p_name, const Variant& add_to_base) const;
 
 	void get_property_list(List<PropertyInfo> *p_list, bool p_reversed = false) const;
 	void validate_property(PropertyInfo &p_property) const;

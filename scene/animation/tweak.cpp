@@ -63,6 +63,8 @@ Tweak::Tweak(Object* p_object, const StringName& p_property, const Variant &p_va
 	case ACTION_SUBTRACT:  pImpl = memnew(TweakSubtract); break;
 	case ACTION_MULTIPLY:  pImpl = memnew(TweakMultiply); break;
 	case ACTION_DIVIDE:  pImpl = memnew(TweakDivide); break;
+	case ACTION_AND: pImpl = memnew(TweakLogicalAnd); break;
+	case ACTION_OR: pImpl = memnew(TweakLogicalOr); break;
 	case ACTION_SET:
 	default: pImpl = memnew(TweakImpl); break;
 	}
@@ -185,6 +187,25 @@ void ObjectTweaker::set_owning_object(Object *p_object) {
 	p_owner = p_object;
 }
 
+Variant ObjectTweaker::get_tweaked(const StringName &property, const Variant &add_to_base) {
+	PropertyTweaker* ptr = props.getptr(property);
+	if(ptr == nullptr)
+	{
+		return Variant::evaluate(Variant::Operator::OP_ADD, p_owner->get(property), add_to_base);
+	}
+	return ptr->get_tweaked(add_to_base);
+}
+
+Variant PropertyTweaker::get_tweaked(const Variant& add_to_base)
+{
+	Variant value = Variant::evaluate(Variant::Operator::OP_ADD, base, add_to_base);
+	for(TweakImpl* p_tweak : tweaks)
+	{
+		value = p_tweak->apply(value);
+	}
+	return value;
+}
+
 void PropertyTweaker::add_tweak(TweakImpl *p_tweak) {
 	p_tweak->set_owning_tweaker(this);
 	p_tweak->set_order(tweak_order++);
@@ -282,4 +303,12 @@ TweakMonitor::~TweakMonitor() {
 
 void TweakMonitor::set_observer(TweakImpl *pTweak) {
 	pObserver = pTweak;
+}
+
+Variant TweakLogicalAnd::apply(const Variant &value) const {
+	return Variant::evaluate(Variant::Operator::OP_AND, value, tweak_value);
+}
+
+Variant TweakLogicalOr::apply(const Variant &value) const {
+	return Variant::evaluate(Variant::Operator::OP_OR, value, tweak_value);
 }

@@ -515,6 +515,14 @@ Variant Object::get_indexed(const Vector<StringName> &p_names, bool *r_valid) co
 	return current_value;
 }
 
+Variant Object::get_tweaked(const StringName &p_name, const Variant &add_to_base) const {
+	if(object_tweaker)
+	{
+		return object_tweaker->get_tweaked(p_name, add_to_base);
+	}
+	return Variant::evaluate(Variant::Operator::OP_ADD, get(p_name), add_to_base);
+}
+
 void Object::get_property_list(List<PropertyInfo> *p_list, bool p_reversed) const {
 	if (script_instance && p_reversed) {
 		script_instance->get_property_list(p_list);
@@ -1716,6 +1724,7 @@ void Object::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get", "property"), &Object::_get_bind);
 	ClassDB::bind_method(D_METHOD("set_indexed", "property_path", "value"), &Object::_set_indexed_bind);
 	ClassDB::bind_method(D_METHOD("get_indexed", "property_path"), &Object::_get_indexed_bind);
+	ClassDB::bind_method(D_METHOD("get_tweaked", "property", "add_to_base"), &Object::get_tweaked);
 	ClassDB::bind_method(D_METHOD("get_property_list"), &Object::_get_property_list_bind);
 	ClassDB::bind_method(D_METHOD("get_method_list"), &Object::_get_method_list_bind);
 	ClassDB::bind_method(D_METHOD("property_can_revert", "property"), &Object::property_can_revert);
