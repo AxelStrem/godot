@@ -112,6 +112,11 @@ void Tweak::set_order(int _order) {
 	pImpl->order = _order;
 }
 
+void Tweak::set_value(const Variant& new_value) {
+	pImpl->set_value(new_value);
+}
+
+
 Tweak::~Tweak() {
 	if(pImpl)
 	{
@@ -120,11 +125,18 @@ Tweak::~Tweak() {
 }
 
 void Tweak::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_value", "new_value"), &Tweak::set_value);
+	ClassDB::bind_method(D_METHOD("get_value"), &Tweak::get_value);
+	
+	ADD_PROPERTY(PropertyInfo(Variant::NIL, "value", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NIL_IS_VARIANT), "set_value", "get_value");
+
 	BIND_ENUM_CONSTANT(ACTION_ADD);
 	BIND_ENUM_CONSTANT(ACTION_SUBTRACT);
 	BIND_ENUM_CONSTANT(ACTION_MULTIPLY);
 	BIND_ENUM_CONSTANT(ACTION_DIVIDE);
 	BIND_ENUM_CONSTANT(ACTION_SET);
+	BIND_ENUM_CONSTANT(ACTION_AND);
+	BIND_ENUM_CONSTANT(ACTION_OR);
 }
 
 Variant PropertyTweaker::evaluate() {
@@ -159,9 +171,12 @@ public:
 };
 
 void PropertyTweaker::recalculate() {
-	tweaks.sort_custom_inplace<TweakSort>();
-	Variant val = evaluate();
-	p_owner->set_direct(p_prop, val);
+	if(p_owner!=nullptr)
+	{
+		tweaks.sort_custom_inplace<TweakSort>();
+		Variant val = evaluate();
+		p_owner->set_direct(p_prop, val);
+	}
 }
 
 Variant ObjectTweaker::set_base(const StringName &p_name, const Variant &p_value) {
@@ -196,6 +211,13 @@ Variant ObjectTweaker::get_tweaked(const StringName &property, const Variant &ad
 	return ptr->get_tweaked(add_to_base);
 }
 
+ObjectTweaker::~ObjectTweaker() {
+	for(auto& p : props)
+	{
+		p.value.remove_owner();
+	}
+}
+
 Variant PropertyTweaker::get_tweaked(const Variant& add_to_base)
 {
 	Variant value = Variant::evaluate(Variant::Operator::OP_ADD, base, add_to_base);
@@ -204,6 +226,15 @@ Variant PropertyTweaker::get_tweaked(const Variant& add_to_base)
 		value = p_tweak->apply(value);
 	}
 	return value;
+}
+
+void PropertyTweaker::remove_owner() {
+	p_owner = nullptr;
+	for(TweakImpl* p_tweak : tweaks)
+	{
+		p_tweak->set_owning_tweaker(nullptr);
+	}
+	tweaks.clear();
 }
 
 void PropertyTweaker::add_tweak(TweakImpl *p_tweak) {

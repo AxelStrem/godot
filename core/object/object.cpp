@@ -2168,16 +2168,16 @@ void Object::detach_from_objectdb() {
 }
 
 Object::~Object() {
-	if (script_instance) {
-		memdelete(script_instance);
-	}
-	script_instance = nullptr;
-
 	if(object_tweaker)
 	{
 		memdelete(object_tweaker);
 	}
 	object_tweaker = nullptr;
+
+	if (script_instance) {
+		memdelete(script_instance);
+	}
+	script_instance = nullptr;
 
 	if (_extension) {
 #ifdef TOOLS_ENABLED

@@ -52,6 +52,7 @@ public:
 
 	_FORCE_INLINE_ int get_order() const { return order; }
 	_FORCE_INLINE_ int get_priority() const { return priority; }
+	_FORCE_INLINE_ const Variant& get_value() const { return tweak_value; }
 
 	void set_owning_tweaker(PropertyTweaker* p_tweaker);
 	void set_order(int order);
@@ -128,6 +129,8 @@ public:
 	void add_tweak(TweakImpl* p_tweak);
 	void remove_tweak(TweakImpl* p_tweak);
 
+	void remove_owner();
+
 	Variant get_tweaked(const Variant& add_to_base);
 
 	PropertyTweaker(Object* p_object, const StringName& p_property);
@@ -143,6 +146,8 @@ public:
 	PropertyTweaker* get_property_tweaker(const StringName& property);
 	void set_owning_object(Object* p_object);
 	Variant get_tweaked(const StringName& property, const Variant& add_to_base);
+
+	~ObjectTweaker();
 };
 
 
@@ -168,6 +173,9 @@ enum ActionType {
 
 	void set_owning_tweaker(PropertyTweaker* p_tweaker);
 	void set_order(int order);
+
+	_FORCE_INLINE_ const Variant& get_value() const { return pImpl->get_value(); };
+	void set_value(const Variant& value);
 	
 	_FORCE_INLINE_ int get_order() const { return pImpl->order; }
 	_FORCE_INLINE_ int get_priority() const { return pImpl->priority; }
