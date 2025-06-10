@@ -611,6 +611,7 @@ void BaseMaterial3D::init_shaders() {
 	shader_names->uv2_offset = "uv2_offset";
 	shader_names->uv1_blend_sharpness = "uv1_blend_sharpness";
 	shader_names->uv2_blend_sharpness = "uv2_blend_sharpness";
+	shader_names->billboard_width = "billboard_width";
 
 	shader_names->particles_anim_h_frames = "particles_anim_h_frames";
 	shader_names->particles_anim_v_frames = "particles_anim_v_frames";
@@ -839,7 +840,10 @@ void BaseMaterial3D::_update_shader() {
 	if (features[FEATURE_SUBSURFACE_SCATTERING] && flags[FLAG_SUBSURFACE_MODE_SKIN]) {
 		code += ", sss_mode_skin";
 	}
-
+	bool custom_vertex_transform = flags[FLAG_BILLBOARD_UV];
+	if (custom_vertex_transform) {
+		code += ", skip_vertex_transform";
+	}
 	if (shading_mode == SHADING_MODE_UNSHADED) {
 		code += ", unshaded";
 	}
@@ -1110,6 +1114,12 @@ varying vec3 uv2_power_normal;
 )";
 	}
 
+	if(flags[FLAG_BILLBOARD_UV]){
+		code += R"(
+uniform float billboard_width : hint_range(0.0, 10.0, 0.01);
+)";
+	}
+
 	code += R"(
 uniform vec3 uv1_scale;
 uniform vec3 uv1_offset;
@@ -1357,6 +1367,23 @@ void vertex() {)";
 		code += R"(
 	// Grow: Enabled
 	VERTEX += NORMAL * grow;
+)";
+	}
+
+	if(custom_vertex_transform) {
+		code += R"(
+	// Custom Vertex Transform: Enabled
+	VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    NORMAL = normalize((MODELVIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+    BINORMAL = normalize((MODELVIEW_MATRIX * vec4(BINORMAL, 0.0)).xyz);
+    TANGENT = normalize((MODELVIEW_MATRIX * vec4(TANGENT, 0.0)).xyz);
+	)";
+	}
+
+	if(flags[FLAG_BILLBOARD_UV]) {
+		code += R"(
+	// Billboard UV: Enabled
+	VERTEX += (UV.y - 0.5)*billboard_width*normalize(cross(TANGENT, VERTEX));
 )";
 	}
 
@@ -2012,6 +2039,15 @@ void BaseMaterial3D::set_roughness(float p_roughness) {
 
 float BaseMaterial3D::get_roughness() const {
 	return roughness;
+}
+
+void BaseMaterial3D::set_billboard_width(float p_billboard_width) {
+	billboard_width = p_billboard_width;
+	_material_set_param(shader_names->billboard_width, p_billboard_width);
+}
+
+float BaseMaterial3D::get_billboard_width() const {
+	return billboard_width;
 }
 
 void BaseMaterial3D::set_metallic(float p_metallic) {
@@ -2977,6 +3013,9 @@ void BaseMaterial3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_roughness", "roughness"), &BaseMaterial3D::set_roughness);
 	ClassDB::bind_method(D_METHOD("get_roughness"), &BaseMaterial3D::get_roughness);
+	
+	ClassDB::bind_method(D_METHOD("set_billboard_width", "billboard_width"), &BaseMaterial3D::set_billboard_width);
+	ClassDB::bind_method(D_METHOD("get_billboard_width"), &BaseMaterial3D::get_billboard_width);
 
 	ClassDB::bind_method(D_METHOD("set_emission", "emission"), &BaseMaterial3D::set_emission);
 	ClassDB::bind_method(D_METHOD("get_emission"), &BaseMaterial3D::get_emission);
@@ -3307,6 +3346,8 @@ void BaseMaterial3D::_bind_methods() {
 	ADD_GROUP("Billboard", "billboard_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "billboard_mode", PROPERTY_HINT_ENUM, "Disabled,Enabled,Y-Billboard,Particle Billboard"), "set_billboard_mode", "get_billboard_mode");
 	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "billboard_keep_scale"), "set_flag", "get_flag", FLAG_BILLBOARD_KEEP_SCALE);
+	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "billboard_uv"), "set_flag", "get_flag", FLAG_BILLBOARD_UV);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "billboard_width", PROPERTY_HINT_RANGE, "0,10,0.01"), "set_billboard_width", "get_billboard_width");
 
 	ADD_GROUP("Particles Anim", "particles_anim_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "particles_anim_h_frames", PROPERTY_HINT_RANGE, "1,128,1"), "set_particles_anim_h_frames", "get_particles_anim_h_frames");
@@ -3429,6 +3470,7 @@ void BaseMaterial3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(FLAG_PARTICLE_TRAILS_MODE);
 	BIND_ENUM_CONSTANT(FLAG_ALBEDO_TEXTURE_MSDF);
 	BIND_ENUM_CONSTANT(FLAG_DISABLE_FOG);
+	BIND_ENUM_CONSTANT(FLAG_BILLBOARD_UV);
 	BIND_ENUM_CONSTANT(FLAG_MAX);
 
 	BIND_ENUM_CONSTANT(DIFFUSE_BURLEY);
@@ -3467,6 +3509,7 @@ BaseMaterial3D::BaseMaterial3D(bool p_orm) :
 	set_albedo(Color(1.0, 1.0, 1.0, 1.0));
 	set_specular(0.5);
 	set_roughness(1.0);
+	set_billboard_width(1.0);
 	set_metallic(0.0);
 	set_emission(Color(0, 0, 0));
 	set_emission_energy_multiplier(1.0);

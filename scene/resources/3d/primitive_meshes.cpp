@@ -3987,7 +3987,7 @@ void Curve3DMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_curve", "curve"), &Curve3DMesh::set_curve);
 	ClassDB::bind_method(D_METHOD("get_curve"), &Curve3DMesh::get_curve);
 
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "width", PROPERTY_HINT_RANGE, "0.001,1000.0,0.001,or_greater,exp"), "set_width", "get_width");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "width", PROPERTY_HINT_RANGE, "0.0,2.0,0.001,or_greater"), "set_width", "get_width");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve3D"), "set_curve", "get_curve");
 	
 }
