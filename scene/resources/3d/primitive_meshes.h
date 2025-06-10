@@ -414,6 +414,32 @@ public:
 };
 
 /**
+	A ribbon-like mesh that follows a curve.
+*/
+class Curve3DMesh : public PrimitiveMesh {
+	GDCLASS(Curve3DMesh, PrimitiveMesh);
+
+private:
+	float width = 0.5;
+	Ref<Curve3D> curve;
+
+protected:
+	static void _bind_methods();
+	virtual void _create_mesh_array(Array &p_arr) const override;
+
+	virtual void _update_lightmap_size() override;
+
+public:
+	void set_width(const float p_width);
+	float get_width() const;
+
+	void set_curve(const Ref<Curve3D> &p_curve);
+	Ref<Curve3D> get_curve() const;
+
+	Curve3DMesh();
+};
+
+/**
 	A single point for use in particle systems
 */
 

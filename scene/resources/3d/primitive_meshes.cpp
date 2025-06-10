@@ -3896,3 +3896,135 @@ void TextMesh::set_uppercase(bool p_uppercase) {
 bool TextMesh::is_uppercase() const {
 	return uppercase;
 }
+
+
+void Curve3DMesh::_update_lightmap_size() {
+	if (get_add_uv2()) {
+		// size must have changed, update lightmap size hint
+		Size2i _lightmap_size_hint;
+		float padding = get_uv2_padding();
+
+		// TODO: finish this
+
+		set_lightmap_size_hint(_lightmap_size_hint);
+	}
+}
+
+void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
+	Vector<Vector3> points;
+	Vector<Vector3> normals;
+	Vector<float> tangents;
+	Vector<Vector2> uvs;
+	Vector<Vector2> uv2s;
+	Vector<int> indices;
+
+	// Only used if we calculate UV2
+	bool _add_uv2 = get_add_uv2();
+	float _uv2_padding = get_uv2_padding() * texel_size;
+
+	if(curve.is_valid())
+	{
+
+		PackedVector3Array pts = curve->get_baked_points();
+		PackedVector3Array fws = curve->get_baked_forward_vectors();
+
+		for (int i = 0; i < pts.size(); i++) {
+			Vector3 binormal = fws[i].cross(Vector3(0.0,1.0,0.0)).normalized();
+
+			points.push_back(pts[i] + binormal * width);
+			points.push_back(pts[i] - binormal * width);
+
+			Vector3 normal = fws[i].cross(binormal).normalized();
+			normals.push_back(normal);
+			normals.push_back(normal);
+
+			ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
+			ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
+
+			uvs.push_back(Vector2(float(i) / (pts.size() - 1), 1.0));
+			uvs.push_back(Vector2(float(i) / (pts.size() - 1), 0.0));
+
+			if (_add_uv2) {
+				uv2s.push_back(Vector2(_uv2_padding, 0.0));
+				uv2s.push_back(Vector2(_uv2_padding, 1.0));
+			}
+
+			indices.push_back(i * 2);
+			indices.push_back(i * 2 + 1);
+		}
+	}
+
+	if (indices.is_empty()) {
+		// If empty, add single triangle to suppress errors.
+		points.push_back(Vector3());
+		normals.push_back(Vector3());
+		uvs.push_back(Vector2());
+		tangents.push_back(1.0);
+		tangents.push_back(0.0);
+		tangents.push_back(0.0);
+		tangents.push_back(1.0);
+		indices.push_back(0);
+		indices.push_back(0);
+		indices.push_back(0);
+	}
+
+	p_arr[RS::ARRAY_VERTEX] = points;
+	p_arr[RS::ARRAY_NORMAL] = normals;
+	p_arr[RS::ARRAY_TANGENT] = tangents;
+	p_arr[RS::ARRAY_TEX_UV] = uvs;
+	if (_add_uv2) {
+		p_arr[RS::ARRAY_TEX_UV2] = uv2s;
+	}
+	p_arr[RS::ARRAY_INDEX] = indices;
+}
+
+void Curve3DMesh::_bind_methods() {
+	
+
+	ClassDB::bind_method(D_METHOD("set_width", "width"), &Curve3DMesh::set_width);
+	ClassDB::bind_method(D_METHOD("get_width"), &Curve3DMesh::get_width);
+
+	ClassDB::bind_method(D_METHOD("set_curve", "curve"), &Curve3DMesh::set_curve);
+	ClassDB::bind_method(D_METHOD("get_curve"), &Curve3DMesh::get_curve);
+
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "width", PROPERTY_HINT_RANGE, "0.001,1000.0,0.001,or_greater,exp"), "set_width", "get_width");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve3D"), "set_curve", "get_curve");
+	
+}
+
+void Curve3DMesh::set_width(const float p_width) {
+	if (width != p_width) {
+		width = p_width;
+		request_update();
+	}
+}
+
+float Curve3DMesh::get_width() const {
+	return width;
+}
+
+void Curve3DMesh::set_curve(const Ref<Curve3D> &p_curve) {
+	if (curve != p_curve) {
+
+		if ((curve != nullptr) && curve.is_valid()) {
+			curve->disconnect_changed(callable_mp(static_cast<PrimitiveMesh*>(this), (&PrimitiveMesh::request_update)));
+		}
+
+		curve = p_curve;
+
+		if (curve.is_valid()) {
+			curve->connect_changed(callable_mp(static_cast<PrimitiveMesh*>(this), (&PrimitiveMesh::request_update)));
+		}
+
+		request_update();
+	}
+}
+
+Ref<Curve3D> Curve3DMesh::get_curve() const {
+	return curve;
+}
+
+Curve3DMesh::Curve3DMesh() {
+	primitive_type = PRIMITIVE_TRIANGLE_STRIP;
+
+}
