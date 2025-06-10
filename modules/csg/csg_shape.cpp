@@ -2120,18 +2120,27 @@ CSGTorus3D::CSGTorus3D() {
 CSGBrush *CSGPolygon3D::_build_brush() {
 	CSGBrush *new_brush = memnew(CSGBrush);
 
+	bool flat_surface = false;
+
 	if (polygon.size() < 3) {
-		return new_brush;
+		flat_surface = true;
 	}
 
 	// Triangulate polygon shape.
 	Vector<Point2> shape_polygon = polygon;
-	if (Triangulate::get_area(shape_polygon) > 0) {
-		shape_polygon.reverse();
+
+	if(!flat_surface){
+		if (Triangulate::get_area(shape_polygon) > 0) {
+			shape_polygon.reverse();
+		}
 	}
+
 	int shape_sides = shape_polygon.size();
 	Vector<int> shape_faces = Geometry2D::triangulate_polygon(shape_polygon);
-	ERR_FAIL_COND_V_MSG(shape_faces.size() < 3, new_brush, "Failed to triangulate CSGPolygon. Make sure the polygon doesn't have any intersecting edges.");
+
+	if(!flat_surface) {
+		ERR_FAIL_COND_V_MSG(shape_faces.size() < 3, new_brush, "Failed to triangulate CSGPolygon. Make sure the polygon doesn't have any intersecting edges.");
+	}	
 
 	// Get polygon enclosing Rect2.
 	Rect2 shape_rect(shape_polygon[0], Vector2());
@@ -2196,6 +2205,10 @@ CSGBrush *CSGPolygon3D::_build_brush() {
 				extrusions -= 1;
 			}
 		} break;
+	}
+
+	if (flat_surface) {
+		end_count = 0;
 	}
 	int face_count = extrusions * extrusion_face_count + end_count * shape_face_count;
 
