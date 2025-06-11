@@ -3927,22 +3927,41 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 		PackedVector3Array pts = curve->get_baked_points();
 		PackedVector3Array fws = curve->get_baked_forward_vectors();
+		PackedFloat32Array tilts = curve->get_baked_tilts();
 
 		for (int i = 0; i < pts.size(); i++) {
 			Vector3 binormal = fws[i].cross(Vector3(0.0,1.0,0.0)).normalized();
+			binormal.rotate(fws[i], tilts[i]);
 
-			points.push_back(pts[i] + binormal * width);
-			points.push_back(pts[i] - binormal * width);
+			float local_width = 1.0;
+			float u = float(i) / (pts.size() - 1);
 
-			Vector3 normal = fws[i].cross(binormal).normalized();
+			if(width_curve.is_valid())
+			{
+				local_width = width_curve->sample(u);
+			}
+
+			points.push_back(pts[i] + binormal * width * local_width);
+			points.push_back(pts[i] - binormal * width * local_width);
+
+			Vector3 normal = -fws[i].cross(binormal).normalized();
 			normals.push_back(normal);
 			normals.push_back(normal);
 
 			ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
 			ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
+			
+			if(scale_UV_by_length){
+				u*= curve->get_baked_length();
+			}
+			
+			float v_offset = 0.5;
+			if(scale_UV_by_width){
+				v_offset *= local_width;
+			}
 
-			uvs.push_back(Vector2(float(i) / (pts.size() - 1), 1.0));
-			uvs.push_back(Vector2(float(i) / (pts.size() - 1), 0.0));
+			uvs.push_back(Vector2(u, 0.5 + v_offset));
+			uvs.push_back(Vector2(u, 0.5 - v_offset));
 
 			if (_add_uv2) {
 				uv2s.push_back(Vector2(_uv2_padding, 0.0));
@@ -3979,17 +3998,26 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 }
 
 void Curve3DMesh::_bind_methods() {
-	
+	ClassDB::bind_method(D_METHOD("set_curve", "curve"), &Curve3DMesh::set_curve);
+	ClassDB::bind_method(D_METHOD("get_curve"), &Curve3DMesh::get_curve);
 
 	ClassDB::bind_method(D_METHOD("set_width", "width"), &Curve3DMesh::set_width);
 	ClassDB::bind_method(D_METHOD("get_width"), &Curve3DMesh::get_width);
 
-	ClassDB::bind_method(D_METHOD("set_curve", "curve"), &Curve3DMesh::set_curve);
-	ClassDB::bind_method(D_METHOD("get_curve"), &Curve3DMesh::get_curve);
+	ClassDB::bind_method(D_METHOD("set_width_curve", "curve"), &Curve3DMesh::set_width_curve);
+	ClassDB::bind_method(D_METHOD("get_width_curve"), &Curve3DMesh::get_width_curve);
 
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "width", PROPERTY_HINT_RANGE, "0.0,2.0,0.001,or_greater"), "set_width", "get_width");
+	ClassDB::bind_method(D_METHOD("set_scale_UV_by_length", "scale_UV_by_length"), &Curve3DMesh::set_scale_UV_by_length);
+	ClassDB::bind_method(D_METHOD("is_scale_UV_by_length"), &Curve3DMesh::is_scale_UV_by_length);
+
+	ClassDB::bind_method(D_METHOD("set_scale_UV_by_width", "scale_UV_by_width"), &Curve3DMesh::set_scale_UV_by_width);
+	ClassDB::bind_method(D_METHOD("is_scale_UV_by_width"), &Curve3DMesh::is_scale_UV_by_width);
+
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve3D"), "set_curve", "get_curve");
-	
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "width", PROPERTY_HINT_RANGE, "0.0,2.0,0.001,or_greater"), "set_width", "get_width");	
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "width_curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve"), "set_width_curve", "get_width_curve");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "scale_UV_by_length"), "set_scale_UV_by_length", "is_scale_UV_by_length");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "scale_UV_by_width"), "set_scale_UV_by_width", "is_scale_UV_by_width");
 }
 
 void Curve3DMesh::set_width(const float p_width) {
@@ -4006,7 +4034,7 @@ float Curve3DMesh::get_width() const {
 void Curve3DMesh::set_curve(const Ref<Curve3D> &p_curve) {
 	if (curve != p_curve) {
 
-		if ((curve != nullptr) && curve.is_valid()) {
+		if (curve.is_valid()) {
 			curve->disconnect_changed(callable_mp(static_cast<PrimitiveMesh*>(this), (&PrimitiveMesh::request_update)));
 		}
 
@@ -4022,6 +4050,49 @@ void Curve3DMesh::set_curve(const Ref<Curve3D> &p_curve) {
 
 Ref<Curve3D> Curve3DMesh::get_curve() const {
 	return curve;
+}
+
+void Curve3DMesh::set_width_curve(const Ref<Curve> &p_curve) {
+	if (width_curve != p_curve) {
+
+		if (width_curve.is_valid()) {
+			width_curve->disconnect_changed(callable_mp(static_cast<PrimitiveMesh*>(this), (&PrimitiveMesh::request_update)));
+		}
+
+		width_curve = p_curve;
+
+		if (width_curve.is_valid()) {
+			width_curve->connect_changed(callable_mp(static_cast<PrimitiveMesh*>(this), (&PrimitiveMesh::request_update)));
+		}
+
+		request_update();
+	}
+}
+
+Ref<Curve> Curve3DMesh::get_width_curve() const {
+	return width_curve;
+}
+
+void Curve3DMesh::set_scale_UV_by_length(bool p_enable) {
+	if (scale_UV_by_length != p_enable) {
+		scale_UV_by_length = p_enable;
+		request_update();
+	}
+}
+
+bool Curve3DMesh::is_scale_UV_by_length() const {
+	return scale_UV_by_length;
+}
+
+void Curve3DMesh::set_scale_UV_by_width(bool p_enable) {
+	if (scale_UV_by_width != p_enable) {
+		scale_UV_by_width = p_enable;
+		request_update();
+	}
+}
+
+bool Curve3DMesh::is_scale_UV_by_width() const {
+	return scale_UV_by_width;
 }
 
 Curve3DMesh::Curve3DMesh() {

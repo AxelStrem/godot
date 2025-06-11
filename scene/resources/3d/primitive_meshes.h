@@ -420,8 +420,13 @@ class Curve3DMesh : public PrimitiveMesh {
 	GDCLASS(Curve3DMesh, PrimitiveMesh);
 
 private:
-	float width = 0.5;
 	Ref<Curve3D> curve;
+
+	float width = 0.5;
+	Ref<Curve> width_curve;
+
+	bool scale_UV_by_length = false;
+	bool scale_UV_by_width = false;
 
 protected:
 	static void _bind_methods();
@@ -435,6 +440,15 @@ public:
 
 	void set_curve(const Ref<Curve3D> &p_curve);
 	Ref<Curve3D> get_curve() const;
+
+	void set_width_curve(const Ref<Curve> &p_curve);
+	Ref<Curve> get_width_curve() const;
+
+	void set_scale_UV_by_length(bool p_enable);
+	bool is_scale_UV_by_length() const;
+
+	void set_scale_UV_by_width(bool p_enable);
+	bool is_scale_UV_by_width() const;
 
 	Curve3DMesh();
 };
