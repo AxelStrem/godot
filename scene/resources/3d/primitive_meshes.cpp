@@ -3922,12 +3922,87 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 	bool _add_uv2 = get_add_uv2();
 	float _uv2_padding = get_uv2_padding() * texel_size;
 
-	if(curve.is_valid())
+	if(curve.is_valid() && (curve->get_point_count() > 1))
 	{
+		PackedVector3Array pts;
+		PackedVector3Array fws;
+		PackedFloat32Array tilts;
+		PackedFloat32Array width_comps;
 
-		PackedVector3Array pts = curve->get_baked_points();
-		PackedVector3Array fws = curve->get_baked_forward_vectors();
-		PackedFloat32Array tilts = curve->get_baked_tilts();
+		int point_count = 0;
+		switch(tesselation_mode)
+		{
+			case TESSELATION_BAKED: {
+				pts = curve->get_baked_points();
+				tilts = curve->get_baked_tilts();
+				point_count = pts.size();
+				if(curve->is_closed()) {
+					point_count--;
+					pts.remove_at(point_count);
+					tilts.remove_at(point_count);
+				}
+			} break;
+			case TESSELATION_ADAPTIVE: {
+				pts = curve->tessellate(5, tesselation_tolerance);
+				point_count = pts.size();
+				if(curve->is_closed()) {
+					point_count--;
+					pts.remove_at(point_count);
+				}
+				for(int i=0;i<point_count;i++) {
+					float offset = curve->get_closest_offset(pts[i]);
+					tilts.push_back(curve->sample_baked_tilt(offset));
+				}
+			} break;
+			case TESSELATION_DISABLED: {
+				point_count = curve->get_point_count();
+				for(int i = 0; i < point_count; i++) {
+					pts.push_back(curve->get_point_position(i));
+					tilts.push_back(curve->get_point_tilt(i));
+				}
+			} break;
+		}	
+		// Calculate tangent for the first point
+		Vector3 prev = prev = pts[point_count - 1];
+		Vector3 next = pts[1];
+		Vector3 next_dir = (next - pts[0]).normalized();
+		Vector3 prev_dir = next_dir;
+		if(curve->is_closed()) {
+			prev_dir = (pts[0] - prev).normalized();
+		}
+		Vector3 dir = (next_dir + prev_dir).normalized();
+		fws.push_back(dir);
+		float width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
+		width_comps.push_back(width_compensation);
+
+		// Calculate tangents for the middle section
+		for(int i=1;i<point_count-1;i++) {
+			prev_dir = (pts[i] - pts[i-1]).normalized();
+			next_dir = (pts[i+1] - pts[i]).normalized();
+			dir = (next_dir + prev_dir).normalized();
+			fws.push_back(dir);
+			width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
+			width_comps.push_back(width_compensation);
+		}
+
+		// Calculate tangent for the last point
+		prev = pts[point_count - 2];
+		prev_dir = (pts[point_count - 1] - prev).normalized();
+		next_dir = prev_dir;
+		if(curve->is_closed()) {
+			next_dir = (pts[0] - pts[point_count - 1]).normalized();
+		}
+		dir = (next_dir + prev_dir).normalized();
+		fws.push_back(dir);
+		width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
+		width_comps.push_back(width_compensation);
+
+		if(curve->is_closed()) {
+			pts.push_back(pts[0]);
+			tilts.push_back(tilts[0]);
+			fws.push_back(fws[0]);
+			width_comps.push_back(width_comps[0]);
+		}		
 
 		for (int i = 0; i < pts.size(); i++) {
 			Vector3 binormal = fws[i].cross(Vector3(0.0,1.0,0.0)).normalized();
@@ -3941,16 +4016,11 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				local_width = width_curve->sample(u);
 			}
 
-			points.push_back(pts[i] + binormal * width * local_width);
-			points.push_back(pts[i] - binormal * width * local_width);
+			Vector3 spoke = binormal * width * local_width;
+			if(width_comps.size() > 0) {
+				spoke *= width_comps[i];
+			}
 
-			Vector3 normal = -fws[i].cross(binormal).normalized();
-			normals.push_back(normal);
-			normals.push_back(normal);
-
-			ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
-			ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
-			
 			if(scale_UV_by_length){
 				u*= curve->get_baked_length();
 			}
@@ -3960,16 +4030,76 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				v_offset *= local_width;
 			}
 
-			uvs.push_back(Vector2(u, 0.5 + v_offset));
-			uvs.push_back(Vector2(u, 0.5 - v_offset));
+			Vector3 normal = -fws[i].cross(binormal).normalized();
 
-			if (_add_uv2) {
-				uv2s.push_back(Vector2(_uv2_padding, 0.0));
-				uv2s.push_back(Vector2(_uv2_padding, 1.0));
+			bool skip_even = interleave_vertices && (i % 2 == 1);
+			bool skip_odd = interleave_vertices && (i % 2 == 0);
+
+			if(!curve->is_closed()) {
+				if((i <= 1) || (i >= pts.size() - 1)) {
+					skip_even = false;
+				}
+				if((i <= 0) || (i >= pts.size() - 2)) {
+					skip_odd = false;
+				}
 			}
 
-			indices.push_back(i * 2);
-			indices.push_back(i * 2 + 1);
+			if(!skip_even) {
+				points.push_back(pts[i] + spoke);
+				uvs.push_back(Vector2(u, 0.5 + v_offset));
+				if(_add_uv2) {
+					uv2s.push_back(Vector2(_uv2_padding, 0.0));
+				}
+				normals.push_back(normal);
+				ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
+			}
+
+			if(!skip_odd) {
+				points.push_back(pts[i] - spoke);
+				uvs.push_back(Vector2(u, 0.5 - v_offset));
+				if(_add_uv2) {
+					uv2s.push_back(Vector2(_uv2_padding, 1.0));
+				}
+				normals.push_back(normal);
+				ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
+			}
+		}
+
+		for(int i=0; i < points.size() - 3; i++){
+			if(i%2==0) {
+				indices.push_back(i);
+				indices.push_back(i + 1);
+				indices.push_back(i + 2);
+			}
+			else {
+				indices.push_back(i);
+				indices.push_back(i + 2);
+				indices.push_back(i + 1);
+			}
+		}
+
+
+		// TODO: Simplify this.
+		if(curve->is_closed()){
+			int i = points.size() - 4;
+			indices.push_back(i);
+			indices.push_back(i + 1);
+			indices.push_back(0);
+
+			indices.push_back(i + 1);
+			indices.push_back(1);
+			indices.push_back(0);
+		}
+		else
+		{
+			int i = points.size() - 4;
+			indices.push_back(i);
+			indices.push_back(i + 1);
+			indices.push_back(i + 2);
+
+			indices.push_back(i + 1);
+			indices.push_back(i + 3);
+			indices.push_back(i + 2);
 		}
 	}
 
@@ -4007,17 +4137,33 @@ void Curve3DMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_width_curve", "curve"), &Curve3DMesh::set_width_curve);
 	ClassDB::bind_method(D_METHOD("get_width_curve"), &Curve3DMesh::get_width_curve);
 
-	ClassDB::bind_method(D_METHOD("set_scale_UV_by_length", "scale_UV_by_length"), &Curve3DMesh::set_scale_UV_by_length);
-	ClassDB::bind_method(D_METHOD("is_scale_UV_by_length"), &Curve3DMesh::is_scale_UV_by_length);
+	ClassDB::bind_method(D_METHOD("set_scale_uv_by_length", "scale_uv_by_length"), &Curve3DMesh::set_scale_UV_by_length);
+	ClassDB::bind_method(D_METHOD("is_scale_uv_by_length"), &Curve3DMesh::is_scale_UV_by_length);
 
-	ClassDB::bind_method(D_METHOD("set_scale_UV_by_width", "scale_UV_by_width"), &Curve3DMesh::set_scale_UV_by_width);
-	ClassDB::bind_method(D_METHOD("is_scale_UV_by_width"), &Curve3DMesh::is_scale_UV_by_width);
+	ClassDB::bind_method(D_METHOD("set_scale_uv_by_width", "scale_uv_by_width"), &Curve3DMesh::set_scale_UV_by_width);
+	ClassDB::bind_method(D_METHOD("is_scale_uv_by_width"), &Curve3DMesh::is_scale_UV_by_width);
+
+	ClassDB::bind_method(D_METHOD("set_tesselation_mode", "mode"), &Curve3DMesh::set_tesselation_mode);
+	ClassDB::bind_method(D_METHOD("get_tesselation_mode"), &Curve3DMesh::get_tesselation_mode);
+
+	ClassDB::bind_method(D_METHOD("set_tesselation_tolerance", "tolerance"), &Curve3DMesh::set_tesselation_tolerance);
+	ClassDB::bind_method(D_METHOD("get_tesselation_tolerance"), &Curve3DMesh::get_tesselation_tolerance);
+
+	ClassDB::bind_method(D_METHOD("set_interleave_vertices", "enable"), &Curve3DMesh::set_interleave_vertices);
+	ClassDB::bind_method(D_METHOD("is_interleave_vertices"), &Curve3DMesh::is_interleave_vertices);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve3D"), "set_curve", "get_curve");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "width", PROPERTY_HINT_RANGE, "0.0,2.0,0.001,or_greater"), "set_width", "get_width");	
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "width_curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve"), "set_width_curve", "get_width_curve");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "scale_UV_by_length"), "set_scale_UV_by_length", "is_scale_UV_by_length");
-	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "scale_UV_by_width"), "set_scale_UV_by_width", "is_scale_UV_by_width");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "tesselation_mode", PROPERTY_HINT_ENUM, "Adaptive,Baked,Disabled"), "set_tesselation_mode", "get_tesselation_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tesselation_tolerance", PROPERTY_HINT_RANGE, "0.001,1.0,0.001,or_greater,suffix:m"), "set_tesselation_tolerance", "get_tesselation_tolerance");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "interleave_vertices", PROPERTY_HINT_NONE, "hint_tooltip:Interleave vertices to reduce vertex count."), "set_interleave_vertices", "is_interleave_vertices");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "scale_uv_by_length"), "set_scale_uv_by_length", "is_scale_uv_by_length");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "scale_uv_by_width"), "set_scale_uv_by_width", "is_scale_uv_by_width");
+	
+
+	BIND_ENUM_CONSTANT(TESSELATION_BAKED);
+	BIND_ENUM_CONSTANT(TESSELATION_DISABLED);
 }
 
 void Curve3DMesh::set_width(const float p_width) {
@@ -4095,7 +4241,40 @@ bool Curve3DMesh::is_scale_UV_by_width() const {
 	return scale_UV_by_width;
 }
 
-Curve3DMesh::Curve3DMesh() {
-	primitive_type = PRIMITIVE_TRIANGLE_STRIP;
+bool Curve3DMesh::is_interleave_vertices() const {
+	return interleave_vertices;
+}
 
+void Curve3DMesh::set_interleave_vertices(bool p_enable) {
+	if (interleave_vertices != p_enable) {
+		interleave_vertices = p_enable;
+		request_update();
+	}
+}
+
+void Curve3DMesh::set_tesselation_mode(TesselationMode p_mode) {
+	if (tesselation_mode != p_mode) {
+		tesselation_mode = p_mode;
+		request_update();
+	}
+}
+
+Curve3DMesh::TesselationMode Curve3DMesh::get_tesselation_mode() const {
+	return tesselation_mode;
+}
+
+void Curve3DMesh::set_tesselation_tolerance(float p_tolerance) {
+	if (tesselation_tolerance != p_tolerance) {
+		tesselation_tolerance = MAX(p_tolerance, 0.001);
+		request_update();
+	}
+}
+
+float Curve3DMesh::get_tesselation_tolerance() const {
+	return tesselation_tolerance;
+}
+
+
+
+Curve3DMesh::Curve3DMesh() {
 }

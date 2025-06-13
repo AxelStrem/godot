@@ -419,11 +419,23 @@ public:
 class Curve3DMesh : public PrimitiveMesh {
 	GDCLASS(Curve3DMesh, PrimitiveMesh);
 
+public:
+	enum TesselationMode {
+		TESSELATION_ADAPTIVE,
+		TESSELATION_BAKED,
+		TESSELATION_DISABLED
+	};
+
 private:
 	Ref<Curve3D> curve;
 
 	float width = 0.5;
 	Ref<Curve> width_curve;
+
+	TesselationMode tesselation_mode = TESSELATION_BAKED; 
+	float tesselation_tolerance = 0.2;
+
+	bool interleave_vertices = true;
 
 	bool scale_UV_by_length = false;
 	bool scale_UV_by_width = false;
@@ -450,8 +462,19 @@ public:
 	void set_scale_UV_by_width(bool p_enable);
 	bool is_scale_UV_by_width() const;
 
+	bool is_interleave_vertices() const;
+	void set_interleave_vertices(bool p_enable);
+
+	void set_tesselation_mode(TesselationMode p_mode);
+	TesselationMode get_tesselation_mode() const;
+
+	void set_tesselation_tolerance(float p_tolerance);
+	float get_tesselation_tolerance() const;
+
 	Curve3DMesh();
 };
+
+VARIANT_ENUM_CAST(Curve3DMesh::TesselationMode)
 
 /**
 	A single point for use in particle systems
