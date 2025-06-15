@@ -4004,8 +4004,15 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			width_comps.push_back(width_comps[0]);
 		}		
 
+		int radial_segments = 1;
+		float segment_angle = Math_PI;
+		if (profile == PROFILE_CROSS) {
+			radial_segments = segments;
+			segment_angle = Math_PI / radial_segments;
+		}
+
 		for (int i = 0; i < pts.size(); i++) {
-			Vector3 binormal = fws[i].cross(Vector3(0.0,1.0,0.0)).normalized();
+			Vector3 binormal = fws[i].cross(up_vector).normalized();
 			binormal.rotate(fws[i], tilts[i]);
 
 			float local_width = 1.0;
@@ -4017,9 +4024,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}
 
 			Vector3 spoke = binormal * width * local_width;
-			if(width_comps.size() > 0) {
-				spoke *= width_comps[i];
-			}
 
 			if(scale_UV_by_length){
 				u*= curve->get_baked_length();
@@ -4045,42 +4049,92 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}
 
 			if(!skip_even) {
-				points.push_back(pts[i] + spoke);
-				uvs.push_back(Vector2(u, 0.5 + v_offset));
-				if(_add_uv2) {
-					uv2s.push_back(Vector2(_uv2_padding, 0.0));
+				for(int j=0; j < radial_segments; j++) {
+					float angle = j * segment_angle;
+					Vector3 spoke_rotated = spoke.rotated(fws[i], angle);
+					Vector3 normal_rotated = normal.rotated(fws[i], angle);
+					if(width_comps.size() > 0) {
+						float stretched_component = spoke_rotated.dot(binormal);
+						float fixed_component = spoke_rotated.dot(normal);
+						spoke_rotated = width_comps[i]*stretched_component*binormal + fixed_component*normal;
+					}
+					points.push_back(pts[i] + spoke_rotated);
+					uvs.push_back(Vector2(u, 0.5 + v_offset));
+					if(_add_uv2) {
+						uv2s.push_back(Vector2(_uv2_padding, 0.0));
+					}
+					normals.push_back(normal_rotated);
+					ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
 				}
-				normals.push_back(normal);
-				ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
 			}
 
 			if(!skip_odd) {
-				points.push_back(pts[i] - spoke);
-				uvs.push_back(Vector2(u, 0.5 - v_offset));
-				if(_add_uv2) {
-					uv2s.push_back(Vector2(_uv2_padding, 1.0));
+				for(int j=0; j < radial_segments; j++) {
+					float angle = j * segment_angle;
+					Vector3 spoke_rotated = spoke.rotated(fws[i], angle);
+					Vector3 normal_rotated = normal.rotated(fws[i], angle);
+					if(width_comps.size() > 0) {
+						float stretched_component = spoke_rotated.dot(binormal);
+						float fixed_component = spoke_rotated.dot(normal);
+						spoke_rotated = width_comps[i]*stretched_component*binormal + fixed_component*normal;
+					}
+					points.push_back(pts[i] - spoke_rotated);
+					uvs.push_back(Vector2(u, 0.5 - v_offset));
+					if(_add_uv2) {
+						uv2s.push_back(Vector2(_uv2_padding, 1.0));
+					}
+					normals.push_back(normal_rotated);
+					ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
 				}
-				normals.push_back(normal);
-				ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
 			}
 		}
 
-		for(int i=0; i < points.size() - 3; i++){
-			if(i%2==0) {
-				indices.push_back(i);
-				indices.push_back(i + 1);
-				indices.push_back(i + 2);
+		int face_count = points.size() / radial_segments;
+		for(int i=0; i < face_count - 4; i++){
+			for(int j=0; j < radial_segments; j++) {
+				if(i%2==0) {
+					indices.push_back(i*radial_segments + j);
+					indices.push_back((i + 1)*radial_segments + j);
+					indices.push_back((i + 2)*radial_segments + j);
+				}
+				else {
+					indices.push_back(i*radial_segments + j);
+					indices.push_back((i + 2)*radial_segments + j);
+					indices.push_back((i + 1)*radial_segments + j);
+				}
 			}
-			else {
-				indices.push_back(i);
-				indices.push_back(i + 2);
-				indices.push_back(i + 1);
+		}
+
+		if(curve->is_closed()) {
+			// Add faces for the last segment.
+			int i = face_count - 4;
+			for(int j=0; j < radial_segments; j++) {
+				indices.push_back(i*radial_segments + j);
+				indices.push_back((i + 1)*radial_segments + j);
+				indices.push_back(j);
+
+				indices.push_back((i + 1)*radial_segments + j);
+				indices.push_back(radial_segments + j);
+				indices.push_back(j);
+			}
+		}
+		else
+		{
+			int i = face_count - 4;
+			for(int j=0; j < radial_segments; j++) {
+				indices.push_back(i*radial_segments + j);
+				indices.push_back((i + 1)*radial_segments + j);
+				indices.push_back((i + 2)*radial_segments + j);
+
+				indices.push_back((i + 1)*radial_segments + j);
+				indices.push_back((i + 3)*radial_segments + j);
+				indices.push_back((i + 2)*radial_segments + j);
 			}
 		}
 
 
 		// TODO: Simplify this.
-		if(curve->is_closed()){
+		/*if(curve->is_closed()){
 			int i = points.size() - 4;
 			indices.push_back(i);
 			indices.push_back(i + 1);
@@ -4100,7 +4154,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			indices.push_back(i + 1);
 			indices.push_back(i + 3);
 			indices.push_back(i + 2);
-		}
+		}*/
 	}
 
 	if (indices.is_empty()) {
@@ -4152,18 +4206,33 @@ void Curve3DMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_interleave_vertices", "enable"), &Curve3DMesh::set_interleave_vertices);
 	ClassDB::bind_method(D_METHOD("is_interleave_vertices"), &Curve3DMesh::is_interleave_vertices);
 
+	ClassDB::bind_method(D_METHOD("set_up_vector", "up_vector"), &Curve3DMesh::set_up_vector);
+	ClassDB::bind_method(D_METHOD("get_up_vector"), &Curve3DMesh::get_up_vector);
+
+	ClassDB::bind_method(D_METHOD("set_profile", "profile"), &Curve3DMesh::set_profile);
+	ClassDB::bind_method(D_METHOD("get_profile"), &Curve3DMesh::get_profile);
+	ClassDB::bind_method(D_METHOD("set_segments", "segments"), &Curve3DMesh::set_segments);
+	ClassDB::bind_method(D_METHOD("get_segments"), &Curve3DMesh::get_segments);
+
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve3D"), "set_curve", "get_curve");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "width", PROPERTY_HINT_RANGE, "0.0,2.0,0.001,or_greater"), "set_width", "get_width");	
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "width_curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve"), "set_width_curve", "get_width_curve");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "profile", PROPERTY_HINT_ENUM, "Flat,Cross,Tube"), "set_profile", "get_profile");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "segments", PROPERTY_HINT_RANGE, "2,100,1,or_greater"), "set_segments", "get_segments");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "up_vector", PROPERTY_HINT_NONE, "hint_tooltip:Up vector for the curve."), "set_up_vector", "get_up_vector");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "tesselation_mode", PROPERTY_HINT_ENUM, "Adaptive,Baked,Disabled"), "set_tesselation_mode", "get_tesselation_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tesselation_tolerance", PROPERTY_HINT_RANGE, "0.001,1.0,0.001,or_greater,suffix:m"), "set_tesselation_tolerance", "get_tesselation_tolerance");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "interleave_vertices", PROPERTY_HINT_NONE, "hint_tooltip:Interleave vertices to reduce vertex count."), "set_interleave_vertices", "is_interleave_vertices");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "scale_uv_by_length"), "set_scale_uv_by_length", "is_scale_uv_by_length");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "scale_uv_by_width"), "set_scale_uv_by_width", "is_scale_uv_by_width");
 	
-
 	BIND_ENUM_CONSTANT(TESSELATION_BAKED);
 	BIND_ENUM_CONSTANT(TESSELATION_DISABLED);
+	BIND_ENUM_CONSTANT(TESSELATION_ADAPTIVE);
+
+	BIND_ENUM_CONSTANT(PROFILE_FLAT);
+	BIND_ENUM_CONSTANT(PROFILE_CROSS);
+	BIND_ENUM_CONSTANT(PROFILE_TUBE);
 }
 
 void Curve3DMesh::set_width(const float p_width) {
@@ -4274,7 +4343,38 @@ float Curve3DMesh::get_tesselation_tolerance() const {
 	return tesselation_tolerance;
 }
 
+void Curve3DMesh::set_up_vector(const Vector3 &p_up_vector) {
+	if (up_vector != p_up_vector) {
+		up_vector = p_up_vector;
+		request_update();
+	}
+}
 
+Vector3 Curve3DMesh::get_up_vector() const {
+	return up_vector;
+}
+
+void Curve3DMesh::set_profile(Profile p_profile) {
+	if (profile != p_profile) {
+		profile = p_profile;
+		request_update();
+	}
+}
+
+Curve3DMesh::Profile Curve3DMesh::get_profile() const {
+	return profile;
+}	
+
+void Curve3DMesh::set_segments(int p_segments) {
+	if (segments != p_segments) {
+		segments = MAX(p_segments, 2);
+		request_update();
+	}
+}
+
+int Curve3DMesh::get_segments() const {
+	return segments;
+}
 
 Curve3DMesh::Curve3DMesh() {
 }

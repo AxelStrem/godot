@@ -426,6 +426,12 @@ public:
 		TESSELATION_DISABLED
 	};
 
+	enum Profile {
+		PROFILE_FLAT,
+		PROFILE_CROSS,
+		PROFILE_TUBE
+	};
+
 private:
 	Ref<Curve3D> curve;
 
@@ -434,6 +440,11 @@ private:
 
 	TesselationMode tesselation_mode = TESSELATION_BAKED; 
 	float tesselation_tolerance = 0.2;
+
+	Vector3 up_vector = Vector3(0.0, 1.0, 0.0);
+
+	Profile profile = PROFILE_FLAT;
+	int segments = 2;
 
 	bool interleave_vertices = true;
 
@@ -471,10 +482,20 @@ public:
 	void set_tesselation_tolerance(float p_tolerance);
 	float get_tesselation_tolerance() const;
 
+	void set_up_vector(const Vector3 &p_up_vector);
+	Vector3 get_up_vector() const;
+
+	void set_profile(Profile p_profile);
+	Profile get_profile() const;
+
+	void set_segments(int p_segments);
+	int get_segments() const;
+
 	Curve3DMesh();
 };
 
 VARIANT_ENUM_CAST(Curve3DMesh::TesselationMode)
+VARIANT_ENUM_CAST(Curve3DMesh::Profile)
 
 /**
 	A single point for use in particle systems
