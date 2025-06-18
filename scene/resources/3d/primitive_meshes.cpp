@@ -3922,19 +3922,26 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 	bool _add_uv2 = get_add_uv2();
 	float _uv2_padding = get_uv2_padding() * texel_size;
 
+
 	if(curve.is_valid() && (curve->get_point_count() > 1))
 	{
 		PackedVector3Array pts;
 		PackedVector3Array fws;
 		PackedFloat32Array tilts;
 		PackedFloat32Array width_comps;
+		PackedVector3Array ups;
 
+		// UP vector is not calculated correctly for the first point if the curve is closed
+		// UP vector should be calculated manually for every point for TESSELATION_ADAPTIVE and TESSELATION_DISABLED modes 
+		//(look up how its done in Curve3D::get_baked_up_vectors()
+		
 		int point_count = 0;
 		switch(tesselation_mode)
 		{
 			case TESSELATION_BAKED: {
 				pts = curve->get_baked_points();
 				tilts = curve->get_baked_tilts();
+				
 				point_count = pts.size();
 				if(curve->is_closed()) {
 					point_count--;
@@ -3952,6 +3959,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				for(int i=0;i<point_count;i++) {
 					float offset = curve->get_closest_offset(pts[i]);
 					tilts.push_back(curve->sample_baked_tilt(offset));
+					
 				}
 			} break;
 			case TESSELATION_DISABLED: {
@@ -3959,6 +3967,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				for(int i = 0; i < point_count; i++) {
 					pts.push_back(curve->get_point_position(i));
 					tilts.push_back(curve->get_point_tilt(i));
+					
 				}
 			} break;
 		}	
@@ -3971,7 +3980,12 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			prev_dir = (pts[0] - prev).normalized();
 		}
 		Vector3 dir = (next_dir + prev_dir).normalized();
+		
 		fws.push_back(dir);
+		ups.push_back(up_vector.slide(next_dir).normalized());
+
+		next_dir = next_dir.slide(up_vector);
+		prev_dir = prev_dir.slide(up_vector);
 		float width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 		width_comps.push_back(width_compensation);
 
@@ -3980,8 +3994,13 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			prev_dir = (pts[i] - pts[i-1]).normalized();
 			next_dir = (pts[i+1] - pts[i]).normalized();
 			dir = (next_dir + prev_dir).normalized();
+		
 			fws.push_back(dir);
-			width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
+			ups.push_back(up_vector.slide(next_dir).normalized());
+			
+			next_dir = next_dir.slide(up_vector);
+			prev_dir = prev_dir.slide(up_vector);
+			width_compensation =  sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 			width_comps.push_back(width_compensation);
 		}
 
@@ -3993,14 +4012,23 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			next_dir = (pts[0] - pts[point_count - 1]).normalized();
 		}
 		dir = (next_dir + prev_dir).normalized();
+		
 		fws.push_back(dir);
+		ups.push_back(up_vector.slide(next_dir).normalized());
+
+		next_dir = next_dir.slide(up_vector);
+		prev_dir = prev_dir.slide(up_vector);
 		width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 		width_comps.push_back(width_compensation);
 
 		if(curve->is_closed()) {
+			// TODO: simplify this
+			// If the curve is closed, we don't need to duplicate anything actuallym just remove this and update everything else.
+
 			pts.push_back(pts[0]);
 			tilts.push_back(tilts[0]);
 			fws.push_back(fws[0]);
+			ups.push_back(ups[0]);
 			width_comps.push_back(width_comps[0]);
 		}		
 
@@ -4010,10 +4038,51 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			radial_segments = segments;
 			segment_angle = Math_PI / radial_segments;
 		}
+		else if (profile == PROFILE_TUBE) {
+			if ((segments % 2) == 0) {
+				radial_segments = segments / 2;
+				segment_angle = Math_PI / radial_segments;
+			} else {
+				radial_segments = segments;
+				segment_angle = Math_PI * 2.0 / radial_segments;
+			}
+		}
 
 		for (int i = 0; i < pts.size(); i++) {
-			Vector3 binormal = fws[i].cross(up_vector).normalized();
+			int pri = i - 1;
+			if (pri < 0) {
+				if(curve->is_closed()) {
+					pri = pts.size() - 1;
+				} else {
+					pri = 0;
+				}
+			}
+			int ni = i+1;
+			if (ni >= pts.size()) {
+				if(curve->is_closed()) {
+					ni = 0;
+				} else {
+					ni = pts.size() - 1;
+				}
+			}
+
+
+			Vector3 up = ups[i];
+
+			Vector3 binormal = fws[i].cross(up);
+
+			//if (up.dot(up_prev) < 0.9999)
+			//{
+			//	Vector3 binormal_corrected = up.cross(up_prev);
+			//	binormal = (binormal.dot(binormal_corrected) < 0.0) ? -binormal_corrected : binormal_corrected;
+			//}
+
+			binormal.normalize();
 			binormal.rotate(fws[i], tilts[i]);
+
+			Vector3 dir = pts[i] - pts[pri];
+			Vector3 dv = dir.cross(binormal);
+			dv = dv.cross(dir);
 
 			float local_width = 1.0;
 			float u = float(i) / (pts.size() - 1);
@@ -4036,33 +4105,55 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 			Vector3 normal = -fws[i].cross(binormal).normalized();
 
-			bool skip_even = interleave_vertices && (i % 2 == 1);
-			bool skip_odd = interleave_vertices && (i % 2 == 0);
+			bool skip_even, skip_odd;
+			
+			if(profile != PROFILE_TUBE) {
+				skip_even = interleave_vertices && (i % 2 == 1);
+				skip_odd = interleave_vertices && (i % 2 == 0);
 
-			if(!curve->is_closed()) {
-				if((i <= 1) || (i >= pts.size() - 1)) {
-					skip_even = false;
+				if(!curve->is_closed()) {
+					if((i <= 1) || (i >= pts.size() - 1)) {
+						skip_even = false;
+					}
+					if((i <= 0) || (i >= pts.size() - 2)) {
+						skip_odd = false;
+					}
 				}
-				if((i <= 0) || (i >= pts.size() - 2)) {
+			} 
+			else {
+				skip_even = false;
+				skip_odd = true;
+				if((segments%2)==0) {
 					skip_odd = false;
 				}
+			}
+
+			float dvl = dv.length_squared();
+			float wc = 1.0;
+			if (dvl > CMP_EPSILON) {
+				wc = sqrt(dvl) / dv.dot(binormal);
 			}
 
 			if(!skip_even) {
 				for(int j=0; j < radial_segments; j++) {
 					float angle = j * segment_angle;
 					Vector3 spoke_rotated = spoke.rotated(fws[i], angle);
-					Vector3 normal_rotated = normal.rotated(fws[i], angle);
 					if(width_comps.size() > 0) {
 						float stretched_component = spoke_rotated.dot(binormal);
 						float fixed_component = spoke_rotated.dot(normal);
-						spoke_rotated = width_comps[i]*stretched_component*binormal + fixed_component*normal;
+						float wc = width_comps[i];
+						//wc =  sqrt(2.0/(1.0 + tesselation_tolerance*dv.dot(binormal)));
+						
+						//wc = 1.0/(dv.dot(binormal));
+						spoke_rotated = wc*stretched_component*binormal + fixed_component*normal;
 					}
 					points.push_back(pts[i] + spoke_rotated);
 					uvs.push_back(Vector2(u, 0.5 + v_offset));
 					if(_add_uv2) {
 						uv2s.push_back(Vector2(_uv2_padding, 0.0));
 					}
+					Vector3 normal_rotated = (profile == PROFILE_TUBE) ? -binormal : normal;
+					normal_rotated.rotate(fws[i], angle);
 					normals.push_back(normal_rotated);
 					ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
 				}
@@ -4072,63 +4163,96 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				for(int j=0; j < radial_segments; j++) {
 					float angle = j * segment_angle;
 					Vector3 spoke_rotated = spoke.rotated(fws[i], angle);
-					Vector3 normal_rotated = normal.rotated(fws[i], angle);
 					if(width_comps.size() > 0) {
 						float stretched_component = spoke_rotated.dot(binormal);
 						float fixed_component = spoke_rotated.dot(normal);
-						spoke_rotated = width_comps[i]*stretched_component*binormal + fixed_component*normal;
+						spoke_rotated = wc*stretched_component*binormal + fixed_component*normal;
 					}
 					points.push_back(pts[i] - spoke_rotated);
 					uvs.push_back(Vector2(u, 0.5 - v_offset));
 					if(_add_uv2) {
 						uv2s.push_back(Vector2(_uv2_padding, 1.0));
 					}
+					Vector3 normal_rotated = (profile == PROFILE_TUBE) ? binormal : normal;
+					normal_rotated.rotate(fws[i], angle);
 					normals.push_back(normal_rotated);
 					ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
 				}
 			}
 		}
 
-		int face_count = points.size() / radial_segments;
-		for(int i=0; i < face_count - 4; i++){
-			for(int j=0; j < radial_segments; j++) {
-				if(i%2==0) {
-					indices.push_back(i*radial_segments + j);
-					indices.push_back((i + 1)*radial_segments + j);
-					indices.push_back((i + 2)*radial_segments + j);
-				}
-				else {
-					indices.push_back(i*radial_segments + j);
-					indices.push_back((i + 2)*radial_segments + j);
-					indices.push_back((i + 1)*radial_segments + j);
+		
+		if(profile != PROFILE_TUBE){
+			int face_count = points.size() / radial_segments;
+			for(int i=0; i < face_count - 4; i++){
+				for(int j=0; j < radial_segments; j++) {
+					if(i%2==0) {
+						indices.push_back(i*radial_segments + j);
+						indices.push_back((i + 1)*radial_segments + j);
+						indices.push_back((i + 2)*radial_segments + j);
+					}
+					else {
+						indices.push_back(i*radial_segments + j);
+						indices.push_back((i + 2)*radial_segments + j);
+						indices.push_back((i + 1)*radial_segments + j);
+					}
 				}
 			}
-		}
 
-		if(curve->is_closed()) {
-			// Add faces for the last segment.
-			int i = face_count - 4;
-			for(int j=0; j < radial_segments; j++) {
-				indices.push_back(i*radial_segments + j);
-				indices.push_back((i + 1)*radial_segments + j);
-				indices.push_back(j);
+			if(curve->is_closed()) {
+				// Add faces for the last segment.
+				int i = face_count - 4;
+				for(int j=0; j < radial_segments; j++) {
+					indices.push_back(i*radial_segments + j);
+					indices.push_back((i + 1)*radial_segments + j);
+					indices.push_back(j);
 
-				indices.push_back((i + 1)*radial_segments + j);
-				indices.push_back(radial_segments + j);
-				indices.push_back(j);
+					indices.push_back((i + 1)*radial_segments + j);
+					indices.push_back(radial_segments + j);
+					indices.push_back(j);
+				}
+			}
+			else
+			{
+				int i = face_count - 4;
+				for(int j=0; j < radial_segments; j++) {
+					indices.push_back(i*radial_segments + j);
+					indices.push_back((i + 1)*radial_segments + j);
+					indices.push_back((i + 2)*radial_segments + j);
+
+					indices.push_back((i + 1)*radial_segments + j);
+					indices.push_back((i + 3)*radial_segments + j);
+					indices.push_back((i + 2)*radial_segments + j);
+				}
 			}
 		}
 		else
 		{
-			int i = face_count - 4;
-			for(int j=0; j < radial_segments; j++) {
-				indices.push_back(i*radial_segments + j);
-				indices.push_back((i + 1)*radial_segments + j);
-				indices.push_back((i + 2)*radial_segments + j);
+			int face_count = points.size() / segments;
+			for(int i=0; i < face_count - 2; i++){
+				for(int j=0; j < segments; j++) {
+						int next_j = (j + 1) % segments;					
+						indices.push_back(i*segments + j);
+						indices.push_back(i*segments + next_j);
+						indices.push_back((i+1)*segments + j);
+				
+						indices.push_back(i*segments + next_j);
+						indices.push_back((i+1)*segments + next_j);
+						indices.push_back((i+1)*segments + j);
+					}
+			}
 
-				indices.push_back((i + 1)*radial_segments + j);
-				indices.push_back((i + 3)*radial_segments + j);
-				indices.push_back((i + 2)*radial_segments + j);
+			int i = face_count - 2;
+			int next_i = (curve->is_closed()) ? 0 : (face_count - 1);
+			for(int j=0; j < segments; j++) {
+				int next_j = (j + 1) % segments;	
+				indices.push_back(i*segments + j);
+				indices.push_back(i*segments + next_j);
+				indices.push_back(next_i*segments + j);
+		
+				indices.push_back(i*segments + next_j);
+				indices.push_back(next_i*segments + next_j);
+				indices.push_back(next_i*segments + j);
 			}
 		}
 
