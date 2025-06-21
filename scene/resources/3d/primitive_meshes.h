@@ -447,6 +447,7 @@ private:
 	int segments = 2;
 
 	bool interleave_vertices = true;
+	bool filter_overlaps = true;
 
 	bool scale_UV_by_length = false;
 	bool scale_UV_by_width = false;
@@ -475,6 +476,9 @@ public:
 
 	bool is_interleave_vertices() const;
 	void set_interleave_vertices(bool p_enable);
+
+	bool is_filter_overlaps() const;
+	void set_filter_overlaps(bool p_enable);
 
 	void set_tesselation_mode(TesselationMode p_mode);
 	TesselationMode get_tesselation_mode() const;

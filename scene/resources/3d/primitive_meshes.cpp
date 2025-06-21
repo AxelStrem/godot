@@ -3930,6 +3930,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		PackedFloat32Array tilts;
 		PackedFloat32Array width_comps;
 		PackedVector3Array ups;
+		PackedByteArray flags;
 
 		// UP vector is not calculated correctly for the first point if the curve is closed
 		// UP vector should be calculated manually for every point for TESSELATION_ADAPTIVE and TESSELATION_DISABLED modes 
@@ -3973,6 +3974,22 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				}
 			} break;
 		}	
+
+		// Calculate which points are key points
+		// Very inefficient, but requires exposing more of the Curve3D to improve
+		// Key points can't be interleaved or filtered out
+		int key_point = 0;
+		PackedVector3Array key_points = curve->get_points();
+		for(int i=0;i<point_count;i++) {
+			if((key_point < curve->get_point_count()) && 
+				((pts[i] - curve->get_point_position(key_point)).length_squared() < 0.0001)) {
+					flags.push_back(1);
+					key_point++;
+				} else {
+					flags.push_back(0);
+				}
+		}
+
 		// Calculate tangent for the first point
 		Vector3 prev = prev = pts[point_count - 1];
 		Vector3 next = pts[1];
@@ -4025,13 +4042,14 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 		if(curve->is_closed()) {
 			// TODO: simplify this
-			// If the curve is closed, we don't need to duplicate anything actuallym just remove this and update everything else.
+			// If the curve is closed, we don't need to duplicate anything actually, just remove this and update everything else.
 
 			pts.push_back(pts[0]);
 			tilts.push_back(tilts[0]);
 			fws.push_back(fws[0]);
 			ups.push_back(ups[0]);
 			width_comps.push_back(width_comps[0]);
+			flags.push_back(flags[0]);
 		}		
 
 		int radial_segments = 1;
@@ -4049,6 +4067,10 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				segment_angle = Math_PI * 2.0 / radial_segments;
 			}
 		}
+
+		Vector3 prev_spoke = Vector3();
+		Vector3 prev_pos = pts[0];
+		float spoke_direction = 1.0;
 
 		for (int i = 0; i < pts.size(); i++) {
 			int pri = i - 1;
@@ -4096,6 +4118,20 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 			Vector3 spoke = binormal * width * local_width;
 
+			if(filter_overlaps) {
+				Vector3 spoke_diff = spoke - prev_spoke;
+				Vector3 pos_diff = pts[i] - prev_pos;
+				if ((pos_diff.dot(pos_diff + spoke_diff) < 0.0) || (pos_diff.dot(pos_diff - spoke_diff) < 0.0)) {
+					if(flags[i]!=1) {
+						// If this is not a key point, skip it.
+						continue;
+					}
+					
+				}
+				prev_spoke = spoke;
+				prev_pos = pts[i];
+			}
+
 			if(scale_UV_by_length){
 				u*= curve->get_baked_length();
 			}
@@ -4107,26 +4143,20 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 			Vector3 normal = -fws[i].cross(binormal).normalized();
 
-			bool skip_even, skip_odd;
+			//bool skip_even = false, skip_odd = false;
+			int add_vertices = 2;
 			
-			if(profile != PROFILE_TUBE) {
-				skip_even = interleave_vertices && (i % 2 == 1);
-				skip_odd = interleave_vertices && (i % 2 == 0);
-
-				if(!curve->is_closed()) {
-					if((i <= 1) || (i >= pts.size() - 1)) {
-						skip_even = false;
+			if(flags[i]!=1){
+				if(profile != PROFILE_TUBE) {
+					if (interleave_vertices) {
+						add_vertices = 1;
 					}
-					if((i <= 0) || (i >= pts.size() - 2)) {
-						skip_odd = false;
+				} 
+				else {
+					add_vertices = 1;
+					if((segments%2)==0) {
+						add_vertices = 2;
 					}
-				}
-			} 
-			else {
-				skip_even = false;
-				skip_odd = true;
-				if((segments%2)==0) {
-					skip_odd = false;
 				}
 			}
 
@@ -4136,49 +4166,26 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				wc = sqrt(dvl) / dv.dot(binormal);
 			}
 
-			if(!skip_even) {
+			for(int j=0; j < add_vertices; j++) {
 				for(int j=0; j < radial_segments; j++) {
 					float angle = j * segment_angle;
 					Vector3 spoke_rotated = spoke.rotated(fws[i], angle);
 					if(width_comps.size() > 0) {
 						float stretched_component = spoke_rotated.dot(binormal);
 						float fixed_component = spoke_rotated.dot(normal);
-						//wc =  sqrt(2.0/(1.0 + tesselation_tolerance*dv.dot(binormal)));
-						
-						//wc = 1.0/(dv.dot(binormal));
 						spoke_rotated = wc*stretched_component*binormal + fixed_component*normal;
 					}
-					points.push_back(pts[i] + spoke_rotated);
-					uvs.push_back(Vector2(u, 0.5 + v_offset));
+					points.push_back(pts[i] + spoke_direction*spoke_rotated);
+					uvs.push_back(Vector2(u, 0.5 + spoke_direction*v_offset));
 					if(_add_uv2) {
 						uv2s.push_back(Vector2(_uv2_padding, 0.0));
 					}
-					Vector3 normal_rotated = (profile == PROFILE_TUBE) ? -binormal : normal;
+					Vector3 normal_rotated = (profile == PROFILE_TUBE) ? -spoke_direction*binormal : normal;
 					normal_rotated.rotate(fws[i], angle);
 					normals.push_back(normal_rotated);
 					ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
 				}
-			}
-
-			if(!skip_odd) {
-				for(int j=0; j < radial_segments; j++) {
-					float angle = j * segment_angle;
-					Vector3 spoke_rotated = spoke.rotated(fws[i], angle);
-					if(width_comps.size() > 0) {
-						float stretched_component = spoke_rotated.dot(binormal);
-						float fixed_component = spoke_rotated.dot(normal);
-						spoke_rotated = wc*stretched_component*binormal + fixed_component*normal;
-					}
-					points.push_back(pts[i] - spoke_rotated);
-					uvs.push_back(Vector2(u, 0.5 - v_offset));
-					if(_add_uv2) {
-						uv2s.push_back(Vector2(_uv2_padding, 1.0));
-					}
-					Vector3 normal_rotated = (profile == PROFILE_TUBE) ? binormal : normal;
-					normal_rotated.rotate(fws[i], angle);
-					normals.push_back(normal_rotated);
-					ADD_TANGENT(fws[i].x, fws[i].y, fws[i].z, 1.0);
-				}
+				spoke_direction *= -1.0;			
 			}
 		}
 
@@ -4331,6 +4338,9 @@ void Curve3DMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_interleave_vertices", "enable"), &Curve3DMesh::set_interleave_vertices);
 	ClassDB::bind_method(D_METHOD("is_interleave_vertices"), &Curve3DMesh::is_interleave_vertices);
 
+	ClassDB::bind_method(D_METHOD("is_filter_overlaps"), &Curve3DMesh::is_filter_overlaps);
+	ClassDB::bind_method(D_METHOD("set_filter_overlaps", "enable"), &Curve3DMesh::set_filter_overlaps);
+
 	ClassDB::bind_method(D_METHOD("set_up_vector", "up_vector"), &Curve3DMesh::set_up_vector);
 	ClassDB::bind_method(D_METHOD("get_up_vector"), &Curve3DMesh::get_up_vector);
 
@@ -4348,6 +4358,7 @@ void Curve3DMesh::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "tesselation_mode", PROPERTY_HINT_ENUM, "Adaptive,Baked,Disabled"), "set_tesselation_mode", "get_tesselation_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tesselation_tolerance", PROPERTY_HINT_RANGE, "0.001,1.0,0.001,or_greater,suffix:m"), "set_tesselation_tolerance", "get_tesselation_tolerance");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "interleave_vertices", PROPERTY_HINT_NONE, "hint_tooltip:Interleave vertices to reduce vertex count."), "set_interleave_vertices", "is_interleave_vertices");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "filter_overlaps", PROPERTY_HINT_NONE), "set_filter_overlaps", "is_filter_overlaps");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "scale_uv_by_length"), "set_scale_uv_by_length", "is_scale_uv_by_length");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "scale_uv_by_width"), "set_scale_uv_by_width", "is_scale_uv_by_width");
 	
@@ -4442,6 +4453,17 @@ bool Curve3DMesh::is_interleave_vertices() const {
 void Curve3DMesh::set_interleave_vertices(bool p_enable) {
 	if (interleave_vertices != p_enable) {
 		interleave_vertices = p_enable;
+		request_update();
+	}
+}
+
+bool Curve3DMesh::is_filter_overlaps() const {
+	return filter_overlaps;
+}
+
+void Curve3DMesh::set_filter_overlaps(bool p_enable) {
+	if (filter_overlaps != p_enable) {
+		filter_overlaps = p_enable;
 		request_update();
 	}
 }
