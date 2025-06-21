@@ -3935,6 +3935,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		// UP vector should be calculated manually for every point for TESSELATION_ADAPTIVE and TESSELATION_DISABLED modes 
 		//(look up how its done in Curve3D::get_baked_up_vectors()
 		
+		Vector3 up_vector_normalized = up_vector.normalized();
+
 		int point_count = 0;
 		switch(tesselation_mode)
 		{
@@ -3984,8 +3986,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		fws.push_back(dir);
 		ups.push_back(up_vector.slide(next_dir).normalized());
 
-		next_dir = next_dir.slide(up_vector);
-		prev_dir = prev_dir.slide(up_vector);
+		next_dir = next_dir.slide(up_vector_normalized);
+		prev_dir = prev_dir.slide(up_vector_normalized);
 		float width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 		width_comps.push_back(width_compensation);
 
@@ -3998,8 +4000,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			fws.push_back(dir);
 			ups.push_back(up_vector.slide(next_dir).normalized());
 			
-			next_dir = next_dir.slide(up_vector);
-			prev_dir = prev_dir.slide(up_vector);
+			next_dir = next_dir.slide(up_vector_normalized);
+			prev_dir = prev_dir.slide(up_vector_normalized);
 			width_compensation =  sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 			width_comps.push_back(width_compensation);
 		}
@@ -4016,8 +4018,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		fws.push_back(dir);
 		ups.push_back(up_vector.slide(next_dir).normalized());
 
-		next_dir = next_dir.slide(up_vector);
-		prev_dir = prev_dir.slide(up_vector);
+		next_dir = next_dir.slide(up_vector_normalized);
+		prev_dir = prev_dir.slide(up_vector_normalized);
 		width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 		width_comps.push_back(width_compensation);
 
@@ -4141,7 +4143,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 					if(width_comps.size() > 0) {
 						float stretched_component = spoke_rotated.dot(binormal);
 						float fixed_component = spoke_rotated.dot(normal);
-						float wc = width_comps[i];
 						//wc =  sqrt(2.0/(1.0 + tesselation_tolerance*dv.dot(binormal)));
 						
 						//wc = 1.0/(dv.dot(binormal));
@@ -4284,7 +4285,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 	if (indices.is_empty()) {
 		// If empty, add single triangle to suppress errors.
 		points.push_back(Vector3());
-		normals.push_back(Vector3());
+		normals.push_back(Vector3(0.0,1.0,0.0));
 		uvs.push_back(Vector2());
 		tangents.push_back(1.0);
 		tangents.push_back(0.0);
