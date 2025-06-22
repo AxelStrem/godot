@@ -4068,8 +4068,9 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}
 		}
 
-		Vector3 prev_spoke = Vector3();
-		Vector3 prev_pos = pts[0];
+		PackedVector3Array prev_spokes;
+		PackedVector3Array prev_positions;
+		PackedInt32Array prev_point_counts;
 		float spoke_direction = 1.0;
 
 		for (int i = 0; i < pts.size(); i++) {
@@ -4118,18 +4119,57 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 			Vector3 spoke = binormal * width * local_width;
 
+			float dvl = dv.length_squared();
+			float wc = 1.0;
+			if (dvl > CMP_EPSILON) {
+				wc = sqrt(dvl) / dv.dot(binormal);
+			}
+
 			if(filter_overlaps) {
-				Vector3 spoke_diff = spoke - prev_spoke;
-				Vector3 pos_diff = pts[i] - prev_pos;
-				if ((pos_diff.dot(pos_diff + spoke_diff) < 0.0) || (pos_diff.dot(pos_diff - spoke_diff) < 0.0)) {
-					if(flags[i]!=1) {
-						// If this is not a key point, skip it.
-						continue;
+				Vector3 spoke_corrected = spoke * wc;
+				if(!prev_spokes.is_empty())
+				{
+					int prev_index = prev_spokes.size() - 1;
+					Vector3 prev_pos = prev_positions[prev_index];
+					Vector3 spoke_diff = spoke_corrected - prev_spokes[prev_index];
+					Vector3 pos_diff = pts[i] - prev_pos;
+					if ((pos_diff.dot(pos_diff + spoke_diff) < 0.0) || (pos_diff.dot(pos_diff - spoke_diff) < 0.0)) {
+						if(flags[i]!=1) {
+							// If this is not a key point, skip it.
+							continue;
+						}
+						else {
+							int rollback = 1;
+							while(rollback < prev_spokes.size()) {
+								Vector3 prev_spoke = prev_spokes[prev_index - rollback];
+								Vector3 spoke_diff = spoke_corrected - prev_spoke;
+								prev_pos = prev_positions[prev_index - rollback];
+								Vector3 pos_diff = pts[i] - prev_pos;
+								if ((pos_diff.dot(pos_diff + spoke_diff) < 0.0) || (pos_diff.dot(pos_diff - spoke_diff) < 0.0)) {
+									rollback++;
+								} else {
+									break;
+								}
+							}
+
+							int new_point_count = prev_point_counts[prev_index - rollback + 1];
+							points.resize(new_point_count);
+							uvs.resize(new_point_count);
+							normals.resize(new_point_count);
+							if(_add_uv2) {
+								uv2s.resize(new_point_count);
+							}
+							tangents.resize(new_point_count * 4);
+
+							prev_spokes.resize(prev_index - rollback + 1);
+							prev_positions.resize(prev_index - rollback + 1);
+							prev_point_counts.resize(prev_index - rollback + 1);
+						}
 					}
-					
 				}
-				prev_spoke = spoke;
-				prev_pos = pts[i];
+				prev_spokes.push_back(spoke_corrected);
+				prev_positions.push_back(pts[i]);
+				prev_point_counts.push_back(points.size());
 			}
 
 			if(scale_UV_by_length){
@@ -4158,12 +4198,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 						add_vertices = 2;
 					}
 				}
-			}
-
-			float dvl = dv.length_squared();
-			float wc = 1.0;
-			if (dvl > CMP_EPSILON) {
-				wc = sqrt(dvl) / dv.dot(binormal);
 			}
 
 			for(int j=0; j < add_vertices; j++) {
