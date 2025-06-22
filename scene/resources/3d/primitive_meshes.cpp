@@ -4153,6 +4153,9 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 							}
 
 							int new_point_count = prev_point_counts[prev_index - rollback + 1];
+							if((points.size()-new_point_count)%2 == 1) {
+								spoke_direction *= -1.0;
+							}
 							points.resize(new_point_count);
 							uvs.resize(new_point_count);
 							normals.resize(new_point_count);
