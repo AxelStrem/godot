@@ -3975,21 +3975,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			} break;
 		}	
 
-		// Calculate which points are key points
-		// Very inefficient, but requires exposing more of the Curve3D to improve
-		// Key points can't be interleaved or filtered out
-		int key_point = 0;
-		PackedVector3Array key_points = curve->get_points();
-		for(int i=0;i<point_count;i++) {
-			if((key_point < curve->get_point_count()) && 
-				((pts[i] - curve->get_point_position(key_point)).length_squared() < 0.0001)) {
-					flags.push_back(1);
-					key_point++;
-				} else {
-					flags.push_back(0);
-				}
-		}
-
 		// Calculate tangent for the first point
 		Vector3 prev = prev = pts[point_count - 1];
 		Vector3 next = pts[1];
@@ -4003,8 +3988,10 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		fws.push_back(dir);
 		ups.push_back(up_vector.slide(next_dir).normalized());
 
-		next_dir = next_dir.slide(up_vector_normalized);
-		prev_dir = prev_dir.slide(up_vector_normalized);
+		flags.push_back(1);
+
+		//next_dir = next_dir.slide(up_vector_normalized);
+		//prev_dir = prev_dir.slide(up_vector_normalized);
 		float width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 		width_comps.push_back(width_compensation);
 
@@ -4016,9 +4003,16 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		
 			fws.push_back(dir);
 			ups.push_back(up_vector.slide(next_dir).normalized());
+
+			if(next_dir.dot(prev_dir) < 0.75) {
+				// If the angle between the two directions is too large, we consider this a corner point.
+				flags.push_back(1);
+			} else {
+				flags.push_back(0);
+			}
 			
-			next_dir = next_dir.slide(up_vector_normalized);
-			prev_dir = prev_dir.slide(up_vector_normalized);
+			//next_dir = next_dir.slide(up_vector_normalized);
+			//prev_dir = prev_dir.slide(up_vector_normalized);
 			width_compensation =  sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 			width_comps.push_back(width_compensation);
 		}
@@ -4034,9 +4028,10 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		
 		fws.push_back(dir);
 		ups.push_back(up_vector.slide(next_dir).normalized());
+		flags.push_back(1);
 
-		next_dir = next_dir.slide(up_vector_normalized);
-		prev_dir = prev_dir.slide(up_vector_normalized);
+		//next_dir = next_dir.slide(up_vector_normalized);
+		//prev_dir = prev_dir.slide(up_vector_normalized);
 		width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 		width_comps.push_back(width_compensation);
 
@@ -4105,9 +4100,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			binormal.normalize();
 			binormal.rotate(fws[i], tilts[i]);
 
-			Vector3 dir = pts[i] - pts[pri];
-			Vector3 dv = dir.cross(binormal);
-			dv = dv.cross(dir);
+			
 
 			float local_width = 1.0;
 			float u = float(i) / (pts.size() - 1);
@@ -4119,14 +4112,13 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 			Vector3 spoke = binormal * width * local_width;
 
-			float dvl = dv.length_squared();
-			float wc = 1.0;
-			if (dvl > CMP_EPSILON) {
-				wc = sqrt(dvl) / dv.dot(binormal);
-			}
+			// TODO: move this to where width_comps are calculated
+			Vector3 dir = (pts[i] - pts[pri]).normalized();
+			Vector3 dirn = (pts[i] - pts[ni]).normalized();
+			Vector3 wc_dir = (dir + dirn).normalized();
 
 			if(filter_overlaps) {
-				Vector3 spoke_corrected = spoke * wc;
+				Vector3 spoke_corrected = spoke * width_comps[i];
 				if(!prev_spokes.is_empty())
 				{
 					int prev_index = prev_spokes.size() - 1;
@@ -4207,11 +4199,11 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				for(int j=0; j < radial_segments; j++) {
 					float angle = j * segment_angle;
 					Vector3 spoke_rotated = spoke.rotated(fws[i], angle);
-					if(width_comps.size() > 0) {
-						float stretched_component = spoke_rotated.dot(binormal);
-						float fixed_component = spoke_rotated.dot(normal);
-						spoke_rotated = wc*stretched_component*binormal + fixed_component*normal;
-					}
+
+					Vector3 stretched_component = spoke_rotated.project(wc_dir);
+					Vector3 fixed_component = spoke_rotated - stretched_component;
+					spoke_rotated = width_comps[i]*stretched_component + fixed_component;
+			
 					points.push_back(pts[i] + spoke_direction*spoke_rotated);
 					uvs.push_back(Vector2(u, 0.5 + spoke_direction*v_offset));
 					if(_add_uv2) {
