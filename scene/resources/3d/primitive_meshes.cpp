@@ -3925,9 +3925,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 	if(curve.is_valid() && (curve->get_point_count() > 1))
 	{
-		PackedVector3Array pts;
 		PackedVector3Array fws;
-		PackedFloat32Array tilts;
 		PackedFloat32Array width_comps;
 		PackedFloat32Array partial_lengths;
 		PackedVector3Array ups;
@@ -3947,50 +3945,53 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			int flags;
 		};
 
+		LocalVector<CenterPoint> center_points;
+
 		int point_count = 0;
 		switch(tesselation_mode)
 		{
 			case TESSELATION_BAKED: {
-				pts = curve->get_baked_points();
-				tilts = curve->get_baked_tilts();
-				
+				PackedVector3Array pts = curve->get_baked_points();
+				PackedFloat32Array tilts = curve->get_baked_tilts();
 				point_count = pts.size();
 				if(curve->is_closed()) {
 					point_count--;
-					pts.remove_at(point_count);
-					tilts.remove_at(point_count);
+				}
+				center_points.resize(point_count);
+				for(int i = 0; i < point_count; i++) {
+					center_points[i].position = pts[i];
+					center_points[i].tilt = tilts[i];
 				}
 			} break;
 			case TESSELATION_ADAPTIVE: {
-				pts = curve->tessellate(5, tesselation_tolerance);
+				PackedVector3Array pts = curve->tessellate(5, tesselation_tolerance);
 				point_count = pts.size();
 				if(curve->is_closed()) {
 					point_count--;
-					pts.remove_at(point_count);
 				}
+				center_points.resize(point_count);
 				for(int i=0;i<point_count;i++) {
 					float offset = curve->get_closest_offset(pts[i]);
-					tilts.push_back(curve->sample_baked_tilt(offset));
-					
+					center_points[i].position = pts[i];
+					center_points[i].tilt = curve->sample_baked_tilt(offset);
 				}
 			} break;
 			case TESSELATION_DISABLED: {
 				point_count = curve->get_point_count();
+				center_points.resize(point_count);
 				for(int i = 0; i < point_count; i++) {
-					pts.push_back(curve->get_point_position(i));
-					tilts.push_back(curve->get_point_tilt(i));
-					
+					center_points[i].position = curve->get_point_position(i);
+					center_points[i].tilt = curve->get_point_tilt(i);					
 				}
 			} break;
 		}	
 
 		// Calculate tangent for the first point
-		Vector3 prev = prev = pts[point_count - 1];
-		Vector3 next = pts[1];
-		Vector3 next_dir = (next - pts[0]).normalized();
+		Vector3 next = center_points[1].position;
+		Vector3 next_dir = (next - center_points[0].position).normalized();
 		Vector3 prev_dir = next_dir;
 		if(curve->is_closed()) {
-			prev_dir = (pts[0] - prev).normalized();
+			prev_dir = (center_points[0].position - center_points[point_count - 1].position).normalized();
 		}
 		Vector3 dir = (next_dir + prev_dir).normalized();
 		
@@ -4001,17 +4002,15 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		float total_length = 0.0;
 		partial_lengths.push_back(total_length);
 
-		//next_dir = next_dir.slide(up_vector_normalized);
-		//prev_dir = prev_dir.slide(up_vector_normalized);
 		float width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 		width_comps.push_back(width_compensation);
 
 		// Calculate tangents for the middle section
 		for(int i=1;i<point_count-1;i++) {
-			Vector3 prev_vec = pts[i] - pts[i-1];
+			Vector3 prev_vec = center_points[i].position - center_points[i-1].position;
 			float prev_length = prev_vec.length();
 			prev_dir = prev_vec.normalized();
-			next_dir = (pts[i+1] - pts[i]).normalized();
+			next_dir = (center_points[i+1].position - center_points[i].position).normalized();
 			dir = (next_dir + prev_dir).normalized();
 			total_length += prev_length;
 			partial_lengths.push_back(total_length);
@@ -4026,19 +4025,17 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				flags.push_back(0);
 			}
 			
-			//next_dir = next_dir.slide(up_vector_normalized);
-			//prev_dir = prev_dir.slide(up_vector_normalized);
 			width_compensation =  sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 			width_comps.push_back(width_compensation);
 		}
 
 		// Calculate tangent for the last point
-		Vector3 prev_vec = pts[point_count - 2] - pts[point_count - 1];
+		Vector3 prev_vec = center_points[point_count - 2].position - center_points[point_count - 1].position;
 		float prev_length = prev_vec.length();
 		prev_dir = prev_vec.normalized();
 		next_dir = prev_dir;
 		if(curve->is_closed()) {
-			next_dir = (pts[0] - pts[point_count - 1]).normalized();
+			next_dir = (center_points[0].position - center_points[point_count - 1].position).normalized();
 		}
 		dir = (next_dir + prev_dir).normalized();
 		total_length += prev_length;
@@ -4048,8 +4045,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		ups.push_back(up_vector.slide(next_dir).normalized());
 		flags.push_back(1);
 
-		//next_dir = next_dir.slide(up_vector_normalized);
-		//prev_dir = prev_dir.slide(up_vector_normalized);
 		width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 		width_comps.push_back(width_compensation);
 
@@ -4057,8 +4052,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			// TODO: simplify this
 			// If the curve is closed, we don't need to duplicate anything actually, just remove this and update everything else.
 
-			pts.push_back(pts[0]);
-			tilts.push_back(tilts[0]);
+			center_points.push_back(center_points[0]);
 			fws.push_back(fws[0]);
 			ups.push_back(ups[0]);
 			width_comps.push_back(width_comps[0]);
@@ -4102,21 +4096,21 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 		LocalVector<EdgePoint> edge_points;
 
-		for (int i = 0; i < pts.size(); i++) {
+		for (int i = 0; i < point_count; i++) {
 			int pri = i - 1;
 			if (pri < 0) {
 				if(curve->is_closed()) {
-					pri = pts.size() - 1;
+					pri = point_count - 1;
 				} else {
 					pri = 0;
 				}
 			}
 			int ni = i+1;
-			if (ni >= pts.size()) {
+			if (ni >= point_count) {
 				if(curve->is_closed()) {
 					ni = 0;
 				} else {
-					ni = pts.size() - 1;
+					ni = point_count - 1;
 				}
 			}
 
@@ -4125,14 +4119,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 			Vector3 binormal = fws[i].cross(up);
 
-			//if (up.dot(up_prev) < 0.9999)
-			//{
-			//	Vector3 binormal_corrected = up.cross(up_prev);
-			//	binormal = (binormal.dot(binormal_corrected) < 0.0) ? -binormal_corrected : binormal_corrected;
-			//}
-
 			binormal.normalize();
-			binormal.rotate(fws[i], tilts[i]);
+			binormal.rotate(fws[i], center_points[i].tilt);
 
 			
 
@@ -4147,8 +4135,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			Vector3 spoke = binormal * width * local_width;
 
 			// TODO: move this to where width_comps are calculated
-			Vector3 dir = (pts[i] - pts[pri]).normalized();
-			Vector3 dirn = (pts[i] - pts[ni]).normalized();
+			Vector3 dir = (center_points[i].position - center_points[pri].position).normalized();
+			Vector3 dirn = (center_points[i].position - center_points[ni].position).normalized();
 			Vector3 wc_dir = (dir + dirn).normalized();
 
 			if(scale_UV_by_length){
@@ -4175,7 +4163,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 					Vector3 fixed_component = spoke_rotated - stretched_component;
 					spoke_rotated = width_comps[i]*stretched_component + fixed_component;
 			
-					point.position = pts[i] + edge*spoke_rotated;
+					point.position = center_points[i].position + edge*spoke_rotated;
 					point.uv.y = 0.5 + edge*v_offset;
 					if(_add_uv2) {
 						point.uv2 = Vector2(_uv2_padding, 0.0);
