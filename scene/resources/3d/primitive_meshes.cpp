@@ -3929,6 +3929,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		PackedVector3Array fws;
 		PackedFloat32Array tilts;
 		PackedFloat32Array width_comps;
+		PackedFloat32Array partial_lengths;
 		PackedVector3Array ups;
 		PackedByteArray flags;
 
@@ -3937,6 +3938,14 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		//(look up how its done in Curve3D::get_baked_up_vectors()
 		
 		Vector3 up_vector_normalized = up_vector.normalized();
+
+		struct CenterPoint {
+			Vector3 position;
+			Vector3 tangent;
+			float width_compensation;
+			float tilt;
+			int flags;
+		};
 
 		int point_count = 0;
 		switch(tesselation_mode)
@@ -3989,6 +3998,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		ups.push_back(up_vector.slide(next_dir).normalized());
 
 		flags.push_back(1);
+		float total_length = 0.0;
+		partial_lengths.push_back(total_length);
 
 		//next_dir = next_dir.slide(up_vector_normalized);
 		//prev_dir = prev_dir.slide(up_vector_normalized);
@@ -3997,9 +4008,13 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 		// Calculate tangents for the middle section
 		for(int i=1;i<point_count-1;i++) {
-			prev_dir = (pts[i] - pts[i-1]).normalized();
+			Vector3 prev_vec = pts[i] - pts[i-1];
+			float prev_length = prev_vec.length();
+			prev_dir = prev_vec.normalized();
 			next_dir = (pts[i+1] - pts[i]).normalized();
 			dir = (next_dir + prev_dir).normalized();
+			total_length += prev_length;
+			partial_lengths.push_back(total_length);
 		
 			fws.push_back(dir);
 			ups.push_back(up_vector.slide(next_dir).normalized());
@@ -4018,13 +4033,16 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		}
 
 		// Calculate tangent for the last point
-		prev = pts[point_count - 2];
-		prev_dir = (pts[point_count - 1] - prev).normalized();
+		Vector3 prev_vec = pts[point_count - 2] - pts[point_count - 1];
+		float prev_length = prev_vec.length();
+		prev_dir = prev_vec.normalized();
 		next_dir = prev_dir;
 		if(curve->is_closed()) {
 			next_dir = (pts[0] - pts[point_count - 1]).normalized();
 		}
 		dir = (next_dir + prev_dir).normalized();
+		total_length += prev_length;
+		partial_lengths.push_back(total_length);
 		
 		fws.push_back(dir);
 		ups.push_back(up_vector.slide(next_dir).normalized());
@@ -4045,6 +4063,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			ups.push_back(ups[0]);
 			width_comps.push_back(width_comps[0]);
 			flags.push_back(flags[0]);
+			partial_lengths.push_back(partial_lengths[0]);
 		}		
 
 		int radial_segments = 1;
@@ -4118,7 +4137,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			
 
 			float local_width = 1.0;
-			float u = float(i) / (pts.size() - 1);
+			float u = partial_lengths[i] / total_length;
 
 			if(width_curve.is_valid())
 			{
@@ -4132,56 +4151,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			Vector3 dirn = (pts[i] - pts[ni]).normalized();
 			Vector3 wc_dir = (dir + dirn).normalized();
 
-			/*if(filter_overlaps) {
-				Vector3 spoke_corrected = spoke * width_comps[i];
-				if(!prev_spokes.is_empty())
-				{
-					int prev_index = prev_spokes.size() - 1;
-					Vector3 prev_pos = prev_positions[prev_index];
-					Vector3 spoke_diff = spoke_corrected - prev_spokes[prev_index];
-					Vector3 pos_diff = pts[i] - prev_pos;
-					if ((pos_diff.dot(pos_diff + spoke_diff) < 0.0) || (pos_diff.dot(pos_diff - spoke_diff) < 0.0)) {
-						if(flags[i]!=1) {
-							// If this is not a key point, skip it.
-							continue;
-						}
-						else {
-							int rollback = 1;
-							while(rollback < prev_spokes.size()) {
-								Vector3 prev_spoke = prev_spokes[prev_index - rollback];
-								Vector3 spoke_diff = spoke_corrected - prev_spoke;
-								prev_pos = prev_positions[prev_index - rollback];
-								Vector3 pos_diff = pts[i] - prev_pos;
-								if ((pos_diff.dot(pos_diff + spoke_diff) < 0.0) || (pos_diff.dot(pos_diff - spoke_diff) < 0.0)) {
-									rollback++;
-								} else {
-									break;
-								}
-							}
-
-							int new_point_count = prev_point_counts[prev_index - rollback + 1];
-							if((points.size()-new_point_count)%2 == 1) {
-								spoke_direction *= -1.0;
-							}
-							points.resize(new_point_count);
-							uvs.resize(new_point_count);
-							normals.resize(new_point_count);
-							if(_add_uv2) {
-								uv2s.resize(new_point_count);
-							}
-							tangents.resize(new_point_count * 4);
-
-							prev_spokes.resize(prev_index - rollback + 1);
-							prev_positions.resize(prev_index - rollback + 1);
-							prev_point_counts.resize(prev_index - rollback + 1);
-						}
-					}
-				}
-				prev_spokes.push_back(spoke_corrected);
-				prev_positions.push_back(pts[i]);
-				prev_point_counts.push_back(points.size());
-			}*/
-
 			if(scale_UV_by_length){
 				u*= curve->get_baked_length();
 			}
@@ -4192,23 +4161,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}
 
 			Vector3 normal = -fws[i].cross(binormal).normalized();
-
-			//bool skip_even = false, skip_odd = false;
-			int add_vertices = 2;
-			
-			/*if(flags[i]!=1){
-				if(profile != PROFILE_TUBE) {
-					if (interleave_vertices) {
-						add_vertices = 1;
-					}
-				} 
-				else {
-					add_vertices = 1;
-					if((segments%2)==0) {
-						add_vertices = 2;
-					}
-				}
-			}*/
 
 			EdgePoint point;
 			point.tangent = fws[i];
