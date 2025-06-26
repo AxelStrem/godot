@@ -3925,17 +3925,17 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 	if(curve.is_valid() && (curve->get_point_count() > 1))
 	{
-		PackedVector3Array ups;
-
 		// UP vector is not calculated correctly for the first point if the curve is closed
 		// UP vector should be calculated manually for every point for TESSELATION_ADAPTIVE and TESSELATION_DISABLED modes 
 		//(look up how its done in Curve3D::get_baked_up_vectors()
 		
 		Vector3 up_vector_normalized = up_vector.normalized();
+		bool zero_width = (width == 0.0);
 
 		struct CenterPoint {
 			Vector3 position;
 			Vector3 tangent;
+			Vector3 local_up;
 			float partial_length;
 			float width_correction;
 			float tilt;
@@ -3993,11 +3993,12 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		Vector3 dir = (next_dir + prev_dir).normalized();
 		
 		center_points[0].tangent = dir;
-		ups.push_back(up_vector.slide(next_dir).normalized());
-
 		float total_length = 0.0;
 		center_points[0].partial_length = total_length;
-		center_points[0].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
+		if(!zero_width) {
+			center_points[0].local_up = up_vector.slide(next_dir).normalized();
+			center_points[0].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
+		}
 
 		// Calculate tangents for the middle section
 		for(int i=1;i<point_count-1;i++) {
@@ -4009,7 +4010,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			total_length += prev_length;
 			center_points[i].partial_length = total_length;
 			center_points[i].tangent = dir;
-			ups.push_back(up_vector.slide(next_dir).normalized());
 
 			if(interleave_vertices)
 			{
@@ -4021,11 +4021,14 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				}
 			}
 			
-			center_points[i].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
+			if(!zero_width) {
+				center_points[i].local_up = up_vector.slide(next_dir).normalized();
+				center_points[i].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
+			}
 		}
 
 		// Calculate tangent for the last point
-		Vector3 prev_vec = center_points[point_count - 2].position - center_points[point_count - 1].position;
+		Vector3 prev_vec = center_points[point_count - 1].position - center_points[point_count - 2].position;
 		float prev_length = prev_vec.length();
 		prev_dir = prev_vec.normalized();
 		next_dir = prev_dir;
@@ -4036,15 +4039,16 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		total_length += prev_length;
 		center_points[point_count - 1].partial_length = total_length;		
 		center_points[point_count - 1].tangent = dir;
-		ups.push_back(up_vector.slide(next_dir).normalized());
-		center_points[point_count - 1].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
+		if(!zero_width) {
+			center_points[point_count - 1].local_up = up_vector.slide(next_dir).normalized();
+			center_points[point_count - 1].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
+		}
 
 		if(curve->is_closed()) {
 			// TODO: simplify this
 			// If the curve is closed, we don't need to duplicate anything actually, just remove this and update everything else.
 
 			center_points.push_back(center_points[0]);
-			ups.push_back(ups[0]);
 		}
 		else
 		{
@@ -4085,6 +4089,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		};
 
 		LocalVector<EdgePoint> edge_points;
+		LocalVector<Vector3> debug_points;
+		LocalVector<Vector3> debug_normals;
 
 		for (int i = 0; i < point_count; i++) {
 			int pri = i - 1;
@@ -4104,15 +4110,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				}
 			}
 
-
-			Vector3 up = ups[i];
-			Vector3 binormal = center_points[i].tangent.cross(up);
-
-			binormal.normalize();
-			binormal.rotate(center_points[i].tangent, center_points[i].tilt);
-
-			
-
 			float local_width = 1.0;
 			float u = center_points[i].partial_length / total_length;
 
@@ -4121,7 +4118,22 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				local_width = width_curve->sample(u);
 			}
 
-			Vector3 spoke = binormal * width * local_width;
+			Vector3 binormal, spoke;
+			
+			if(!zero_width) {
+				binormal = center_points[i].tangent.cross(center_points[i].local_up);
+				binormal.normalize();
+				binormal.rotate(center_points[i].tangent, center_points[i].tilt);
+				spoke = binormal * width * local_width;
+			} else {
+				binormal = Vector3(0.0,0.0,1.0);
+				spoke = Vector3(0.0,0.0,0.0);
+			}
+
+			
+			
+
+			Vector3 normal = -center_points[i].tangent.cross(binormal).normalized();
 
 			// TODO: move this to where width_correction is calculated
 			Vector3 dir = (center_points[i].position - center_points[pri].position).normalized();
@@ -4137,29 +4149,40 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				v_offset *= local_width;
 			}
 
-			Vector3 normal = -center_points[i].tangent.cross(binormal).normalized();
-
 			EdgePoint point;
 			point.tangent = center_points[i].tangent;
 			point.uv.x = u;
 			for(int e = 0; e < 2; e++) {
 				int edge = e * 2 - 1;
 				for(int j=0; j < radial_segments; j++) {
-					float angle = j * segment_angle;
-					Vector3 spoke_rotated = spoke.rotated(center_points[i].tangent, angle);
+					if(!zero_width)
+					{
+						
 
-					Vector3 stretched_component = spoke_rotated.project(wc_dir);
-					Vector3 fixed_component = spoke_rotated - stretched_component;
-					spoke_rotated = center_points[i].width_correction*stretched_component + fixed_component;
-			
-					point.position = center_points[i].position + edge*spoke_rotated;
+						float angle = j * segment_angle;
+						Vector3 spoke_rotated = spoke.rotated(center_points[i].tangent, angle);
+
+						Vector3 stretched_component = spoke_rotated.dot(wc_dir) * wc_dir;
+						Vector3 fixed_component = spoke_rotated - stretched_component;
+						spoke_rotated = center_points[i].width_correction*stretched_component + fixed_component;
+				
+						point.position = center_points[i].position + edge*spoke_rotated;
+
+						Vector3 normal_rotated = (profile == PROFILE_TUBE) ? -edge*binormal : normal;
+						normal_rotated.rotate(center_points[i].tangent, angle);
+						point.normal = normal_rotated;
+
+						debug_points.push_back(center_points[i].position + edge*spoke_rotated);
+						debug_normals.push_back(normal);
+					}
+					else {
+						point.position = center_points[i].position;
+						point.normal = normal;
+					}
 					point.uv.y = 0.5 + edge*v_offset;
 					if(_add_uv2) {
 						point.uv2 = Vector2(_uv2_padding, 0.0);
 					}
-					Vector3 normal_rotated = (profile == PROFILE_TUBE) ? -edge*binormal : normal;
-					normal_rotated.rotate(center_points[i].tangent, angle);
-					point.normal = normal_rotated;
 					
 					point.next_point = (2*i+e+1)*radial_segments + j;
 					point.prev_point = (2*i+e-1)*radial_segments + j;
@@ -4377,6 +4400,44 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			indices.push_back(i + 3);
 			indices.push_back(i + 2);
 		}*/
+
+		// temp for debug
+	
+		for(int j=0;j<debug_points.size();++j) {
+			Vector3 p = debug_points[j];
+			Vector3 n = debug_normals[j];
+			int i = points.size();
+			points.push_back(p - Vector3(0.0, 0.0, 0.1));
+			points.push_back(p + Vector3(0.0, 0.0, 0.1));
+			points.push_back(p + n);
+			normals.push_back(Vector3(0.0, 1.0, 0.0));
+			normals.push_back(Vector3(0.0, 1.0, 0.0));
+			normals.push_back(Vector3(0.0, 1.0, 0.0));
+			uvs.push_back(Vector2(0.0, 0.0));
+			uvs.push_back(Vector2(0.0, 1.0));
+			uvs.push_back(Vector2(1.0, 0.5));
+			if (_add_uv2) {
+				uv2s.push_back(Vector2(_uv2_padding, 0.0));
+				uv2s.push_back(Vector2(_uv2_padding, 1.0));
+				uv2s.push_back(Vector2(1.0 - _uv2_padding, 0.5));
+			}
+			tangents.push_back(1.0);
+			tangents.push_back(0.0);
+			tangents.push_back(0.0);
+			tangents.push_back(1.0);
+			tangents.push_back(1.0);
+			tangents.push_back(0.0);
+			tangents.push_back(0.0);
+			tangents.push_back(1.0);
+			tangents.push_back(1.0);
+			tangents.push_back(0.0);
+			tangents.push_back(0.0);
+			tangents.push_back(1.0);
+			indices.push_back(i);
+			indices.push_back(i + 1);
+			indices.push_back(i + 2);
+		}
+		// --------------
 	}
 
 	if (indices.is_empty()) {
@@ -4392,6 +4453,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		indices.push_back(0);
 		indices.push_back(0);
 	}
+
+	
 
 	p_arr[RS::ARRAY_VERTEX] = points;
 	p_arr[RS::ARRAY_NORMAL] = normals;
