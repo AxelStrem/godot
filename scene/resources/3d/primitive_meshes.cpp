@@ -4071,11 +4071,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}
 		}
 
-		PackedVector3Array prev_spokes;
-		PackedVector3Array prev_positions;
-		PackedInt32Array prev_point_counts;
-		float spoke_direction = 1.0;
-
 		struct EdgePoint {
 			Vector3 position;
 			Vector3 normal;
