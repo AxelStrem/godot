@@ -3925,10 +3925,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 	if(curve.is_valid() && (curve->get_point_count() > 1))
 	{
-		PackedFloat32Array width_comps;
-		PackedFloat32Array partial_lengths;
 		PackedVector3Array ups;
-		PackedByteArray flags;
 
 		// UP vector is not calculated correctly for the first point if the curve is closed
 		// UP vector should be calculated manually for every point for TESSELATION_ADAPTIVE and TESSELATION_DISABLED modes 
@@ -3939,9 +3936,10 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		struct CenterPoint {
 			Vector3 position;
 			Vector3 tangent;
-			float width_compensation;
+			float partial_length;
+			float width_correction;
 			float tilt;
-			int flags;
+			bool no_interleave;
 		};
 
 		LocalVector<CenterPoint> center_points;
@@ -3997,12 +3995,9 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		center_points[0].tangent = dir;
 		ups.push_back(up_vector.slide(next_dir).normalized());
 
-		flags.push_back(1);
 		float total_length = 0.0;
-		partial_lengths.push_back(total_length);
-
-		float width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
-		width_comps.push_back(width_compensation);
+		center_points[0].partial_length = total_length;
+		center_points[0].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 
 		// Calculate tangents for the middle section
 		for(int i=1;i<point_count-1;i++) {
@@ -4012,20 +4007,21 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			next_dir = (center_points[i+1].position - center_points[i].position).normalized();
 			dir = (next_dir + prev_dir).normalized();
 			total_length += prev_length;
-			partial_lengths.push_back(total_length);
-		
+			center_points[i].partial_length = total_length;
 			center_points[i].tangent = dir;
 			ups.push_back(up_vector.slide(next_dir).normalized());
 
-			if(next_dir.dot(prev_dir) < 0.6) {
+			if(interleave_vertices)
+			{
+				if(next_dir.dot(prev_dir) < 0.6) {
 				// If the angle between the two directions is too large, we consider this a corner point.
-				flags.push_back(1);
-			} else {
-				flags.push_back(0);
+				center_points[i].no_interleave = true;
+				} else {
+					center_points[i].no_interleave = false;
+				}
 			}
 			
-			width_compensation =  sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
-			width_comps.push_back(width_compensation);
+			center_points[i].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 		}
 
 		// Calculate tangent for the last point
@@ -4038,14 +4034,10 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		}
 		dir = (next_dir + prev_dir).normalized();
 		total_length += prev_length;
-		partial_lengths.push_back(total_length);
-		
+		center_points[point_count - 1].partial_length = total_length;		
 		center_points[point_count - 1].tangent = dir;
 		ups.push_back(up_vector.slide(next_dir).normalized());
-		flags.push_back(1);
-
-		width_compensation = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
-		width_comps.push_back(width_compensation);
+		center_points[point_count - 1].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 
 		if(curve->is_closed()) {
 			// TODO: simplify this
@@ -4053,9 +4045,14 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 			center_points.push_back(center_points[0]);
 			ups.push_back(ups[0]);
-			width_comps.push_back(width_comps[0]);
-			flags.push_back(flags[0]);
-			partial_lengths.push_back(partial_lengths[0]);
+		}
+		else
+		{
+			if(interleave_vertices)
+			{
+				center_points[point_count - 1].no_interleave = true;
+				center_points[0].no_interleave = true;
+			}
 		}		
 
 		int radial_segments = 1;
@@ -4122,7 +4119,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			
 
 			float local_width = 1.0;
-			float u = partial_lengths[i] / total_length;
+			float u = center_points[i].partial_length / total_length;
 
 			if(width_curve.is_valid())
 			{
@@ -4131,7 +4128,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 			Vector3 spoke = binormal * width * local_width;
 
-			// TODO: move this to where width_comps are calculated
+			// TODO: move this to where width_correction is calculated
 			Vector3 dir = (center_points[i].position - center_points[pri].position).normalized();
 			Vector3 dirn = (center_points[i].position - center_points[ni].position).normalized();
 			Vector3 wc_dir = (dir + dirn).normalized();
@@ -4158,7 +4155,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 					Vector3 stretched_component = spoke_rotated.project(wc_dir);
 					Vector3 fixed_component = spoke_rotated - stretched_component;
-					spoke_rotated = width_comps[i]*stretched_component + fixed_component;
+					spoke_rotated = center_points[i].width_correction*stretched_component + fixed_component;
 			
 					point.position = center_points[i].position + edge*spoke_rotated;
 					point.uv.y = 0.5 + edge*v_offset;
@@ -4188,7 +4185,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				const EdgePoint* point = &edge_points[j];
 				while(point->next_point < edge_points.size()) {
 					const EdgePoint *next_point = &edge_points[point->next_point];
-					if((flags[point->source_index] == 1) || (flags[next_point->source_index] == 1) || 
+					if((center_points[point->source_index].no_interleave) || 
+						(center_points[next_point->source_index].no_interleave) || 
 						(point->source_index == next_point->source_index)) {
 						point = next_point;
 						continue;
