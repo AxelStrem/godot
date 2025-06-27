@@ -4084,6 +4084,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		};
 
 		LocalVector<EdgePoint> edge_points;
+		Vector3 current_up = up_vector_normalized;
 
 		for (int i = 0; i < point_count; i++) {
 			int pri = i - 1;
@@ -4114,7 +4115,9 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			Vector3 binormal, spoke;
 			
 			if(!zero_width) {
-				binormal = center_points[i].tangent.cross(center_points[i].local_up);
+				//binormal = center_points[i].tangent.cross(center_points[i].local_up);
+				binormal = center_points[i].tangent.cross(current_up);
+				current_up = -binormal.cross(center_points[i].tangent);
 				binormal.normalize();
 				binormal.rotate(center_points[i].tangent, center_points[i].tilt);
 				spoke = binormal * width * local_width;
