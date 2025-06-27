@@ -4014,8 +4014,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			if(interleave_vertices)
 			{
 				if(next_dir.dot(prev_dir) < 0.6) {
-				// If the angle between the two directions is too large, we consider this a corner point.
-				center_points[i].no_interleave = true;
+					center_points[i].no_interleave = true;
 				} else {
 					center_points[i].no_interleave = false;
 				}
@@ -4032,31 +4031,27 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		float prev_length = prev_vec.length();
 		prev_dir = prev_vec.normalized();
 		next_dir = prev_dir;
+		center_points[point_count - 1].partial_length = total_length;
 		if(curve->is_closed()) {
-			next_dir = (center_points[0].position - center_points[point_count - 1].position).normalized();
+			next_dir = (center_points[0].position - center_points[point_count - 1].position);
+			float extra_length = next_dir.length();
+			if(extra_length > 0.0) {
+				next_dir /= extra_length;
+			}
+			total_length += extra_length;
 		}
 		dir = (next_dir + prev_dir).normalized();
-		total_length += prev_length;
-		center_points[point_count - 1].partial_length = total_length;		
+		total_length += prev_length;		
 		center_points[point_count - 1].tangent = dir;
 		if(!zero_width) {
 			center_points[point_count - 1].local_up = up_vector.slide(next_dir).normalized();
 			center_points[point_count - 1].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 		}
 
-		if(curve->is_closed()) {
-			// TODO: simplify this
-			// If the curve is closed, we don't need to duplicate anything actually, just remove this and update everything else.
-
-			center_points.push_back(center_points[0]);
-		}
-		else
+		if(interleave_vertices && !curve->is_closed())
 		{
-			if(interleave_vertices)
-			{
 				center_points[point_count - 1].no_interleave = true;
 				center_points[0].no_interleave = true;
-			}
 		}		
 
 		int radial_segments = 1;
@@ -4089,8 +4084,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		};
 
 		LocalVector<EdgePoint> edge_points;
-		LocalVector<Vector3> debug_points;
-		LocalVector<Vector3> debug_normals;
 
 		for (int i = 0; i < point_count; i++) {
 			int pri = i - 1;
@@ -4171,9 +4164,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 						Vector3 normal_rotated = (profile == PROFILE_TUBE) ? -edge*binormal : normal;
 						normal_rotated.rotate(center_points[i].tangent, angle);
 						point.normal = normal_rotated;
-
-						debug_points.push_back(center_points[i].position + edge*spoke_rotated);
-						debug_normals.push_back(normal);
 					}
 					else {
 						point.position = center_points[i].position;
@@ -4190,8 +4180,13 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 					point.source_index = i;
 					point.edge = e;
 					edge_points.push_back(point);
-				}	
+				}
 			}
+		}
+
+		for(int j=0; j < radial_segments; j++) {
+			edge_points[edge_points.size() - radial_segments + j].next_point = j;
+			edge_points[j].prev_point = edge_points.size() - radial_segments + j;	
 		}
 
 #define REMOVE_POINT(m_point) \
@@ -4201,7 +4196,9 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		if(interleave_vertices) {
 			for(int j=0; j < radial_segments; j++) {
 				const EdgePoint* point = &edge_points[j];
-				while(point->next_point < edge_points.size()) {
+				int point_index = 0;
+				while(point->next_point >= point_index) {
+					point_index = point->next_point;
 					const EdgePoint *next_point = &edge_points[point->next_point];
 					if((center_points[point->source_index].no_interleave) || 
 						(center_points[next_point->source_index].no_interleave) || 
@@ -4212,13 +4209,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 					REMOVE_POINT(*point)
 					REMOVE_POINT(*next_point)
 					point = &edge_points[next_point->next_point];
-					if(point->next_point >= edge_points.size()) {
-						break;
-					}
 					point = &edge_points[point->next_point];
-					if(point->next_point >= edge_points.size()) {
-						break;
-					}
 					point = &edge_points[point->next_point];
 				}
 			}
@@ -4232,9 +4223,14 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				bool points_removed = true;
 				while(points_removed) {
 					points_removed = false;
+					int point_index = edge_points.size();
+					int next_index = point_index;
 					EdgePoint *point = &edge_points[j];
 					EdgePoint *next_point = &edge_points[point->next_point];
-					while(next_point->next_point < edge_points.size()) {
+					while(point_index > point->prev_point) {
+							if((next_index < point_index) && !curve->is_closed()) {
+								break;
+							}
 							if(next_point->edge == point->edge) {
 								Vector3 next_dir = next_point->position - point->position;
 								Vector3 fwd = point->tangent;
@@ -4243,21 +4239,26 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 										next_point->filter = 1;
 									}
 							
-								point = &edge_points[point->next_point];
-								next_point = &edge_points[point->next_point];
+								point_index = point->next_point;
+								point = &edge_points[point_index];
+								next_index = point->next_point;
+								next_point = &edge_points[next_index];
 							}
 							else {
-								next_point = &edge_points[next_point->next_point];
+								next_index = next_point->next_point;
+								next_point = &edge_points[next_index];
 							}
 					}
+					point_index = edge_points.size();
 					point = &edge_points[j];
 					point->filter = 0;
-					while(point->next_point < edge_points.size()) {
+					while(point_index > point->prev_point) {
 						if(point->filter) {
 							REMOVE_POINT(*point)
 							points_removed = true;
 						}
-						point = &edge_points[point->next_point];
+						point_index = point->next_point;
+						point = &edge_points[point_index];
 					}
 				}
 			}
@@ -4284,11 +4285,13 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			ADD_POINT(point)
 
 			id = points.size();
-			point = edge_points[point.next_point];
+			int point_index = point.next_point;
+			point = edge_points[point_index];
 			ADD_POINT(point)
 			last_edge_idx[point.edge] = id;
 
-			while(point.next_point < edge_points.size()) {
+			while(point.next_point > point_index) {
+				point_index = point.next_point;
 				point = edge_points[point.next_point];
 				
 				id = points.size();
@@ -4299,6 +4302,17 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				indices.push_back(id);
 
 				last_edge_idx[point.edge] = id;
+			}
+
+			if(curve->is_closed()) {
+				indices.push_back(last_edge_idx[1]);
+				indices.push_back(last_edge_idx[0]);
+				indices.push_back(0);
+
+				last_edge_idx[edge_points[0].edge] = 0;
+				indices.push_back(last_edge_idx[1]);
+				indices.push_back(last_edge_idx[0]);
+				indices.push_back(1);
 			}
 		}
 
@@ -4400,44 +4414,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			indices.push_back(i + 3);
 			indices.push_back(i + 2);
 		}*/
-
-		// temp for debug
-	
-		for(int j=0;j<debug_points.size();++j) {
-			Vector3 p = debug_points[j];
-			Vector3 n = debug_normals[j];
-			int i = points.size();
-			points.push_back(p - Vector3(0.0, 0.0, 0.1));
-			points.push_back(p + Vector3(0.0, 0.0, 0.1));
-			points.push_back(p + n);
-			normals.push_back(Vector3(0.0, 1.0, 0.0));
-			normals.push_back(Vector3(0.0, 1.0, 0.0));
-			normals.push_back(Vector3(0.0, 1.0, 0.0));
-			uvs.push_back(Vector2(0.0, 0.0));
-			uvs.push_back(Vector2(0.0, 1.0));
-			uvs.push_back(Vector2(1.0, 0.5));
-			if (_add_uv2) {
-				uv2s.push_back(Vector2(_uv2_padding, 0.0));
-				uv2s.push_back(Vector2(_uv2_padding, 1.0));
-				uv2s.push_back(Vector2(1.0 - _uv2_padding, 0.5));
-			}
-			tangents.push_back(1.0);
-			tangents.push_back(0.0);
-			tangents.push_back(0.0);
-			tangents.push_back(1.0);
-			tangents.push_back(1.0);
-			tangents.push_back(0.0);
-			tangents.push_back(0.0);
-			tangents.push_back(1.0);
-			tangents.push_back(1.0);
-			tangents.push_back(0.0);
-			tangents.push_back(0.0);
-			tangents.push_back(1.0);
-			indices.push_back(i);
-			indices.push_back(i + 1);
-			indices.push_back(i + 2);
-		}
-		// --------------
 	}
 
 	if (indices.is_empty()) {
