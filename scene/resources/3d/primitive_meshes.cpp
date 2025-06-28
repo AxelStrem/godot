@@ -4013,7 +4013,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 			if(interleave_vertices)
 			{
-				if(next_dir.dot(prev_dir) < 0.6) {
+				if(next_dir.dot(prev_dir) < 0.9) {
 					center_points[i].no_interleave = true;
 				} else {
 					center_points[i].no_interleave = false;
@@ -4054,20 +4054,13 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				center_points[0].no_interleave = true;
 		}		
 
-		int radial_segments = 1;
+		int radial_segments = segments;
 		float segment_angle = Math_PI;
 		if (profile == PROFILE_CROSS) {
-			radial_segments = segments;
 			segment_angle = Math_PI / radial_segments;
 		}
 		else if (profile == PROFILE_TUBE) {
-			if ((segments % 2) == 0) {
-				radial_segments = segments / 2;
-				segment_angle = Math_PI / radial_segments;
-			} else {
-				radial_segments = segments;
-				segment_angle = Math_PI * 2.0 / radial_segments;
-			}
+			segment_angle = Math_PI * 2.0 / radial_segments;
 		}
 
 		struct EdgePoint {
@@ -4265,6 +4258,29 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 						point = &edge_points[point_index];
 					}
 				}
+
+				int point_index = j;
+				EdgePoint* point = &edge_points[j];
+				while(point->next_point > point_index) {
+					if(point->filter) {
+						if(center_points[point->source_index].no_interleave) {
+							point->filter = 0;
+							EdgePoint* next_point = &edge_points[point->next_point];
+							while(next_point->filter) {
+								next_point = &edge_points[next_point->next_point];
+							}
+							next_point->prev_point = point_index;
+
+							EdgePoint* prev_point = &edge_points[point->prev_point];
+							while(prev_point->filter) {
+								prev_point = &edge_points[prev_point->prev_point];
+							}
+							prev_point->next_point = point->next_point;							
+						}
+					}
+					point_index = point->next_point;
+					point = &edge_points[point_index];
+				}
 			}
 		}
 
@@ -4342,8 +4358,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				}
 				EdgePoint* next_point = &edge_points[point->next_point];
 				EdgePoint* top_point = &edge_points[i*radial_segments + ((j + 1) % radial_segments)];
-				EdgePoint* bottom_point = &edge_points[((i+1)%center_points.size())*radial_segments + ((j + radial_segments - 1) % radial_segments)];
-				
+				EdgePoint* bottom_point = &edge_points[point->next_point - j + ((j + radial_segments - 1) % radial_segments)];
+
 				while(top_point->filter) {
 					top_point = &edge_points[top_point->prev_point];
 				}
