@@ -4163,7 +4163,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				
 						point.position = center_points[i].position + edge*spoke_rotated;
 
-						Vector3 normal_rotated = (profile == PROFILE_TUBE) ? -edge*binormal : normal;
+						Vector3 normal_rotated = (profile == PROFILE_TUBE) ? edge*binormal : normal;
 						normal_rotated.rotate(center_points[i].tangent, angle);
 						point.normal = normal_rotated;
 					}
