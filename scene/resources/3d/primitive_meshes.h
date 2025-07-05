@@ -442,6 +442,8 @@ private:
 	float tesselation_tolerance = 0.2;
 
 	Vector3 up_vector = Vector3(0.0, 1.0, 0.0);
+	float corner_threshold = 0.1;
+	bool smooth_shaded_corners = true;
 
 	Profile profile = PROFILE_FLAT;
 	int segments = 2;
@@ -479,6 +481,12 @@ public:
 
 	bool is_filter_overlaps() const;
 	void set_filter_overlaps(bool p_enable);
+
+	void set_corner_threshold(float p_threshold);
+	float get_corner_threshold() const;
+
+	void set_smooth_shaded_corners(bool p_enable);
+	bool is_smooth_shaded_corners() const;
 
 	void set_tesselation_mode(TesselationMode p_mode);
 	TesselationMode get_tesselation_mode() const;

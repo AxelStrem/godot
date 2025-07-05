@@ -3922,8 +3922,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 	bool _add_uv2 = get_add_uv2();
 	float _uv2_padding = get_uv2_padding() * texel_size;
 
-	const float corner_threshold = 0.9;
-
+	const float corner_scalar_threshold = cos(corner_threshold);
 
 	if(curve.is_valid() && (curve->get_point_count() > 1))
 	{
@@ -3995,7 +3994,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		Vector3 dir = (next_dir + prev_dir).normalized();
 		
 		center_points[0].tangent = dir;
-		if(next_dir.dot(prev_dir) < corner_threshold) {
+		if(next_dir.dot(prev_dir) < corner_scalar_threshold) {
 			center_points[0].no_interleave = true;
 		} else {
 			center_points[0].no_interleave = false;
@@ -4018,7 +4017,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			center_points[i].partial_length = total_length;
 			center_points[i].tangent = dir;
 
-			if(next_dir.dot(prev_dir) < corner_threshold) {
+			if(next_dir.dot(prev_dir) < corner_scalar_threshold) {
 				center_points[i].no_interleave = true;
 			} else {
 				center_points[i].no_interleave = false;
@@ -4047,7 +4046,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		dir = (next_dir + prev_dir).normalized();
 		total_length += prev_length;		
 		center_points[point_count - 1].tangent = dir;
-		if(next_dir.dot(prev_dir) < corner_threshold) {
+		if(next_dir.dot(prev_dir) < corner_scalar_threshold) {
 			center_points[point_count-1].no_interleave = true;
 		} else {
 			center_points[point_count-1].no_interleave = false;
@@ -4082,7 +4081,9 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			int next_point;
 			int prev_point;
 			char edge;
-			char filter;
+			bool filter;
+			bool next_connected = true;
+			bool prev_connected = true;
 		};
 
 		LocalVector<EdgePoint> edge_points;
@@ -4213,8 +4214,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 						point = next_point;
 						continue;
 					}
-					point->filter = 1;
-					next_point->filter = 1;
+					point->filter = true;
+					next_point->filter = true;
 					REMOVE_POINT(*point)
 					REMOVE_POINT(*next_point)
 					point = &edge_points[next_point->next_point];
@@ -4226,7 +4227,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 		if(filter_overlaps) {
 			for(int i=0; i<edge_points.size(); i++) {
-				edge_points[i].filter = 0;
+				edge_points[i].filter = false;
 			}
 
 			bool points_removed = true;
@@ -4253,13 +4254,13 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 								}
 								if(next_point->edge == point->edge) {
 									Vector3 next_dir = next_point->position - point->position;
-									if(next_dir.dot(point->tangent) < CMP_EPSILON) { 
-											point->filter = 1;
-											next_point->filter = 1;
+									if(next_dir.dot(point->tangent) < 0.0) { 
+											point->filter = true;
+											next_point->filter = true;
 										} 
-									if(next_dir.dot(next_point->tangent) < CMP_EPSILON) {
-											next_point->filter = 1;
-											point->filter = 1;
+									if(next_dir.dot(next_point->tangent) < 0.0) {
+											next_point->filter = true;
+											point->filter = true;
 										}
 
 									if(profile == PROFILE_TUBE) {
@@ -4283,11 +4284,11 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 										Vector3 top_dir = top_point->position - point->position;
 										Vector3 bottom_dir = bottom_point->position - next_point->position;
 										if(top_dir.cross(next_dir).dot(point->normal) < 0.0) {
-											point->filter = 1;
+											point->filter = true;
 										}
 
 										if(next_dir.cross(bottom_dir).dot(point->normal) < 0.0) {
-											point->filter = 1;
+										//	point->filter = true;
 										}
 									}
 
@@ -4305,45 +4306,20 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 						point_index = edge_points.size();
 						point = &edge_points[j];
-						point->filter = 0;
 						while(point_index > point->prev_point) {
 							if(point->filter) {
-								REMOVE_POINT(*point)
-								points_removed = true;
+								if(center_points[point->source_index].no_interleave) {
+									point->filter = false;
+								}
+								else {
+									REMOVE_POINT(*point)
+									points_removed = true;
+								}
 							}
 							point_index = point->next_point;
 							point = &edge_points[point_index];
 						}
 					}
-			}
-
-			for(int j=0; j < edge_points.size(); j++) {
-				EdgePoint* point = &edge_points[j];
-				if(point->filter) {
-					if(center_points[point->source_index].no_interleave) {
-						point->filter = 0;
-
-						int next_index = (j + radial_segments)%edge_points.size();
-						EdgePoint* next_point = &edge_points[next_index];
-						while(next_point->filter) {
-							next_index = (next_index + radial_segments)%edge_points.size();
-							next_point->prev_point = j;
-							next_point = &edge_points[next_index];
-						}
-						next_point->prev_point = j;
-						point->next_point = next_index;
-
-						int prev_index = (j + edge_points.size() - radial_segments)%edge_points.size();
-						EdgePoint* prev_point = &edge_points[prev_index];
-						while(prev_point->filter) {
-							prev_index = (prev_index + edge_points.size() - radial_segments)%edge_points.size();
-							prev_point->next_point = j;
-							prev_point = &edge_points[prev_index];
-						}
-						prev_point->next_point = j;							
-						point->prev_point = prev_index;
-					}
-				}
 			}
 		}
 
@@ -4444,112 +4420,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		}
 
 	}
-
-	/*for(int i=0;i<center_points.size();i++) {
-		if(center_points[i].no_interleave) {
-			debug_points.push_back(center_points[i].position);
-			debug_normals.push_back(center_points[i].tangent);
-		}
-	}*/
-
-		/*
-		if(profile != PROFILE_TUBE){
-			int face_count = points.size() / radial_segments;
-			for(int i=0; i < face_count - 4; i++){
-				for(int j=0; j < radial_segments; j++) {
-					if(i%2==0) {
-						indices.push_back(i*radial_segments + j);
-						indices.push_back((i + 1)*radial_segments + j);
-						indices.push_back((i + 2)*radial_segments + j);
-					}
-					else {
-						indices.push_back(i*radial_segments + j);
-						indices.push_back((i + 2)*radial_segments + j);
-						indices.push_back((i + 1)*radial_segments + j);
-					}
-				}
-			}
-
-			if(curve->is_closed()) {
-				// Add faces for the last segment.
-				int i = face_count - 4;
-				for(int j=0; j < radial_segments; j++) {
-					indices.push_back(i*radial_segments + j);
-					indices.push_back((i + 1)*radial_segments + j);
-					indices.push_back(j);
-
-					indices.push_back((i + 1)*radial_segments + j);
-					indices.push_back(radial_segments + j);
-					indices.push_back(j);
-				}
-			}
-			else
-			{
-				int i = face_count - 4;
-				for(int j=0; j < radial_segments; j++) {
-					indices.push_back(i*radial_segments + j);
-					indices.push_back((i + 1)*radial_segments + j);
-					indices.push_back((i + 2)*radial_segments + j);
-
-					indices.push_back((i + 1)*radial_segments + j);
-					indices.push_back((i + 3)*radial_segments + j);
-					indices.push_back((i + 2)*radial_segments + j);
-				}
-			}
-		}
-		else
-		{
-			int face_count = points.size() / segments;
-			for(int i=0; i < face_count - 2; i++){
-				for(int j=0; j < segments; j++) {
-						int next_j = (j + 1) % segments;					
-						indices.push_back(i*segments + j);
-						indices.push_back(i*segments + next_j);
-						indices.push_back((i+1)*segments + j);
-				
-						indices.push_back(i*segments + next_j);
-						indices.push_back((i+1)*segments + next_j);
-						indices.push_back((i+1)*segments + j);
-					}
-			}
-
-			int i = face_count - 2;
-			int next_i = (curve->is_closed()) ? 0 : (face_count - 1);
-			for(int j=0; j < segments; j++) {
-				int next_j = (j + 1) % segments;	
-				indices.push_back(i*segments + j);
-				indices.push_back(i*segments + next_j);
-				indices.push_back(next_i*segments + j);
-		
-				indices.push_back(i*segments + next_j);
-				indices.push_back(next_i*segments + next_j);
-				indices.push_back(next_i*segments + j);
-			}
-		}*/
-
-
-		// TODO: Simplify this.
-		/*if(curve->is_closed()){
-			int i = points.size() - 4;
-			indices.push_back(i);
-			indices.push_back(i + 1);
-			indices.push_back(0);
-
-			indices.push_back(i + 1);
-			indices.push_back(1);
-			indices.push_back(0);
-		}
-		else
-		{
-			int i = points.size() - 4;
-			indices.push_back(i);
-			indices.push_back(i + 1);
-			indices.push_back(i + 2);
-
-			indices.push_back(i + 1);
-			indices.push_back(i + 3);
-			indices.push_back(i + 2);
-		}*/
 
 		// temp for debug
 	
@@ -4676,6 +4546,12 @@ void Curve3DMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_tesselation_tolerance", "tolerance"), &Curve3DMesh::set_tesselation_tolerance);
 	ClassDB::bind_method(D_METHOD("get_tesselation_tolerance"), &Curve3DMesh::get_tesselation_tolerance);
 
+	ClassDB::bind_method(D_METHOD("set_corner_threshold", "corner_threshold"), &Curve3DMesh::set_corner_threshold);
+	ClassDB::bind_method(D_METHOD("get_corner_threshold"), &Curve3DMesh::get_corner_threshold);
+
+	ClassDB::bind_method(D_METHOD("is_smooth_shaded_corners"), &Curve3DMesh::is_smooth_shaded_corners);
+	ClassDB::bind_method(D_METHOD("set_smooth_shaded_corners", "enable"), &Curve3DMesh::set_smooth_shaded_corners);
+
 	ClassDB::bind_method(D_METHOD("set_interleave_vertices", "enable"), &Curve3DMesh::set_interleave_vertices);
 	ClassDB::bind_method(D_METHOD("is_interleave_vertices"), &Curve3DMesh::is_interleave_vertices);
 
@@ -4698,6 +4574,8 @@ void Curve3DMesh::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "up_vector", PROPERTY_HINT_NONE, "hint_tooltip:Up vector for the curve."), "set_up_vector", "get_up_vector");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "tesselation_mode", PROPERTY_HINT_ENUM, "Adaptive,Baked,Disabled"), "set_tesselation_mode", "get_tesselation_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "tesselation_tolerance", PROPERTY_HINT_RANGE, "0.001,1.0,0.001,or_greater,suffix:m"), "set_tesselation_tolerance", "get_tesselation_tolerance");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "corner_threshold", PROPERTY_HINT_RANGE, "0.0,1.0,0.001,or_greater,suffix:°"), "set_corner_threshold", "get_corner_threshold");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "smooth_shaded_corners", PROPERTY_HINT_NONE, "hint_tooltip:Smooth shaded corners."), "set_smooth_shaded_corners", "is_smooth_shaded_corners");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "interleave_vertices", PROPERTY_HINT_NONE, "hint_tooltip:Interleave vertices to reduce vertex count."), "set_interleave_vertices", "is_interleave_vertices");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "filter_overlaps", PROPERTY_HINT_NONE), "set_filter_overlaps", "is_filter_overlaps");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "scale_uv_by_length"), "set_scale_uv_by_length", "is_scale_uv_by_length");
@@ -4829,6 +4707,28 @@ void Curve3DMesh::set_tesselation_tolerance(float p_tolerance) {
 
 float Curve3DMesh::get_tesselation_tolerance() const {
 	return tesselation_tolerance;
+}
+
+void Curve3DMesh::set_corner_threshold(float p_threshold) {
+	if (corner_threshold != p_threshold) {
+		corner_threshold = p_threshold;
+		request_update();
+	}
+}
+
+float Curve3DMesh::get_corner_threshold() const {
+	return corner_threshold;
+}
+
+void Curve3DMesh::set_smooth_shaded_corners(bool p_enable) {
+	if (smooth_shaded_corners != p_enable) {
+		smooth_shaded_corners = p_enable;
+		request_update();
+	}
+}
+
+bool Curve3DMesh::is_smooth_shaded_corners() const {
+	return smooth_shaded_corners;
 }
 
 void Curve3DMesh::set_up_vector(const Vector3 &p_up_vector) {
