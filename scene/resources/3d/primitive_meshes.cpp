@@ -3935,7 +3935,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 		struct CenterPoint {
 			Vector3 position;
-			Vector3 tangent;
+			Vector3 tangent_next;
+			Vector3 tangent_prev;
 			Vector3 local_up;
 			float partial_length;
 			float width_correction;
@@ -3991,9 +3992,9 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		if(curve->is_closed()) {
 			prev_dir = (center_points[0].position - center_points[point_count - 1].position).normalized();
 		}
-		Vector3 dir = (next_dir + prev_dir).normalized();
 		
-		center_points[0].tangent = dir;
+		center_points[0].tangent_prev = prev_dir;
+		center_points[0].tangent_next = next_dir;
 		if(next_dir.dot(prev_dir) < corner_scalar_threshold) {
 			center_points[0].no_interleave = true;
 		} else {
@@ -4002,7 +4003,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		float total_length = 0.0;
 		center_points[0].partial_length = total_length;
 		if(!zero_width) {
-			center_points[0].local_up = up_vector.slide(dir).normalized();
+			center_points[0].local_up = up_vector.slide(next_dir).normalized();
 			center_points[0].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 		}
 
@@ -4012,10 +4013,10 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			float prev_length = prev_vec.length();
 			prev_dir = prev_vec.normalized();
 			next_dir = (center_points[i+1].position - center_points[i].position).normalized();
-			dir = (next_dir + prev_dir).normalized();
 			total_length += prev_length;
 			center_points[i].partial_length = total_length;
-			center_points[i].tangent = dir;
+			center_points[i].tangent_prev = prev_dir;
+			center_points[i].tangent_next = next_dir;
 
 			if(next_dir.dot(prev_dir) < corner_scalar_threshold) {
 				center_points[i].no_interleave = true;
@@ -4024,7 +4025,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}
 			
 			if(!zero_width) {
-				center_points[i].local_up = up_vector.slide(dir).normalized();
+				center_points[i].local_up = up_vector.slide(next_dir).normalized();
 				center_points[i].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 			}
 		}
@@ -4043,16 +4044,16 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}
 			total_length += extra_length;
 		}
-		dir = (next_dir + prev_dir).normalized();
 		total_length += prev_length;		
-		center_points[point_count - 1].tangent = dir;
+		center_points[point_count - 1].tangent_prev = prev_dir;
+		center_points[point_count - 1].tangent_next = next_dir;
 		if(next_dir.dot(prev_dir) < corner_scalar_threshold) {
 			center_points[point_count-1].no_interleave = true;
 		} else {
 			center_points[point_count-1].no_interleave = false;
 		}
 		if(!zero_width) {
-			center_points[point_count - 1].local_up = up_vector.slide(dir).normalized();
+			center_points[point_count - 1].local_up = up_vector.slide(next_dir).normalized();
 			center_points[point_count - 1].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
 		}
 
@@ -4119,23 +4120,20 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}
 
 			Vector3 binormal, spoke;
-			
+			Vector3 tangent_avg = (center_points[i].tangent_next + center_points[i].tangent_prev).normalized();
+
 			if(!zero_width) {
-				binormal = center_points[i].tangent.cross(center_points[i].local_up);
+				
+				binormal = tangent_avg.cross(center_points[i].local_up);
 				//binormal = center_points[i].tangent.cross(current_up);
 				//current_up = binormal.cross(center_points[i].tangent);
 				binormal.normalize();
-				binormal.rotate(center_points[i].tangent, center_points[i].tilt);
+				binormal.rotate(tangent_avg, center_points[i].tilt);
 				spoke = binormal * width * local_width;
 			} else {
 				binormal = Vector3(0.0,0.0,1.0);
 				spoke = Vector3(0.0,0.0,0.0);
-			}
-
-			
-			
-
-			Vector3 normal = -center_points[i].tangent.cross(binormal).normalized();
+			}			
 
 			// TODO: move this to where width_correction is calculated
 			Vector3 dir = (center_points[i].position - center_points[pri].position).normalized();
@@ -4152,8 +4150,16 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}
 
 			EdgePoint point;
-			point.tangent = center_points[i].tangent;
+
+			Vector3 tangent = tangent_avg;
+			if(!smooth_shaded_corners && center_points[i].no_interleave)
+			{
+				tangent = center_points[i].tangent_prev;
+			}
+
+			Vector3 normal = -tangent.cross(binormal).normalized();
 			point.uv.x = u;
+			point.tangent = tangent;
 			int edge_count = (profile == PROFILE_TUBE) ? 1 : 2;
 			for(int e = 0; e < edge_count; e++) {
 				int edge = e * 2 - 1;
@@ -4161,7 +4167,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 					if(!zero_width)
 					{
 						float angle = j * segment_angle;
-						Vector3 spoke_rotated = spoke.rotated(center_points[i].tangent, angle);
+						Vector3 spoke_rotated = spoke.rotated(tangent_avg, angle);
 
 						Vector3 stretched_component = spoke_rotated.dot(wc_dir) * wc_dir;
 						Vector3 fixed_component = spoke_rotated - stretched_component;
@@ -4169,8 +4175,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				
 						point.position = center_points[i].position + edge*spoke_rotated;
 
-						Vector3 normal_rotated = (profile == PROFILE_TUBE) ? edge*binormal : normal;
-						normal_rotated.rotate(center_points[i].tangent, angle);
+						Vector3 normal_rotated = (profile == PROFILE_TUBE) ? -edge*normal.cross(tangent) : normal;
+						normal_rotated.rotate(tangent, angle);
 						point.normal = normal_rotated;
 					}
 					else {
@@ -4181,13 +4187,40 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 					if(_add_uv2) {
 						point.uv2 = Vector2(_uv2_padding, 0.0);
 					}
-					
-					point.next_point = (edge_count*i+e+1)*radial_segments + j;
-					point.prev_point = (edge_count*i+e-1)*radial_segments + j;
+
+					int index = edge_points.size();
+					if(index >= radial_segments) {
+						point.prev_point = index - radial_segments;
+						edge_points[point.prev_point].next_point = index;
+					}
 					
 					point.source_index = i;
 					point.edge = e;
 					edge_points.push_back(point);
+				}
+			}
+
+			if(!smooth_shaded_corners && center_points[i].no_interleave) {
+
+				tangent = center_points[i].tangent_next;
+				normal = -tangent.cross(binormal).normalized();
+
+				for(int e = 0; e < edge_count; e++) {
+					int edge = e * 2 - 1;
+					for(int j=0; j < radial_segments; j++) {
+						int duplicated_index = edge_points.size() - radial_segments*edge_count;
+						point = edge_points[duplicated_index];
+						point.tangent = tangent;
+						Vector3 normal_rotated = (profile == PROFILE_TUBE) ? -edge*normal.cross(tangent) : normal;
+						normal_rotated.rotate(tangent, j * segment_angle);
+						point.normal = normal_rotated;
+						int index = edge_points.size();
+						point.prev_point = index - radial_segments;
+						edge_points[point.prev_point].next_point = index;
+						edge_points[duplicated_index].next_connected = false;
+						point.prev_connected = false;
+						edge_points.push_back(point);
+					}
 				}
 			}
 		}
@@ -4231,12 +4264,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}
 
 			bool points_removed = true;
-			bool pt_checked = true;
-			while(points_removed || pt_checked) {
-				if(!points_removed) {
-					pt_checked = false;
-				}
-				
+			while(points_removed) {
 				points_removed = false;
 
 				for(int j=0; j < radial_segments; j++) {
@@ -4288,7 +4316,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 										}
 
 										if(next_dir.cross(bottom_dir).dot(point->normal) < 0.0) {
-										//	point->filter = true;
+											point->filter = true;
 										}
 									}
 
@@ -4335,50 +4363,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 	tangents.push_back((m_point).tangent.z); \
 	tangents.push_back(1.0);
 
-	if(profile != PROFILE_TUBE){
-		for(int j = 0; j < radial_segments; j++) {
-			EdgePoint point = edge_points[j];
-			int last_edge_idx[2];
-			
-			int id = points.size();
-			int first_point_index = id;
-			last_edge_idx[point.edge] = id;
-			ADD_POINT(point)
 
-			id = points.size();
-			int second_point_index = id;
-			int point_index = point.next_point;
-			point = edge_points[point_index];
-			ADD_POINT(point)
-			last_edge_idx[point.edge] = id;
-
-			while(point.next_point > point_index) {
-				point_index = point.next_point;
-				point = edge_points[point.next_point];
-				
-				id = points.size();
-				ADD_POINT(point);				
-
-				indices.push_back(last_edge_idx[1]);
-				indices.push_back(last_edge_idx[0]);
-				indices.push_back(id);
-
-				last_edge_idx[point.edge] = id;
-			}
-
-			if(curve->is_closed()) {
-				indices.push_back(last_edge_idx[1]);
-				indices.push_back(last_edge_idx[0]);
-				indices.push_back(first_point_index);
-
-				last_edge_idx[edge_points[0].edge] = first_point_index;
-				indices.push_back(last_edge_idx[1]);
-				indices.push_back(last_edge_idx[0]);
-				indices.push_back(second_point_index);
-			}
-		}
-	} else {
-		for(int j = 0; j < radial_segments; j++) {
+	for(int j = 0; j < radial_segments; j++) {
 			EdgePoint* point = &edge_points[j];
 			int point_index = edge_points.size();
 			while(point->prev_point < point_index) {
@@ -4389,33 +4375,73 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}
 		}
 
+	if(profile != PROFILE_TUBE){
+		for(int j = 0; j < radial_segments; j++) {
+			const EdgePoint* point = &edge_points[j];
+			const EdgePoint* last_edge_idx[2];
+			
+			last_edge_idx[point->edge] = point;
+			int stop_point = point->next_point;
+			point = &edge_points[stop_point];
+			last_edge_idx[point->edge] = point;
+			int point_index;
+
+			do {
+				point_index = point->next_point;
+				point = &edge_points[point_index];
+				
+				bool skip_face = false;
+
+				if(!last_edge_idx[0]->next_connected && !last_edge_idx[1]->next_connected) {
+					skip_face = true;
+				}
+
+				if(!point->prev_connected && !last_edge_idx[1-point->edge]->prev_connected) {
+					skip_face = true;
+				}
+
+				if(!skip_face) {	
+					indices.push_back(last_edge_idx[1]->source_index);
+					indices.push_back(last_edge_idx[0]->source_index);
+					indices.push_back(point->source_index);
+				}
+
+				last_edge_idx[point->edge] = &edge_points[point_index];
+			} while(point_index != stop_point);
+		}
+	} else {
 		int disconnect_ends = curve->is_closed() ? 0 : 1;
-		for(int i=0;i < center_points.size() - disconnect_ends;i++) {
+		for(int i=0;i < edge_points.size(); i += radial_segments) {
 			for(int j=0;j<radial_segments;j++) {
-				int point_index = i*radial_segments + j;
+				int point_index = i + j;
 				EdgePoint* point = &edge_points[point_index];
 				if(point->filter) {
 					continue;
 				}
 				EdgePoint* next_point = &edge_points[point->next_point];
-				EdgePoint* top_point = &edge_points[i*radial_segments + ((j + 1) % radial_segments)];
+				EdgePoint* top_point = &edge_points[i + ((j + 1) % radial_segments)];
 				EdgePoint* bottom_point = &edge_points[point->next_point - j + ((j + radial_segments - 1) % radial_segments)];
 
 				while(top_point->filter) {
 					top_point = &edge_points[top_point->prev_point];
 				}
 
-				indices.push_back(point->source_index);
-				indices.push_back(next_point->source_index);
-				indices.push_back(top_point->source_index);
+				if(next_point->prev_connected || top_point->prev_connected)
+				{
+					indices.push_back(point->source_index);
+					indices.push_back(next_point->source_index);
+					indices.push_back(top_point->source_index);
+				}
 
 				while(bottom_point->filter) {
 					bottom_point = &edge_points[bottom_point->next_point];
 				}
 
-				indices.push_back(point->source_index);
-				indices.push_back(bottom_point->source_index);
-				indices.push_back(next_point->source_index);
+				if(point->next_connected || bottom_point->prev_connected) {
+					indices.push_back(point->source_index);
+					indices.push_back(bottom_point->source_index);
+					indices.push_back(next_point->source_index);
+				}
 			}
 		}
 
