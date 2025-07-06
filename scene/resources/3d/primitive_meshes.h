@@ -437,6 +437,7 @@ private:
 
 	float width = 0.5;
 	Ref<Curve> width_curve;
+	bool extend_edges = false;
 
 	TesselationMode tesselation_mode = TESSELATION_BAKED; 
 	float tesselation_tolerance = 0.2;
@@ -502,6 +503,9 @@ public:
 
 	void set_segments(int p_segments);
 	int get_segments() const;
+
+	void set_extend_edges(bool p_extend);
+	bool is_extend_edges() const;
 
 	Curve3DMesh();
 };

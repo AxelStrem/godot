@@ -3995,16 +3995,17 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		
 		center_points[0].tangent_prev = prev_dir;
 		center_points[0].tangent_next = next_dir;
-		if(next_dir.dot(prev_dir) < corner_scalar_threshold) {
-			center_points[0].no_interleave = true;
-		} else {
-			center_points[0].no_interleave = false;
-		}
+
 		float total_length = 0.0;
 		center_points[0].partial_length = total_length;
-		if(!zero_width) {
-			center_points[0].local_up = up_vector.slide(next_dir).normalized();
-			center_points[0].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
+
+		if(extend_edges && !curve->is_closed()) {
+			float extra_width = width * 0.5;
+			if(width_curve.is_valid()) {
+				extra_width *= width_curve->sample(0.0);
+			}
+			center_points[0].position -= next_dir * extra_width;
+			total_length += extra_width;
 		}
 
 		// Calculate tangents for the middle section
@@ -4017,17 +4018,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			center_points[i].partial_length = total_length;
 			center_points[i].tangent_prev = prev_dir;
 			center_points[i].tangent_next = next_dir;
-
-			if(next_dir.dot(prev_dir) < corner_scalar_threshold) {
-				center_points[i].no_interleave = true;
-			} else {
-				center_points[i].no_interleave = false;
-			}
-			
-			if(!zero_width) {
-				center_points[i].local_up = up_vector.slide(next_dir).normalized();
-				center_points[i].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
-			}
 		}
 
 		// Calculate tangent for the last point
@@ -4035,6 +4025,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		float prev_length = prev_vec.length();
 		prev_dir = prev_vec.normalized();
 		next_dir = prev_dir;
+		total_length += prev_length;
 		center_points[point_count - 1].partial_length = total_length;
 		if(curve->is_closed()) {
 			next_dir = (center_points[0].position - center_points[point_count - 1].position);
@@ -4043,18 +4034,29 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				next_dir /= extra_length;
 			}
 			total_length += extra_length;
-		}
-		total_length += prev_length;		
+		}	
 		center_points[point_count - 1].tangent_prev = prev_dir;
 		center_points[point_count - 1].tangent_next = next_dir;
-		if(next_dir.dot(prev_dir) < corner_scalar_threshold) {
-			center_points[point_count-1].no_interleave = true;
-		} else {
-			center_points[point_count-1].no_interleave = false;
+
+		if(extend_edges && !curve->is_closed()) {
+			float extra_width = width * 0.5;
+			if(width_curve.is_valid()) {
+				extra_width *= width_curve->sample(1.0);
+			}
+			center_points[point_count - 1].position += next_dir * extra_width;
+			total_length += extra_width;
+			center_points[point_count - 1].partial_length += extra_width;
 		}
-		if(!zero_width) {
-			center_points[point_count - 1].local_up = up_vector.slide(next_dir).normalized();
-			center_points[point_count - 1].width_correction = sqrt(2.0/(1.0 + prev_dir.dot(next_dir)));
+		
+
+		for(int i = 0; i < point_count; i++)
+		{
+			float corner_cosine = center_points[i].tangent_prev.dot(center_points[i].tangent_next);
+			center_points[i].no_interleave = (corner_cosine < corner_scalar_threshold);
+			if(!zero_width) {
+				center_points[i].local_up = up_vector.slide(center_points[i].tangent_next).normalized();
+				center_points[i].width_correction = sqrt(2.0/(1.0 + corner_cosine));
+			}
 		}
 
 		if(!curve->is_closed())
@@ -4094,23 +4096,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		LocalVector<Vector3> debug_normals;
 
 		for (int i = 0; i < point_count; i++) {
-			int pri = i - 1;
-			if (pri < 0) {
-				if(curve->is_closed()) {
-					pri = point_count - 1;
-				} else {
-					pri = 0;
-				}
-			}
-			int ni = i+1;
-			if (ni >= point_count) {
-				if(curve->is_closed()) {
-					ni = 0;
-				} else {
-					ni = point_count - 1;
-				}
-			}
-
+	
 			float local_width = 1.0;
 			float u = center_points[i].partial_length / total_length;
 
@@ -4136,8 +4122,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}			
 
 			// TODO: move this to where width_correction is calculated
-			Vector3 dir = (center_points[i].position - center_points[pri].position).normalized();
-			Vector3 dirn = (center_points[i].position - center_points[ni].position).normalized();
+			Vector3 dir = center_points[i].tangent_prev;
+			Vector3 dirn = -center_points[i].tangent_next;
 			Vector3 wc_dir = (dir + dirn).normalized();
 
 			if(scale_UV_by_length){
@@ -4227,7 +4213,11 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 		for(int j=0; j < radial_segments; j++) {
 			edge_points[edge_points.size() - radial_segments + j].next_point = j;
-			edge_points[j].prev_point = edge_points.size() - radial_segments + j;	
+			edge_points[j].prev_point = edge_points.size() - radial_segments + j;
+			if(!curve->is_closed()) {
+				edge_points[j].prev_connected = false;
+				edge_points[edge_points.size() - radial_segments + j].next_connected = false;
+			}
 		}
 
 #define REMOVE_POINT(m_point) \
@@ -4560,6 +4550,9 @@ void Curve3DMesh::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_width_curve", "curve"), &Curve3DMesh::set_width_curve);
 	ClassDB::bind_method(D_METHOD("get_width_curve"), &Curve3DMesh::get_width_curve);
 
+	ClassDB::bind_method(D_METHOD("set_extend_edges", "extend_edges"), &Curve3DMesh::set_extend_edges);
+	ClassDB::bind_method(D_METHOD("is_extend_edges"), &Curve3DMesh::is_extend_edges);
+
 	ClassDB::bind_method(D_METHOD("set_scale_uv_by_length", "scale_uv_by_length"), &Curve3DMesh::set_scale_UV_by_length);
 	ClassDB::bind_method(D_METHOD("is_scale_uv_by_length"), &Curve3DMesh::is_scale_UV_by_length);
 
@@ -4595,6 +4588,7 @@ void Curve3DMesh::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve3D"), "set_curve", "get_curve");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "width", PROPERTY_HINT_RANGE, "0.0,2.0,0.001,or_greater"), "set_width", "get_width");	
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "width_curve", PROPERTY_HINT_RESOURCE_TYPE, "Curve"), "set_width_curve", "get_width_curve");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "extend_edges", PROPERTY_HINT_NONE, "hint_tooltip:Extend edges to cover the curve."), "set_extend_edges", "is_extend_edges");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "profile", PROPERTY_HINT_ENUM, "Flat,Cross,Tube"), "set_profile", "get_profile");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "segments", PROPERTY_HINT_RANGE, "2,100,1,or_greater"), "set_segments", "get_segments");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "up_vector", PROPERTY_HINT_NONE, "hint_tooltip:Up vector for the curve."), "set_up_vector", "get_up_vector");
@@ -4806,6 +4800,17 @@ void Curve3DMesh::set_segments(int p_segments) {
 
 int Curve3DMesh::get_segments() const {
 	return segments;
+}
+
+void Curve3DMesh::set_extend_edges(bool p_extend) {
+	if (extend_edges != p_extend) {
+		extend_edges = p_extend;
+		request_update();
+	}
+}
+
+bool Curve3DMesh::is_extend_edges() const {
+	return extend_edges;
 }
 
 Curve3DMesh::Curve3DMesh() {
