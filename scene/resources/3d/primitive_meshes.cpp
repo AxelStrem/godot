@@ -3899,13 +3899,37 @@ bool TextMesh::is_uppercase() const {
 
 
 void Curve3DMesh::_update_lightmap_size() {
-	if (get_add_uv2()) {
+	if (get_add_uv2() && curve.is_valid() && (curve->get_point_count() > 1)) {
 		// size must have changed, update lightmap size hint
 		Size2i _lightmap_size_hint;
 		float padding = get_uv2_padding();
 
-		// TODO: finish this
+		float lightmap_length = curve->get_baked_length();
+		if(extend_edges && !curve->is_closed()) {
+			float extra_length = 1.0;
+			if (width_curve.is_valid()) {
+				extra_length += width_curve->sample(0.0);
+				extra_length += width_curve->sample(1.0);
+			}
+			lightmap_length += extra_width * width;
+		}
+		_lightmap_size_hint.x = MAX(1.0, lightmap_length / texel_size) + 2.0 * padding;
 
+		float lightmap_width = width;
+		if (width_curve.is_valid()) {
+			lightmap_width *= MAX(width_curve->get_max_value(), width_curve->get_min_value());
+		}
+		float width_padding = 1.0;
+		if(profile == PROFILE_CROSS) {
+			lightmap_width *= segments;
+			width_padding *= segments;
+		}
+		else if(profile == PROFILE_TUBE) {
+			lightmap_width *= Math_PI;
+			width_padding = 0.0;
+		}
+
+		_lightmap_size_hint.y = MAX(1.0, lightmap_width / texel_size) + width_padding * padding;
 		set_lightmap_size_hint(_lightmap_size_hint);
 	}
 }
@@ -3996,7 +4020,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		center_points[0].tangent_prev = prev_dir;
 		center_points[0].tangent_next = next_dir;
 
-		float total_length = 0.0;
+		total_length = 0.0;
 		center_points[0].partial_length = total_length;
 
 		if(extend_edges && !curve->is_closed()) {
@@ -4115,7 +4139,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 				//current_up = binormal.cross(center_points[i].tangent);
 				binormal.normalize();
 				binormal.rotate(tangent_avg, center_points[i].tilt);
-				spoke = binormal * width * local_width;
+				spoke = binormal * width * local_width * 0.5;
 			} else {
 				binormal = Vector3(0.0,0.0,1.0);
 				spoke = Vector3(0.0,0.0,0.0);
