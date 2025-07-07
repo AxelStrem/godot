@@ -3911,7 +3911,7 @@ void Curve3DMesh::_update_lightmap_size() {
 				extra_length += width_curve->sample(0.0);
 				extra_length += width_curve->sample(1.0);
 			}
-			lightmap_length += extra_width * width;
+			lightmap_length += extra_length * width;
 		}
 		_lightmap_size_hint.x = MAX(1.0, lightmap_length / texel_size) + 2.0 * padding;
 
@@ -3946,8 +3946,6 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 	bool _add_uv2 = get_add_uv2();
 	float _uv2_padding = get_uv2_padding() * texel_size;
 
-	const float corner_scalar_threshold = cos(corner_threshold);
-
 	if(curve.is_valid() && (curve->get_point_count() > 1))
 	{
 		// UP vector is not calculated correctly for the first point if the curve is closed
@@ -3956,6 +3954,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		
 		Vector3 up_vector_normalized = up_vector.normalized();
 		bool zero_width = (width == 0.0);
+		
+		const float corner_scalar_threshold = cos(corner_threshold);
 
 		struct CenterPoint {
 			Vector3 position;
@@ -4020,7 +4020,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		center_points[0].tangent_prev = prev_dir;
 		center_points[0].tangent_next = next_dir;
 
-		total_length = 0.0;
+		float total_length = 0.0;
 		center_points[0].partial_length = total_length;
 
 		if(extend_edges && !curve->is_closed()) {
@@ -4098,6 +4098,22 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			segment_angle = Math_PI * 2.0 / radial_segments;
 		}
 
+		float horizontal_total = total_length + 2.0 * _uv2_padding;
+		float length_h = total_length / horizontal_total;
+		float padding_h = _uv2_padding / horizontal_total;
+
+		float max_width = width;
+		if(width_curve.is_valid()) {
+			max_width *= MAX(width_curve->get_max_value(), width_curve->get_min_value());
+		}
+		
+		float length_v = 1.0 / radial_segments;
+		float edge_padding = length_v;
+		if (profile != PROFILE_TUBE) {
+			edge_padding *= max_width / (max_width + _uv2_padding);
+		}
+
+
 		struct EdgePoint {
 			Vector3 position;
 			Vector3 normal;
@@ -4169,6 +4185,9 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 			Vector3 normal = -tangent.cross(binormal).normalized();
 			point.uv.x = u;
+			if(_add_uv2) {
+				point.uv2.x = padding_h + u * length_h;
+			}
 			point.tangent = tangent;
 			int edge_count = (profile == PROFILE_TUBE) ? 1 : 2;
 			for(int e = 0; e < edge_count; e++) {
@@ -4195,7 +4214,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 					}
 					point.uv.y = 0.5 + edge*v_offset;
 					if(_add_uv2) {
-						point.uv2 = Vector2(_uv2_padding, 0.0);
+						point.uv2.y = e*edge_padding + j*length_v;
 					}
 
 					int index = edge_points.size();
