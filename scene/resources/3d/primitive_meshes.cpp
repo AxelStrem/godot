@@ -4352,7 +4352,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 											}
 										}
 
-									if(profile == PROFILE_TUBE) {
+									if(false && (profile == PROFILE_TUBE)) {
 										const EdgePoint* top_point = &edge_points[point_index - j + ((j + 1) % radial_segments)];
 										const EdgePoint* bottom_point = &edge_points[next_index - j + ((j + radial_segments - 1) % radial_segments)];
 
