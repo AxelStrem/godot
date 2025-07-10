@@ -4091,6 +4091,9 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 		int radial_segments = segments;
 		float segment_angle = Math_PI;
+		if(profile == PROFILE_FLAT) {
+			radial_segments = 1;
+		}
 		if (profile == PROFILE_CROSS) {
 			segment_angle = Math_PI / radial_segments;
 		}
@@ -4301,7 +4304,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			}
 
 			bool points_removed = true;
-			int max_iterations = 100;
+			int max_iterations = segments;
 			while(points_removed && (max_iterations > 0)) {
 				points_removed = false;
 				max_iterations--;
@@ -4320,14 +4323,33 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 									break;
 								}
 								if(next_point->edge == point->edge) {
+									EdgePoint* opposite_point = &edge_points[next_point->prev_point];
 									Vector3 next_dir = next_point->position - point->position;
-									if(next_dir.dot(point->tangent) < 0.0) { 
-											point->filter = true;
-											next_point->filter = true;
+									if(next_dir.dot(opposite_point->tangent) < 0.0) { 
+											if(max_iterations == 0) {
+												debug_points.push_back(point->position);
+												debug_normals.push_back(next_dir);
+												debug_points.push_back(center_points[point->source_index].position);
+												debug_normals.push_back(point->tangent);
+											}
+											else{
+												point->filter = true;
+												next_point->filter = true;
+											}
+											
 										} 
 									if(next_dir.dot(next_point->tangent) < 0.0) {
-											next_point->filter = true;
-											point->filter = true;
+											if(max_iterations == 0) {
+												debug_points2.push_back(next_point->position);
+												debug_normals.push_back(next_dir);
+												debug_points2.push_back(center_points[next_point->source_index].position);
+												debug_normals.push_back(next_point->tangent);
+											}
+											else
+											{
+												next_point->filter = true;
+												point->filter = true;
+											}
 										}
 
 									if(profile == PROFILE_TUBE) {
@@ -4825,7 +4847,7 @@ void Curve3DMesh::set_profile(Profile p_profile) {
 	if (profile != p_profile) {
 		profile = p_profile;
 		if(profile == PROFILE_FLAT) {
-			segments = 1;
+			//segments = 1;
 		}
 		else if (profile == PROFILE_CROSS) {
 			segments = MAX(segments, 2); 
@@ -4843,7 +4865,7 @@ Curve3DMesh::Profile Curve3DMesh::get_profile() const {
 
 void Curve3DMesh::set_segments(int p_segments) {
 	if(profile == PROFILE_FLAT) {
-		p_segments = 1;
+		//p_segments = 1;
 	}
 	else if (profile == PROFILE_CROSS) {
 		p_segments = MAX(p_segments, 2); 
