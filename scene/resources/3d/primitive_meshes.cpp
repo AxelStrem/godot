@@ -4323,7 +4323,14 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 									break;
 								}
 								if(next_point->edge == point->edge) {
-									EdgePoint* opposite_point = &edge_points[next_point->prev_point];
+									//looks like the fix worked but only for one direction
+									int opposite_index = next_index - radial_segments;
+									if(opposite_index < 0) {
+										opposite_index += edge_points.size();
+									}
+									EdgePoint* opposite_point = &edge_points[opposite_index];
+									
+
 									Vector3 next_dir = next_point->position - point->position;
 									if(next_dir.dot(opposite_point->tangent) < 0.0) { 
 											if(max_iterations == 0) {
