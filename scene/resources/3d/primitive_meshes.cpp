@@ -4127,7 +4127,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 			int next_point;
 			int prev_point;
 			char edge;
-			bool filter;
+			bool filter = false;
+			bool removed = false;
 			bool next_connected = true;
 			bool prev_connected = true;
 		};
@@ -4287,10 +4288,10 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 						point = next_point;
 						continue;
 					}
-					point->filter = true;
-					next_point->filter = true;
 					REMOVE_POINT(*point)
 					REMOVE_POINT(*next_point)
+					point->removed = true;
+					next_point->removed = true;
 					point = &edge_points[next_point->next_point];
 					point = &edge_points[point->next_point];
 					point = &edge_points[point->next_point];
@@ -4299,21 +4300,16 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		}
 
 		if(filter_overlaps) {
-			for(int i=0; i<edge_points.size(); i++) {
-				edge_points[i].filter = false;
-			}
 
 			bool points_removed = true;
-			int max_iterations = segments;
-			while(points_removed && (max_iterations > 0)) {
+		//	int max_iterations = 999;//segments;
+			while(points_removed) {
 				points_removed = false;
-				max_iterations--;
-
 				for(int j=0; j < radial_segments; j++) {
 					
 						int point_index = j;
 						int last_index = -1;
-						EdgePoint *point = &edge_points[j];
+						EdgePoint *point = &edge_points[point_index];
 						int next_index = point->next_point;
 						EdgePoint *next_point = &edge_points[next_index];
 
@@ -4323,29 +4319,14 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 									break;
 								}
 								if(next_point->edge == point->edge) {
-									//looks like the fix worked but only for one direction
-									int opposite_index = next_index - radial_segments;
-									if(opposite_index < 0) {
-										opposite_index += edge_points.size();
-									}
-									EdgePoint* opposite_point = &edge_points[opposite_index];
-									
 
+									Vector3 center_dir = center_points[next_point->source_index].position - center_points[point->source_index].position;
 									Vector3 next_dir = next_point->position - point->position;
-									if(next_dir.dot(opposite_point->tangent) < 0.0) { 
-											if(max_iterations == 0) {
-												debug_points.push_back(point->position);
-												debug_normals.push_back(next_dir);
-												debug_points.push_back(center_points[point->source_index].position);
-												debug_normals.push_back(point->tangent);
-											}
-											else{
+									if(next_dir.dot(center_dir) < 0.0) { 
 												point->filter = true;
-												next_point->filter = true;
-											}
-											
+												next_point->filter = true;											
 										} 
-									if(next_dir.dot(next_point->tangent) < 0.0) {
+									/*if(next_dir.dot(next_point->tangent) < 0.0) {
 											if(max_iterations == 0) {
 												debug_points2.push_back(next_point->position);
 												debug_normals.push_back(next_dir);
@@ -4357,7 +4338,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 												next_point->filter = true;
 												point->filter = true;
 											}
-										}
+										}*/
 
 									if(false && (profile == PROFILE_TUBE)) {
 										const EdgePoint* top_point = &edge_points[point_index - j + ((j + 1) % radial_segments)];
@@ -4409,6 +4390,8 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 						}
 						else {
 							REMOVE_POINT(*point)
+							point->removed = true;
+							point->filter = false;
 							points_removed = true;
 						}
 					}
@@ -4433,7 +4416,7 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 
 for(int k=0;k<edge_points.size(); ++k) {
 	EdgePoint* point = &edge_points[k];
-	if(!point->filter) {
+	if(!point->removed) {
 			point->source_index = points.size();
 			ADD_POINT(*point)
 		}
@@ -4485,17 +4468,15 @@ for(int k=0;k<edge_points.size(); ++k) {
 			for(int j=0;j < radial_segments;j++) {
 				int point_index = i + j;
 				EdgePoint* point = &edge_points[point_index];
-				if(point->filter) {
+				if(point->removed) {
 					continue;
 				}
 				EdgePoint* next_point = &edge_points[point->next_point];
 				EdgePoint* top_point = &edge_points[i + ((j + 1) % radial_segments)];
 				EdgePoint* bottom_point = &edge_points[point->next_point - j + ((j + radial_segments - 1) % radial_segments)];
 
-				int max_iter = 100;
-				while(top_point->filter && (max_iter > 0)) {
+				while(top_point->removed) {
 					top_point = &edge_points[top_point->prev_point];
-					max_iter--;
 				}
 
 				if(next_point->prev_connected || top_point->prev_connected)
@@ -4503,13 +4484,10 @@ for(int k=0;k<edge_points.size(); ++k) {
 					indices.push_back(point->source_index);
 					indices.push_back(next_point->source_index);
 					indices.push_back(top_point->source_index);
-
-					//print_line("Face A: ", point->source_index, next_point->source_index, top_point->source_index);
 				}
 
-				while(bottom_point->filter && (max_iter > 0)) {
+				while(bottom_point->removed) {
 					bottom_point = &edge_points[bottom_point->next_point];
-					max_iter--;
 				}
 
 				if(point->next_connected || bottom_point->prev_connected) 
@@ -4517,8 +4495,6 @@ for(int k=0;k<edge_points.size(); ++k) {
 					indices.push_back(point->source_index);
 					indices.push_back(bottom_point->source_index);
 					indices.push_back(next_point->source_index);
-
-					//print_line("Face B: ", point->source_index, bottom_point->source_index, next_point->source_index);
 				}
 			}
 		}
@@ -4854,7 +4830,7 @@ void Curve3DMesh::set_profile(Profile p_profile) {
 	if (profile != p_profile) {
 		profile = p_profile;
 		if(profile == PROFILE_FLAT) {
-			//segments = 1;
+			segments = 1;
 		}
 		else if (profile == PROFILE_CROSS) {
 			segments = MAX(segments, 2); 
@@ -4872,7 +4848,7 @@ Curve3DMesh::Profile Curve3DMesh::get_profile() const {
 
 void Curve3DMesh::set_segments(int p_segments) {
 	if(profile == PROFILE_FLAT) {
-		//p_segments = 1;
+		p_segments = 1;
 	}
 	else if (profile == PROFILE_CROSS) {
 		p_segments = MAX(p_segments, 2); 
