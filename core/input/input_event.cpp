@@ -1774,6 +1774,22 @@ void InputEventPanGesture::_bind_methods() {
 
 ///////////////////////////////////
 
+void InputEventMIDI::set_midi_input(const int p_midi_input) {
+	midi_input = p_midi_input;
+}
+
+int InputEventMIDI::get_midi_input() const {
+	return midi_input;
+}
+
+void InputEventMIDI::set_timestamp(const int64_t p_timestamp) {
+	timestamp = p_timestamp;
+}
+
+int64_t InputEventMIDI::get_timestamp() const {
+	return timestamp;
+}
+
 void InputEventMIDI::set_channel(const int p_channel) {
 	channel = p_channel;
 }
@@ -1867,6 +1883,10 @@ String InputEventMIDI::to_string() {
 }
 
 void InputEventMIDI::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("set_midi_input", "midi_input"), &InputEventMIDI::set_midi_input);
+	ClassDB::bind_method(D_METHOD("get_midi_input"), &InputEventMIDI::get_midi_input);
+	ClassDB::bind_method(D_METHOD("set_timestamp", "timestamp"), &InputEventMIDI::set_timestamp);
+	ClassDB::bind_method(D_METHOD("get_timestamp"), &InputEventMIDI::get_timestamp);
 	ClassDB::bind_method(D_METHOD("set_channel", "channel"), &InputEventMIDI::set_channel);
 	ClassDB::bind_method(D_METHOD("get_channel"), &InputEventMIDI::get_channel);
 	ClassDB::bind_method(D_METHOD("set_message", "message"), &InputEventMIDI::set_message);
@@ -1884,6 +1904,8 @@ void InputEventMIDI::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_controller_value", "controller_value"), &InputEventMIDI::set_controller_value);
 	ClassDB::bind_method(D_METHOD("get_controller_value"), &InputEventMIDI::get_controller_value);
 
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "midi_input"), "set_midi_input", "get_midi_input");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "timestamp"), "set_timestamp", "get_timestamp");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "channel"), "set_channel", "get_channel");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "message"), "set_message", "get_message");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "pitch"), "set_pitch", "get_pitch");
