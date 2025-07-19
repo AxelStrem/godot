@@ -437,7 +437,7 @@ private:
 	int segments = 2;
 
 	bool interleave_vertices = false;
-	bool filter_overlaps = true;
+	bool filter_overlaps = false;
 
 	bool scale_UV_by_length = false;
 	bool scale_UV_by_width = false;
