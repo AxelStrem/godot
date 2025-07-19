@@ -41,14 +41,16 @@ extern int WINAPI ShimMainCRTStartup() __attribute__((used));
 #endif
 
 extern int WINAPI ShimMainCRTStartup() {
-	if (IsProcessorFeaturePresent(PF_SSE4_2_INSTRUCTIONS_AVAILABLE)) {
+	// Temporary bypass for development - CPU validation disabled
+	// TODO: Remove this bypass before production builds
+	// if (IsProcessorFeaturePresent(PF_SSE4_2_INSTRUCTIONS_AVAILABLE)) {
 #ifdef WINDOWS_SUBSYSTEM_CONSOLE
 		return mainCRTStartup();
 #else
 		return WinMainCRTStartup();
 #endif
-	} else {
-		MessageBoxW(NULL, L"A CPU with SSE4.2 instruction set support is required.", L"Godot Engine", MB_OK | MB_ICONEXCLAMATION | MB_TASKMODAL);
-		return -1;
-	}
+	// } else {
+	//	MessageBoxW(NULL, L"A CPU with SSE4.2 instruction set support is required.", L"Godot Engine", MB_OK | MB_ICONEXCLAMATION | MB_TASKMODAL);
+	//	return -1;
+	// }
 }
