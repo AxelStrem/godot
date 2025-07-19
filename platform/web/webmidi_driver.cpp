@@ -94,5 +94,7 @@ void MIDIDriverWebMidi::on_midi_message(int p_device_index, int p_status, const 
 }
 
 void MIDIDriverWebMidi::_on_midi_message(int p_device_index, int p_status, const PackedByteArray &p_data, int p_data_len) {
-	MIDIDriver::send_event(p_device_index, p_status, p_data.ptr(), p_data_len);
+	// Use receive_input_packet to set MIDI input port and timestamp
+	uint64_t timestamp = OS::get_singleton()->get_ticks_msec(); // Basic timestamp for web
+	MIDIDriver::receive_input_packet(p_device_index, timestamp, p_status, p_data.ptr(), p_data_len);
 }
