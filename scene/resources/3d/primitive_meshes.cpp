@@ -4305,6 +4305,8 @@ void Curve3DMesh::_generate_edge_vertices(LocalVector<CenterPoint> &center_point
 
 				if(profile == PROFILE_CROSS && tile_segment_UV) {
 					point.uv.y = (e + j) * length_v;	
+				} else if(profile == PROFILE_TUBE) {
+					point.uv.y = (float)j / radial_segments;
 				} else {
 					point.uv.y = 0.5 + edge*v_offset;
 				}
