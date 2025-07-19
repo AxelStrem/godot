@@ -40,7 +40,8 @@ void MIDIDriverWinMidi::read(HMIDIIN hMidiIn, UINT wMsg, DWORD_PTR dwInstance, D
 		// Windows implementation has already unpacked running status and dropped any SysEx,
 		// so we can just forward straight to the event.
 		const uint8_t *midi_msg = (uint8_t *)&dwParam1;
-		send_event((int)dwInstance, midi_msg[0], &midi_msg[1], 2);
+		// Use receive_input_packet to set MIDI input port and timestamp
+		receive_input_packet((int)dwInstance, (uint64_t)dwParam2, midi_msg[0], &midi_msg[1], 2);
 	}
 }
 
