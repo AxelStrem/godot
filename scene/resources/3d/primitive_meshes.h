@@ -400,6 +400,148 @@ public:
 };
 
 /**
+	A ribbon-like mesh that follows a curve.
+*/
+class Curve3DMesh : public PrimitiveMesh {
+	GDCLASS(Curve3DMesh, PrimitiveMesh);
+
+public:
+	enum TesselationMode {
+		TESSELATION_ADAPTIVE,
+		TESSELATION_BAKED,
+		TESSELATION_DISABLED
+	};
+
+	enum Profile {
+		PROFILE_FLAT,
+		PROFILE_CROSS,
+		PROFILE_TUBE
+	};
+
+private:
+	Ref<Curve3D> curve;
+
+	float width = 0.5;
+	Ref<Curve> width_curve;
+	bool extend_edges = false;
+
+	TesselationMode tesselation_mode = TESSELATION_BAKED; 
+	float tesselation_tolerance = 4.0;
+
+	Vector3 up_vector = Vector3(0.0, 1.0, 0.0);
+	bool follow_curve = true;
+	float corner_threshold = 0.5236;
+	bool smooth_shaded_corners = true;
+
+	Profile profile = PROFILE_FLAT;
+	int segments = 2;
+
+	bool interleave_vertices = false;
+	bool filter_overlaps = true;
+
+	bool scale_UV_by_length = false;
+	bool scale_UV_by_width = false;
+	bool tile_segment_UV = true;
+
+	// Helper structs for mesh generation
+	struct CenterPoint {
+		Vector3 position;
+		Vector3 tangent_next;
+		Vector3 tangent_prev;
+		float partial_length;
+		float tilt;
+		bool corner_point = false;
+	};
+
+	struct EdgePoint {
+		Vector3 position;
+		Vector3 normal;
+		Vector2 uv;
+		Vector2 uv2;
+		Vector3 tangent;
+		int source_index;
+		int next_point;
+		int prev_point;
+		char edge;
+		bool filter = false;
+		bool removed = false;
+		bool next_connected = true;
+		bool prev_connected = true;
+	};
+
+	// Helper methods for mesh generation
+	void _generate_curve_points(LocalVector<CenterPoint> &center_points, float &total_length) const;
+	void _generate_edge_vertices(LocalVector<CenterPoint> &center_points, float total_length, int radial_segments, float _uv2_padding, LocalVector<EdgePoint> &edge_points) const;
+	void _interleave_edge_vertices(LocalVector<EdgePoint> &edge_points, LocalVector<CenterPoint> &center_points, int radial_segments) const;
+	void _filter_overlapping_vertices(LocalVector<EdgePoint> &edge_points, LocalVector<CenterPoint> &center_points, int radial_segments) const;
+	void _generate_triangles(LocalVector<EdgePoint> &edge_points, int radial_segments, Vector<Vector3> &points, Vector<Vector3> &normals, Vector<float> &tangents, Vector<Vector2> &uvs, Vector<Vector2> &uv2s, Vector<int> &indices) const;
+
+protected:
+	static void _bind_methods();
+	void _validate_property(PropertyInfo &p_property) const;
+	virtual void _create_mesh_array(Array &p_arr) const override;
+
+	virtual void _update_lightmap_size() override;
+
+public:
+	void set_width(const float p_width);
+	float get_width() const;
+
+	void set_curve(const Ref<Curve3D> &p_curve);
+	Ref<Curve3D> get_curve() const;
+
+	void set_width_curve(const Ref<Curve> &p_curve);
+	Ref<Curve> get_width_curve() const;
+
+	void set_scale_UV_by_length(bool p_enable);
+	bool is_scale_UV_by_length() const;
+
+	void set_scale_UV_by_width(bool p_enable);
+	bool is_scale_UV_by_width() const;
+
+	void set_tile_segment_UV(bool p_enable);
+	bool is_tile_segment_UV() const;
+
+	bool is_interleave_vertices() const;
+	void set_interleave_vertices(bool p_enable);
+
+	bool is_filter_overlaps() const;
+	void set_filter_overlaps(bool p_enable);
+
+	void set_corner_threshold(float p_threshold);
+	float get_corner_threshold() const;
+
+	void set_smooth_shaded_corners(bool p_enable);
+	bool is_smooth_shaded_corners() const;
+
+	void set_tesselation_mode(TesselationMode p_mode);
+	TesselationMode get_tesselation_mode() const;
+
+	void set_tesselation_tolerance(float p_tolerance);
+	float get_tesselation_tolerance() const;
+
+	void set_up_vector(const Vector3 &p_up_vector);
+	Vector3 get_up_vector() const;
+
+	void set_follow_curve(bool p_enable);
+	bool is_follow_curve() const;
+
+	void set_profile(Profile p_profile);
+	Profile get_profile() const;
+
+	void set_segments(int p_segments);
+	int get_segments() const;
+
+	void set_extend_edges(bool p_extend);
+	bool is_extend_edges() const;
+
+	Curve3DMesh();
+};
+
+VARIANT_ENUM_CAST(Curve3DMesh::TesselationMode)
+VARIANT_ENUM_CAST(Curve3DMesh::Profile)
+
+/**
 	A single point for use in particle systems
 */
 
