@@ -126,6 +126,8 @@ void Label3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_texture_filter"), &Label3D::get_texture_filter);
 
 	ClassDB::bind_method(D_METHOD("generate_triangle_mesh"), &Label3D::generate_triangle_mesh);
+	ClassDB::bind_method(D_METHOD("generate_glyph_positions"), &Label3D::generate_glyph_positions);
+	ClassDB::bind_method(D_METHOD("generate_glyph_sizes"), &Label3D::generate_glyph_sizes);
 
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "pixel_size", PROPERTY_HINT_RANGE, "0.0001,128,0.0001,suffix:m"), "set_pixel_size", "get_pixel_size");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "offset", PROPERTY_HINT_NONE, "suffix:px"), "set_offset", "get_offset");
@@ -331,9 +333,11 @@ Ref<TriangleMesh> Label3D::generate_triangle_mesh() const {
 	return triangle_mesh;
 }
 
-void Label3D::_generate_glyph_surfaces(const Glyph &p_glyph, Vector2 &r_offset, const Color &p_modulate, int p_priority, int p_outline_size) {
+void Label3D::_generate_glyph_surfaces(const Glyph &p_glyph, Vector2 &r_offset, Vector2 &g_size, const Color &p_modulate, int p_priority, int p_outline_size) {
 	if (p_glyph.index == 0) {
-		r_offset.x += p_glyph.advance * pixel_size * p_glyph.repeat; // Non visual character, skip.
+		g_size.x = p_glyph.advance * pixel_size * p_glyph.repeat;
+		g_size.y = 0.0;
+		r_offset.x += g_size.x; // Non visual character, skip.
 		return;
 	}
 
@@ -356,8 +360,13 @@ void Label3D::_generate_glyph_surfaces(const Glyph &p_glyph, Vector2 &r_offset, 
 		gl_of = Vector2(0, -gl_sz.y);
 	}
 
+	// Store glyph size for external access
+	g_size = gl_sz;
+
 	if (gl_uv.size.x <= 2 || gl_uv.size.y <= 2) {
-		r_offset.x += p_glyph.advance * pixel_size * p_glyph.repeat; // Nothing to draw.
+		g_size.x = p_glyph.advance * pixel_size * p_glyph.repeat;
+		g_size.y = 0.0;
+		r_offset.x += g_size.x; // Nothing to draw.
 		return;
 	}
 
@@ -580,6 +589,9 @@ void Label3D::_shape() {
 		} break;
 	}
 
+	glyph_positions.clear();
+	glyph_sizes.clear();
+
 	Vector2 offset = Vector2(0, vbegin + lbl_offset.y * pixel_size);
 	for (int i = 0; i < lines_rid.size(); i++) {
 		const Glyph *glyphs = TS->shaped_text_get_glyphs(lines_rid[i]);
@@ -612,13 +624,17 @@ void Label3D::_shape() {
 			// Outline surfaces.
 			Vector2 ol_offset = offset;
 			for (int j = 0; j < gl_size; j++) {
-				_generate_glyph_surfaces(glyphs[j], ol_offset, outline_modulate, outline_render_priority, outline_size);
+				Vector2 g_size;
+				_generate_glyph_surfaces(glyphs[j], ol_offset, g_size, outline_modulate, outline_render_priority, outline_size);
 			}
 		}
 
 		// Main text surfaces.
 		for (int j = 0; j < gl_size; j++) {
-			_generate_glyph_surfaces(glyphs[j], offset, modulate, render_priority);
+			glyph_positions.append(Vector3(offset.x, offset.y, 0.0));
+			Vector2 g_size;
+			_generate_glyph_surfaces(glyphs[j], offset, g_size, modulate, render_priority);
+			glyph_sizes.append(Vector3(g_size.x, g_size.y, 0.0));
 		}
 		offset.y -= (TS->shaped_text_get_descent(lines_rid[i]) + line_spacing) * pixel_size;
 	}
@@ -1094,6 +1110,14 @@ Label3D::Label3D() {
 	set_gi_mode(GI_MODE_DISABLED);
 
 	set_base(mesh);
+}
+
+PackedVector3Array Label3D::generate_glyph_positions() const {
+	return glyph_positions;
+}
+
+PackedVector3Array Label3D::generate_glyph_sizes() const {
+	return glyph_sizes;
 }
 
 Label3D::~Label3D() {
