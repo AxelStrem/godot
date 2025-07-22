@@ -277,6 +277,7 @@ public:
 		FLAG_DISABLE_SPECULAR_OCCLUSION,
 		FLAG_USE_Z_CLIP_SCALE,
 		FLAG_USE_FOV_OVERRIDE,
+		FLAG_BILLBOARD_UV,
 		FLAG_MAX
 	};
 
@@ -500,6 +501,7 @@ private:
 		StringName distance_fade_min;
 		StringName distance_fade_max;
 		StringName ao_light_affect;
+		StringName billboard_width;
 
 		StringName metallic_texture_channel;
 		StringName ao_texture_channel;
@@ -553,6 +555,7 @@ private:
 	Color transmittance_color;
 	float transmittance_depth = 0.0f;
 	float transmittance_boost = 0.0f;
+	float billboard_width = 1.0f;
 
 	Color backlight;
 	float refraction = 0.0f;
@@ -653,6 +656,9 @@ public:
 
 	void set_roughness(float p_roughness);
 	float get_roughness() const;
+
+	void set_billboard_width(float p_roughness);
+	float get_billboard_width() const;
 
 	void set_emission(const Color &p_emission);
 	Color get_emission() const;
