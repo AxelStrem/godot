@@ -333,6 +333,18 @@ Ref<TriangleMesh> Label3D::generate_triangle_mesh() const {
 	return triangle_mesh;
 }
 
+PackedVector3Array Label3D::generate_glyph_positions() const
+{
+	return glyph_positions;
+}
+
+
+PackedVector3Array Label3D::generate_glyph_sizes() const
+{
+	return glyph_sizes;
+}
+
+
 void Label3D::_generate_glyph_surfaces(const Glyph &p_glyph, Vector2 &r_offset, Vector2 &g_size, const Color &p_modulate, int p_priority, int p_outline_size) {
 	if (p_glyph.index == 0) {
 		g_size.x = p_glyph.advance * pixel_size * p_glyph.repeat;
@@ -535,8 +547,7 @@ void Label3D::_shape() {
 			case TextServer::AUTOWRAP_OFF:
 				break;
 		}
-		autowrap_flags = autowrap_flags | autowrap_flags_trim;
-
+		autowrap_flags = autowrap_flags ;//| autowrap_flags_trim;
 		PackedInt32Array line_breaks = TS->shaped_text_get_line_breaks(text_rid, width, 0, autowrap_flags);
 		float max_line_w = 0.0;
 		for (int i = 0; i < line_breaks.size(); i = i + 2) {
@@ -620,21 +631,21 @@ void Label3D::_shape() {
 		}
 		offset.y -= TS->shaped_text_get_ascent(lines_rid[i]) * pixel_size;
 
+		Vector2 g_size;
+
 		if (outline_modulate.a != 0.0 && outline_size > 0) {
 			// Outline surfaces.
 			Vector2 ol_offset = offset;
 			for (int j = 0; j < gl_size; j++) {
-				Vector2 g_size;
 				_generate_glyph_surfaces(glyphs[j], ol_offset, g_size, outline_modulate, outline_render_priority, outline_size);
 			}
 		}
 
 		// Main text surfaces.
 		for (int j = 0; j < gl_size; j++) {
-			glyph_positions.append(Vector3(offset.x, offset.y, 0.0));
-			Vector2 g_size;
+			glyph_positions.append(Vector3(offset.x,  offset.y, 0.0));
 			_generate_glyph_surfaces(glyphs[j], offset, g_size, modulate, render_priority);
-			glyph_sizes.append(Vector3(g_size.x, g_size.y, 0.0));
+			glyph_sizes.append(Vector3(g_size.x,  g_size.y, 0.0));
 		}
 		offset.y -= (TS->shaped_text_get_descent(lines_rid[i]) + line_spacing) * pixel_size;
 	}
