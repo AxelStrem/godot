@@ -599,6 +599,7 @@ void BaseMaterial3D::init_shaders() {
 	shader_names->rim_tint = "rim_tint";
 	shader_names->clearcoat = "clearcoat";
 	shader_names->clearcoat_roughness = "clearcoat_roughness";
+	shader_names->billboard_width = "billboard_width";
 	shader_names->anisotropy = "anisotropy_ratio";
 	shader_names->heightmap_scale = "heightmap_scale";
 	shader_names->subsurface_scattering_strength = "subsurface_scattering_strength";
@@ -1210,6 +1211,10 @@ uniform vec3 uv2_offset;
 		code += "uniform float fov_override : hint_range(1.0, 179.0, 0.1);\n";
 	}
 
+	if (flags[FLAG_BILLBOARD_UV]) {
+		code += "uniform float billboard_width : hint_range(0.0, 10.0, 0.01);\n";
+	}
+
 	// Generate vertex shader.
 	code += R"(
 void vertex() {)";
@@ -1468,6 +1473,13 @@ void vertex() {)";
 		PROJECTION_MATRIX[0][0] = f / aspect;
 		PROJECTION_MATRIX[1][1] = f;
 	}
+)";
+	}
+
+	if (flags[FLAG_BILLBOARD_UV]) {
+		code += R"(
+	// Billboard UV: Enabled
+	VERTEX += (UV.y - 0.5) * billboard_width * normalize(cross(TANGENT, VERTEX));
 )";
 	}
 
@@ -2815,6 +2827,15 @@ BaseMaterial3D::BillboardMode BaseMaterial3D::get_billboard_mode() const {
 	return billboard_mode;
 }
 
+void BaseMaterial3D::set_billboard_width(float p_width) {
+	billboard_width = p_width;
+	_material_set_param(shader_names->billboard_width, p_width);
+}
+
+float BaseMaterial3D::get_billboard_width() const {
+	return billboard_width;
+}
+
 void BaseMaterial3D::set_particles_anim_h_frames(int p_frames) {
 	particles_anim_h_frames = p_frames;
 	_material_set_param(shader_names->particles_anim_h_frames, p_frames);
@@ -3463,6 +3484,8 @@ void BaseMaterial3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_billboard_mode", "mode"), &BaseMaterial3D::set_billboard_mode);
 	ClassDB::bind_method(D_METHOD("get_billboard_mode"), &BaseMaterial3D::get_billboard_mode);
+	ClassDB::bind_method(D_METHOD("set_billboard_width", "billboard_width"), &BaseMaterial3D::set_billboard_width);
+	ClassDB::bind_method(D_METHOD("get_billboard_width"), &BaseMaterial3D::get_billboard_width);
 
 	ClassDB::bind_method(D_METHOD("set_particles_anim_h_frames", "frames"), &BaseMaterial3D::set_particles_anim_h_frames);
 	ClassDB::bind_method(D_METHOD("get_particles_anim_h_frames"), &BaseMaterial3D::get_particles_anim_h_frames);
@@ -3718,6 +3741,8 @@ void BaseMaterial3D::_bind_methods() {
 	ADD_GROUP("Billboard", "billboard_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "billboard_mode", PROPERTY_HINT_ENUM, "Disabled,Enabled,Y-Billboard,Particle Billboard"), "set_billboard_mode", "get_billboard_mode");
 	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "billboard_keep_scale"), "set_flag", "get_flag", FLAG_BILLBOARD_KEEP_SCALE);
+	ADD_PROPERTYI(PropertyInfo(Variant::BOOL, "billboard_uv"), "set_flag", "get_flag", FLAG_BILLBOARD_UV);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "billboard_width", PROPERTY_HINT_RANGE, "0,10,0.01"), "set_billboard_width", "get_billboard_width");
 
 	ADD_GROUP("Particles Anim", "particles_anim_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "particles_anim_h_frames", PROPERTY_HINT_RANGE, "1,128,1"), "set_particles_anim_h_frames", "get_particles_anim_h_frames");
@@ -3943,6 +3968,7 @@ BaseMaterial3D::BaseMaterial3D(bool p_orm) :
 	set_uv2_scale(Vector3(1, 1, 1));
 	set_uv2_triplanar_blend_sharpness(1);
 	set_billboard_mode(BILLBOARD_DISABLED);
+	set_billboard_width(1.0);
 	set_particles_anim_h_frames(1);
 	set_particles_anim_v_frames(1);
 	set_particles_anim_loop(false);
