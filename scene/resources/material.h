@@ -277,6 +277,7 @@ public:
 		FLAG_DISABLE_SPECULAR_OCCLUSION,
 		FLAG_USE_Z_CLIP_SCALE,
 		FLAG_USE_FOV_OVERRIDE,
+		FLAG_BILLBOARD_UV,
 		FLAG_MAX
 	};
 
@@ -472,6 +473,7 @@ private:
 		StringName rim_tint;
 		StringName clearcoat;
 		StringName clearcoat_roughness;
+		StringName billboard_width;
 		StringName anisotropy;
 		StringName heightmap_scale;
 		StringName subsurface_scattering_strength;
@@ -607,6 +609,8 @@ private:
 	DiffuseMode diffuse_mode = DIFFUSE_BURLEY;
 	BillboardMode billboard_mode;
 	EmissionOperator emission_op = EMISSION_OP_ADD;
+
+	float billboard_width = 1.0f;
 
 	TextureChannel metallic_texture_channel;
 	TextureChannel roughness_texture_channel;
@@ -793,6 +797,9 @@ public:
 
 	void set_billboard_mode(BillboardMode p_mode);
 	BillboardMode get_billboard_mode() const;
+
+	void set_billboard_width(float p_width);
+	float get_billboard_width() const;
 
 	void set_particles_anim_h_frames(int p_frames);
 	int get_particles_anim_h_frames() const;
