@@ -42,6 +42,7 @@
 #include "scene/animation/animation_player.h"
 #include "scene/animation/animation_tree.h"
 #include "scene/animation/tween.h"
+#include "scene/animation/tweak.h"
 #include "scene/audio/audio_stream_player.h"
 #include "scene/debugger/scene_debugger.h"
 #include "scene/gui/aspect_ratio_container.h"
@@ -550,6 +551,7 @@ void register_scene_types() {
 
 	/* REGISTER ANIMATION */
 	GDREGISTER_CLASS(Tween);
+	GDREGISTER_CLASS(Tweak);
 	GDREGISTER_ABSTRACT_CLASS(Tweener);
 	GDREGISTER_CLASS(PropertyTweener);
 	GDREGISTER_CLASS(IntervalTweener);

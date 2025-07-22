@@ -50,6 +50,7 @@ class Mesh;
 class MultiplayerAPI;
 class SceneDebugger;
 class Tween;
+class Tweak;
 class Viewport;
 
 class SceneTreeTimer : public RefCounted {
