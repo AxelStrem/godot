@@ -39,6 +39,7 @@
 #include "core/string/print_string.h"
 #include "core/string/translation_server.h"
 #include "core/variant/typed_array.h"
+#include "scene/animation/tweak.h"
 
 #ifdef DEBUG_ENABLED
 
@@ -279,6 +280,14 @@ void Object::_postinitialize() {
 }
 
 void Object::set(const StringName &p_name, const Variant &p_value, bool *r_valid) {
+	if(object_tweaker)
+	{
+		return set_direct(p_name, object_tweaker->set_base(p_name, p_value), r_valid);
+	}
+	return set_direct(p_name, p_value, r_valid);
+}
+
+void Object::set_direct(const StringName &p_name, const Variant &p_value, bool *r_valid) {
 #ifdef TOOLS_ENABLED
 
 	_edited = true;
@@ -518,6 +527,14 @@ Variant Object::get_indexed(const Vector<StringName> &p_names, bool *r_valid) co
 	}
 
 	return current_value;
+}
+
+Variant Object::get_tweaked(const StringName &p_name, const Variant &add_to_base) const {
+	if(object_tweaker)
+	{
+		return object_tweaker->get_tweaked(p_name, add_to_base);
+	}
+	return Variant::evaluate(Variant::Operator::OP_ADD, get(p_name), add_to_base);
 }
 
 void Object::get_property_list(List<PropertyInfo> *p_list, bool p_reversed) const {
@@ -993,6 +1010,13 @@ void Object::set_script_and_instance(const Variant &p_script, ScriptInstance *p_
 
 	script = p_script;
 	script_instance = p_instance;
+}
+
+void Object::set_object_tweaker(ObjectTweaker *p_obj_tweaker) {
+	ERR_FAIL_NULL(p_obj_tweaker);
+	ERR_FAIL_COND(object_tweaker!=nullptr);
+	object_tweaker = p_obj_tweaker;
+	object_tweaker->set_owning_object(this);
 }
 
 void Object::set_script(const Variant &p_script) {
@@ -1771,6 +1795,7 @@ void Object::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get", "property"), &Object::_get_bind);
 	ClassDB::bind_method(D_METHOD("set_indexed", "property_path", "value"), &Object::_set_indexed_bind);
 	ClassDB::bind_method(D_METHOD("get_indexed", "property_path"), &Object::_get_indexed_bind);
+	ClassDB::bind_method(D_METHOD("get_tweaked", "property", "add_to_base"), &Object::get_tweaked);
 	ClassDB::bind_method(D_METHOD("get_property_list"), &Object::_get_property_list_bind);
 	ClassDB::bind_method(D_METHOD("get_method_list"), &Object::_get_method_list_bind);
 	ClassDB::bind_method(D_METHOD("property_can_revert", "property"), &Object::property_can_revert);
@@ -2238,6 +2263,12 @@ void Object::assign_class_name_static(const Span<char> &p_name, StringName &r_ta
 }
 
 Object::~Object() {
+	if(object_tweaker)
+	{
+		memdelete(object_tweaker);
+	}
+	object_tweaker = nullptr;
+
 	if (script_instance) {
 		memdelete(script_instance);
 	}
