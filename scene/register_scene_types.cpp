@@ -551,6 +551,7 @@ void register_scene_types() {
 
 	/* REGISTER ANIMATION */
 	GDREGISTER_CLASS(Tween);
+	GDREGISTER_CLASS(Tweak);
 	GDREGISTER_ABSTRACT_CLASS(Tweener);
 	GDREGISTER_CLASS(PropertyTweener);
 	GDREGISTER_CLASS(IntervalTweener);

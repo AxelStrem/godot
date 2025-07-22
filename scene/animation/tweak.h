@@ -157,15 +157,15 @@ private:
 	bool valid = false;
 	TweakImpl* pImpl = nullptr;
 public:
-	enum ActionType {
-		ACTION_SET,
-		ACTION_ADD,
-		ACTION_SUBTRACT,
-		ACTION_MULTIPLY,
-		ACTION_DIVIDE,
-		ACTION_AND,
-		ACTION_OR
-	};
+enum ActionType {
+	ACTION_SET,
+	ACTION_ADD,
+	ACTION_SUBTRACT,
+	ACTION_MULTIPLY,
+	ACTION_DIVIDE,
+	ACTION_AND,
+	ACTION_OR
+};
 
 	Tweak();
 	Tweak(Object* p_object, const StringName& p_property, const Variant &p_value, Tweak::ActionType action, int priority);
@@ -176,7 +176,7 @@ public:
 
 	_FORCE_INLINE_ const Variant& get_value() const { return pImpl->get_value(); };
 	void set_value(const Variant& value);
-
+	
 	_FORCE_INLINE_ int get_order() const { return pImpl->order; }
 	_FORCE_INLINE_ int get_priority() const { return pImpl->priority; }
 
