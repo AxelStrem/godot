@@ -599,7 +599,6 @@ void BaseMaterial3D::init_shaders() {
 	shader_names->rim_tint = "rim_tint";
 	shader_names->clearcoat = "clearcoat";
 	shader_names->clearcoat_roughness = "clearcoat_roughness";
-	shader_names->billboard_width = "billboard_width";
 	shader_names->anisotropy = "anisotropy_ratio";
 	shader_names->heightmap_scale = "heightmap_scale";
 	shader_names->subsurface_scattering_strength = "subsurface_scattering_strength";
@@ -612,6 +611,7 @@ void BaseMaterial3D::init_shaders() {
 	shader_names->uv2_offset = "uv2_offset";
 	shader_names->uv1_blend_sharpness = "uv1_blend_sharpness";
 	shader_names->uv2_blend_sharpness = "uv2_blend_sharpness";
+	shader_names->billboard_width = "billboard_width";
 
 	shader_names->particles_anim_h_frames = "particles_anim_h_frames";
 	shader_names->particles_anim_v_frames = "particles_anim_v_frames";
@@ -856,7 +856,10 @@ void BaseMaterial3D::_update_shader() {
 	if (features[FEATURE_SUBSURFACE_SCATTERING] && flags[FLAG_SUBSURFACE_MODE_SKIN]) {
 		code += ", sss_mode_skin";
 	}
-
+	bool custom_vertex_transform = flags[FLAG_BILLBOARD_UV];
+	if (custom_vertex_transform) {
+		code += ", skip_vertex_transform";
+	}
 	if (shading_mode == SHADING_MODE_UNSHADED) {
 		code += ", unshaded";
 	}
@@ -1196,6 +1199,12 @@ varying vec3 uv2_power_normal;
 )";
 	}
 
+	if(flags[FLAG_BILLBOARD_UV]){
+		code += R"(
+uniform float billboard_width : hint_range(0.0, 10.0, 0.01);
+)";
+	}
+
 	code += R"(
 uniform vec3 uv1_scale;
 uniform vec3 uv1_offset;
@@ -1209,10 +1218,6 @@ uniform vec3 uv2_offset;
 
 	if (flags[FLAG_USE_FOV_OVERRIDE]) {
 		code += "uniform float fov_override : hint_range(1.0, 179.0, 0.1);\n";
-	}
-
-	if (flags[FLAG_BILLBOARD_UV]) {
-		code += "uniform float billboard_width : hint_range(0.0, 10.0, 0.01);\n";
 	}
 
 	// Generate vertex shader.
@@ -1458,6 +1463,40 @@ void vertex() {)";
 )";
 	}
 
+	if(custom_vertex_transform) {
+		code += R"(
+	// Custom Vertex Transform: Enabled
+	VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    NORMAL = normalize((MODELVIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+    BINORMAL = normalize((MODELVIEW_MATRIX * vec4(BINORMAL, 0.0)).xyz);
+    TANGENT = normalize((MODELVIEW_MATRIX * vec4(TANGENT, 0.0)).xyz);
+	)";
+	}
+
+	if(flags[FLAG_BILLBOARD_UV]) {
+		code += R"(
+	// Billboard UV: Enabled
+	VERTEX += (UV.y - 0.5)*billboard_width*normalize(cross(TANGENT, VERTEX));
+)";
+	}
+
+	if(custom_vertex_transform) {
+		code += R"(
+	// Custom Vertex Transform: Enabled
+	VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    NORMAL = normalize((MODELVIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+    BINORMAL = normalize((MODELVIEW_MATRIX * vec4(BINORMAL, 0.0)).xyz);
+    TANGENT = normalize((MODELVIEW_MATRIX * vec4(TANGENT, 0.0)).xyz);
+	)";
+	}
+
+	if(flags[FLAG_BILLBOARD_UV]) {
+		code += R"(
+	// Billboard UV: Enabled
+	VERTEX += (UV.y - 0.5)*billboard_width*normalize(cross(TANGENT, VERTEX));
+)";
+	}
+
 	if (flags[FLAG_USE_Z_CLIP_SCALE]) {
 		code += R"(
 	Z_CLIP_SCALE = z_clip_scale;
@@ -1475,14 +1514,6 @@ void vertex() {)";
 	}
 )";
 	}
-
-	if (flags[FLAG_BILLBOARD_UV]) {
-		code += R"(
-	// Billboard UV: Enabled
-	VERTEX += (UV.y - 0.5) * billboard_width * normalize(cross(TANGENT, VERTEX));
-)";
-	}
-
 	// End of the vertex shader function.
 	code += "}\n";
 
@@ -2173,6 +2204,15 @@ float BaseMaterial3D::get_roughness() const {
 	return roughness;
 }
 
+void BaseMaterial3D::set_billboard_width(float p_billboard_width) {
+	billboard_width = p_billboard_width;
+	_material_set_param(shader_names->billboard_width, p_billboard_width);
+}
+
+float BaseMaterial3D::get_billboard_width() const {
+	return billboard_width;
+}
+
 void BaseMaterial3D::set_metallic(float p_metallic) {
 	metallic = p_metallic;
 	_material_set_param(shader_names->metallic, p_metallic);
@@ -2827,15 +2867,6 @@ BaseMaterial3D::BillboardMode BaseMaterial3D::get_billboard_mode() const {
 	return billboard_mode;
 }
 
-void BaseMaterial3D::set_billboard_width(float p_width) {
-	billboard_width = p_width;
-	_material_set_param(shader_names->billboard_width, p_width);
-}
-
-float BaseMaterial3D::get_billboard_width() const {
-	return billboard_width;
-}
-
 void BaseMaterial3D::set_particles_anim_h_frames(int p_frames) {
 	particles_anim_h_frames = p_frames;
 	_material_set_param(shader_names->particles_anim_h_frames, p_frames);
@@ -3376,6 +3407,9 @@ void BaseMaterial3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_roughness", "roughness"), &BaseMaterial3D::set_roughness);
 	ClassDB::bind_method(D_METHOD("get_roughness"), &BaseMaterial3D::get_roughness);
+	
+	ClassDB::bind_method(D_METHOD("set_billboard_width", "billboard_width"), &BaseMaterial3D::set_billboard_width);
+	ClassDB::bind_method(D_METHOD("get_billboard_width"), &BaseMaterial3D::get_billboard_width);
 
 	ClassDB::bind_method(D_METHOD("set_emission", "emission"), &BaseMaterial3D::set_emission);
 	ClassDB::bind_method(D_METHOD("get_emission"), &BaseMaterial3D::get_emission);
@@ -3484,8 +3518,6 @@ void BaseMaterial3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_billboard_mode", "mode"), &BaseMaterial3D::set_billboard_mode);
 	ClassDB::bind_method(D_METHOD("get_billboard_mode"), &BaseMaterial3D::get_billboard_mode);
-	ClassDB::bind_method(D_METHOD("set_billboard_width", "billboard_width"), &BaseMaterial3D::set_billboard_width);
-	ClassDB::bind_method(D_METHOD("get_billboard_width"), &BaseMaterial3D::get_billboard_width);
 
 	ClassDB::bind_method(D_METHOD("set_particles_anim_h_frames", "frames"), &BaseMaterial3D::set_particles_anim_h_frames);
 	ClassDB::bind_method(D_METHOD("get_particles_anim_h_frames"), &BaseMaterial3D::get_particles_anim_h_frames);
@@ -3889,6 +3921,7 @@ void BaseMaterial3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(FLAG_DISABLE_SPECULAR_OCCLUSION);
 	BIND_ENUM_CONSTANT(FLAG_USE_Z_CLIP_SCALE);
 	BIND_ENUM_CONSTANT(FLAG_USE_FOV_OVERRIDE);
+	BIND_ENUM_CONSTANT(FLAG_BILLBOARD_UV);
 	BIND_ENUM_CONSTANT(FLAG_MAX);
 
 	BIND_ENUM_CONSTANT(DIFFUSE_BURLEY);
@@ -3944,6 +3977,7 @@ BaseMaterial3D::BaseMaterial3D(bool p_orm) :
 	set_albedo(Color(1.0, 1.0, 1.0, 1.0));
 	set_specular(0.5);
 	set_roughness(1.0);
+	set_billboard_width(1.0);
 	set_metallic(0.0);
 	set_emission(Color(0, 0, 0));
 	set_emission_energy_multiplier(1.0);
@@ -3968,7 +4002,6 @@ BaseMaterial3D::BaseMaterial3D(bool p_orm) :
 	set_uv2_scale(Vector3(1, 1, 1));
 	set_uv2_triplanar_blend_sharpness(1);
 	set_billboard_mode(BILLBOARD_DISABLED);
-	set_billboard_width(1.0);
 	set_particles_anim_h_frames(1);
 	set_particles_anim_v_frames(1);
 	set_particles_anim_loop(false);
