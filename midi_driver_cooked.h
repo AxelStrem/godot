@@ -59,10 +59,6 @@ protected:
 	static void send_event(int p_device_index, uint8_t p_status,
 			const uint8_t *p_data = nullptr, size_t p_data_len = 0);
 
-	// New function for MIDI port identification (from godot-cooked)
-	static void receive_input_packet(int p_midi_input, uint64_t p_timestamp, uint8_t p_status,
-			const uint8_t *p_data = nullptr, size_t p_data_len = 0);
-
 	class Parser {
 	public:
 		Parser() = default;
@@ -111,5 +107,7 @@ public:
 	virtual Error open() = 0;
 	virtual void close() = 0;
 
-	PackedStringArray get_connected_inputs() const;
+	virtual PackedStringArray get_connected_inputs() const;
+
+	static void receive_input_packet(int midi_input, uint64_t timestamp, uint8_t *data, uint32_t length);
 };

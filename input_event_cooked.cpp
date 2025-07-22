@@ -1773,8 +1773,7 @@ void InputEventPanGesture::_bind_methods() {
 }
 
 ///////////////////////////////////
-
-void InputEventMIDI::set_midi_input(const int p_midi_input) {
+void InputEventMIDI::set_midi_input(const int p_midi_input){
 	midi_input = p_midi_input;
 }
 
@@ -1782,13 +1781,14 @@ int InputEventMIDI::get_midi_input() const {
 	return midi_input;
 }
 
-void InputEventMIDI::set_timestamp(const int64_t p_timestamp) {
+void InputEventMIDI::set_timestamp(const int64_t p_timestamp){
 	timestamp = p_timestamp;
 }
-
+	
 int64_t InputEventMIDI::get_timestamp() const {
 	return timestamp;
 }
+	
 
 void InputEventMIDI::set_channel(const int p_channel) {
 	channel = p_channel;

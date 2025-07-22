@@ -42,6 +42,7 @@ MIDIDriver::MIDIDriver() {
 	singleton = this;
 }
 
+
 MIDIDriver::MessageCategory MIDIDriver::Parser::category(uint8_t p_midi_fragment) {
 	if (p_midi_fragment >= 0xf8) {
 		return MessageCategory::RealTime;
@@ -59,6 +60,80 @@ MIDIDriver::MessageCategory MIDIDriver::Parser::category(uint8_t p_midi_fragment
 		return MessageCategory::Voice;
 	}
 	return MessageCategory::Data;
+}
+
+void MIDIDriver::receive_input_packet(int midi_input, uint64_t timestamp, uint8_t *data, uint32_t length)
+{
+	Ref<InputEventMIDI> event;
+	event.instantiate();
+	event->set_midi_input(midi_input);
+	event->set_timestamp(timestamp);
+	uint32_t param_position = 1;
+	if (length >= 1) {
+		if (data[0] >= 0xF0) {
+			// channel does not apply to system common messages
+			event->set_channel(0);
+			event->set_message(MIDIMessage(data[0]));
+			last_received_message = data[0];
+		} else if ((data[0] & 0x80) == 0x00) {
+			// running status
+			event->set_channel(last_received_message & 0xF);
+			event->set_message(MIDIMessage(last_received_message >> 4));
+			param_position = 0;
+		} else {
+			event->set_channel(data[0] & 0xF);
+			event->set_message(MIDIMessage(data[0] >> 4));
+			param_position = 1;
+			last_received_message = data[0];
+		}
+	}
+
+	switch (event->get_message()) {
+		case MIDIMessage::AFTERTOUCH:
+			if (length >= 2 + param_position) {
+				event->set_pitch(data[param_position]);
+				event->set_pressure(data[param_position + 1]);
+			}
+			break;
+
+		case MIDIMessage::CONTROL_CHANGE:
+			if (length >= 2 + param_position) {
+				event->set_controller_number(data[param_position]);
+				event->set_controller_value(data[param_position + 1]);
+			}
+			break;
+
+		case MIDIMessage::NOTE_ON:
+		case MIDIMessage::NOTE_OFF:
+			if (length >= 2 + param_position) {
+				event->set_pitch(data[param_position]);
+				event->set_velocity(data[param_position + 1]);
+			}
+			break;
+
+		case MIDIMessage::PITCH_BEND:
+			if (length >= 2 + param_position) {
+				event->set_pitch((data[param_position + 1] << 7) | data[param_position]);
+			}
+			break;
+
+		case MIDIMessage::PROGRAM_CHANGE:
+			if (length >= 1 + param_position) {
+				event->set_instrument(data[param_position]);
+			}
+			break;
+
+		case MIDIMessage::CHANNEL_PRESSURE:
+			if (length >= 1 + param_position) {
+				event->set_pressure(data[param_position]);
+			}
+			break;
+		default:
+			break;
+	}
+
+	Input *id = Input::get_singleton();
+	id->parse_input_event(event);
 }
 
 MIDIMessage MIDIDriver::Parser::status_to_msg_enum(uint8_t p_status_byte) {
@@ -110,48 +185,6 @@ void MIDIDriver::send_event(int p_device_index, uint8_t p_status,
 	Ref<InputEventMIDI> event;
 	event.instantiate();
 	event->set_device(p_device_index);
-	event->set_channel(Parser::channel(p_status));
-	event->set_message(msg);
-	switch (msg) {
-		case MIDIMessage::NOTE_OFF:
-		case MIDIMessage::NOTE_ON:
-			event->set_pitch(p_data[0]);
-			event->set_velocity(p_data[1]);
-			break;
-		case MIDIMessage::AFTERTOUCH:
-			event->set_pitch(p_data[0]);
-			event->set_pressure(p_data[1]);
-			break;
-		case MIDIMessage::CONTROL_CHANGE:
-			event->set_controller_number(p_data[0]);
-			event->set_controller_value(p_data[1]);
-			break;
-		case MIDIMessage::PROGRAM_CHANGE:
-			event->set_instrument(p_data[0]);
-			break;
-		case MIDIMessage::CHANNEL_PRESSURE:
-			event->set_pressure(p_data[0]);
-			break;
-		case MIDIMessage::PITCH_BEND:
-			event->set_pitch((p_data[1] << 7) | p_data[0]);
-			break;
-		// QUARTER_FRAME, SONG_POSITION_POINTER, and SONG_SELECT not yet implemented.
-		default:
-			break;
-	}
-	Input::get_singleton()->parse_input_event(event);
-}
-
-void MIDIDriver::receive_input_packet(int p_midi_input, uint64_t p_timestamp, uint8_t p_status,
-		const uint8_t *p_data, size_t p_data_len) {
-	const MIDIMessage msg = Parser::status_to_msg_enum(p_status);
-	ERR_FAIL_COND(p_data_len < Parser::expected_data(msg));
-
-	Ref<InputEventMIDI> event;
-	event.instantiate();
-	event->set_device(p_midi_input); // Set device to the MIDI input port
-	event->set_midi_input(p_midi_input); // Set MIDI input identification
-	event->set_timestamp(p_timestamp); // Set timestamp
 	event->set_channel(Parser::channel(p_status));
 	event->set_message(msg);
 	switch (msg) {
