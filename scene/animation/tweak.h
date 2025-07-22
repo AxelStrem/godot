@@ -176,7 +176,6 @@ public:
 
 	_FORCE_INLINE_ const Variant& get_value() const { return pImpl->get_value(); };
 	void set_value(const Variant& value);
-
 	_FORCE_INLINE_ int get_order() const { return pImpl->order; }
 	_FORCE_INLINE_ int get_priority() const { return pImpl->priority; }
 

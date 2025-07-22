@@ -127,7 +127,7 @@ Tweak::~Tweak() {
 void Tweak::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_value", "new_value"), &Tweak::set_value);
 	ClassDB::bind_method(D_METHOD("get_value"), &Tweak::get_value);
-
+	
 	ADD_PROPERTY(PropertyInfo(Variant::NIL, "value", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NIL_IS_VARIANT), "set_value", "get_value");
 
 	BIND_ENUM_CONSTANT(ACTION_ADD);
