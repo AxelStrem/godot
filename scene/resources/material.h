@@ -502,7 +502,6 @@ private:
 		StringName distance_fade_min;
 		StringName distance_fade_max;
 		StringName ao_light_affect;
-		StringName billboard_width;
 
 		StringName metallic_texture_channel;
 		StringName ao_texture_channel;
@@ -556,7 +555,6 @@ private:
 	Color transmittance_color;
 	float transmittance_depth = 0.0f;
 	float transmittance_boost = 0.0f;
-	float billboard_width = 1.0f;
 
 	Color backlight;
 	float refraction = 0.0f;
@@ -802,9 +800,6 @@ public:
 
 	void set_billboard_mode(BillboardMode p_mode);
 	BillboardMode get_billboard_mode() const;
-
-	void set_billboard_width(float p_width);
-	float get_billboard_width() const;
 
 	void set_particles_anim_h_frames(int p_frames);
 	int get_particles_anim_h_frames() const;
