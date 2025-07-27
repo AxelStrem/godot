@@ -6905,7 +6905,10 @@ DisplayServerWindows::DisplayServerWindows(const String &p_rendering_driver, Win
 	wc.cbClsExtra = 0;
 	wc.cbWndExtra = 0;
 	wc.hInstance = hInstance ? hInstance : GetModuleHandle(nullptr);
-	wc.hIcon = LoadIcon(nullptr, IDI_WINLOGO);
+	wc.hIcon = LoadIcon(wc.hInstance, MAKEINTRESOURCE(101)); // Load GODOT_ICON resource (typically ID 101)
+	if (!wc.hIcon) {
+		wc.hIcon = LoadIcon(nullptr, IDI_WINLOGO); // Fallback to default Windows logo
+	}
 	wc.hCursor = nullptr;
 	wc.hbrBackground = nullptr;
 	wc.lpszMenuName = nullptr;
