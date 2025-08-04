@@ -170,6 +170,9 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 	skip_node.resize(nc);
 	for (int k = 0; k < nc; ++k) skip_node.write[k] = false;
 
+	// Map to store property overrides for nodes: node_index -> Dictionary of property overrides
+	HashMap<int, Dictionary> property_overrides;
+
 	for (int i = 0; i < nc; i++) {
 		const NodeData &n = nd[i];
 
@@ -430,6 +433,18 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 						}
 					}
 				}
+				
+				// Apply property overrides from _filter_scene_children if available
+				if (!Engine::get_singleton()->is_editor_hint() && property_overrides.has(i)) {
+					Dictionary override_props = property_overrides[i];
+					for (const KeyValue<Variant, Variant> &kv : override_props) {
+						bool valid;
+						node->set(kv.key, kv.value, &valid);
+						if (!valid) {
+							WARN_PRINT(vformat("Failed to set override property '%s' on node '%s'.", kv.key, node->get_name()));
+						}
+					}
+				}
 				if (!missing_resource_properties.is_empty()) {
 					node->set_meta(META_MISSING_RESOURCES, missing_resource_properties);
 				}
@@ -524,7 +539,7 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 
 			if (!Engine::get_singleton()->is_editor_hint() && node && node->has_method("_filter_scene_children")) {
 				Array child_infos;
-				Vector<StringName> allowed_names;
+				Vector<int> child_node_indices; // Track which node indices are children
 				for (int child_idx = 0; child_idx < nc; ++child_idx) {
 					const NodeData &child_n = nodes[child_idx];
 					if(child_n.parent == -1)
@@ -532,6 +547,7 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 					NODE_FROM_ID(local_parent, child_n.parent);
 					if (local_parent == node) {
 						Dictionary info;
+						info["id"] = child_idx; // Use node index as unique id
 						info["name"] = snames[child_n.name];
 						info["type"] = snames[child_n.type];
 						// Add properties dictionary
@@ -547,6 +563,7 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 						}
 						info["properties"] = prop_dict;
 						child_infos.push_back(info);
+						child_node_indices.push_back(child_idx);
 					}
 				}
 				Variant filter_result = node->call("_filter_scene_children", child_infos);
@@ -556,52 +573,59 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 				} else {
 					filtered_infos = child_infos;
 				}
+				
+				// Create mapping from original node IDs to filtered entries (supporting duplicates)
+				HashMap<int, Vector<Dictionary>> id_to_filtered_entries;
+				Vector<int> allowed_node_ids;
+				
 				for (int j = 0; j < filtered_infos.size(); ++j) {
 					Dictionary info = filtered_infos[j];
-					if (info.has("name")) {
-						allowed_names.push_back(info["name"]);
+					if (info.has("id")) {
+						int node_id = info["id"];
+						if (!id_to_filtered_entries.has(node_id)) {
+							id_to_filtered_entries[node_id] = Vector<Dictionary>();
+							allowed_node_ids.push_back(node_id);
+						}
+						id_to_filtered_entries[node_id].push_back(info);
 					}
 				}
-				// NodePath-based exclusion: collect excluded NodePaths
+				// NodePath-based exclusion: collect excluded NodePaths for nodes not in allowed_node_ids
 				Vector<NodePath> excluded_paths;
-				for (int child_idx = 0; child_idx < nc; ++child_idx) {
+				for (int idx = 0; idx < child_node_indices.size(); ++idx) {
+					int child_idx = child_node_indices[idx];
 					const NodeData &child_n = nodes[child_idx];
-					if(child_n.parent == -1)
-						continue;
-					NODE_FROM_ID(local_parent, child_n.parent);
-					if (local_parent == node) {
-						StringName cname = snames[child_n.name];
-						bool allowed = false;
-						for (int a = 0; a < allowed_names.size(); ++a) {
-							if (allowed_names[a] == cname) {
-								allowed = true;
-								break;
-							}
+					
+					bool allowed = false;
+					for (int a = 0; a < allowed_node_ids.size(); ++a) {
+						if (allowed_node_ids[a] == child_idx) {
+							allowed = true;
+							break;
 						}
-						if (!allowed) {
-							// Build the NodePath for this child
-							NodePath child_path;
-							if (child_n.parent & FLAG_ID_IS_PATH) {
-								child_path = node_paths[child_n.parent & FLAG_MASK];
-								child_path = NodePath(String(child_path) + "/" + String(snames[child_n.name]));
+					}
+					
+					if (!allowed) {
+						// Build the NodePath for this child
+						NodePath child_path;
+						if (child_n.parent & FLAG_ID_IS_PATH) {
+							child_path = node_paths[child_n.parent & FLAG_MASK];
+							child_path = NodePath(String(child_path) + "/" + String(snames[child_n.name]));
+						} else {
+							// Compose path from parent node's path and this node's name
+							// For root's direct children, parent is root (empty path)
+							if (i == 0) {
+								child_path = NodePath(String(snames[child_n.name]));
 							} else {
-								// Compose path from parent node's path and this node's name
-								// For root's direct children, parent is root (empty path)
-								if (i == 0) {
-									child_path = NodePath(String(snames[child_n.name]));
+								// Find parent's path
+								NodePath parent_path;
+								if (nodes[i].parent & FLAG_ID_IS_PATH) {
+									parent_path = node_paths[nodes[i].parent & FLAG_MASK];
 								} else {
-									// Find parent's path
-									NodePath parent_path;
-									if (nodes[i].parent & FLAG_ID_IS_PATH) {
-										parent_path = node_paths[nodes[i].parent & FLAG_MASK];
-									} else {
-										parent_path = NodePath(String(snames[nodes[i].name]));
-									}
-									child_path = NodePath(String(parent_path) + "/" + String(snames[child_n.name]));
+									parent_path = NodePath(String(snames[nodes[i].name]));
 								}
+								child_path = NodePath(String(parent_path) + "/" + String(snames[child_n.name]));
 							}
-							excluded_paths.push_back(child_path);
 						}
+						excluded_paths.push_back(child_path);
 					}
 				}
 				// Mark all nodes whose path starts with any excluded NodePath
@@ -631,6 +655,18 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 						if (node_path_str.begins_with(excluded_path_str)) {
 							skip_node.write[idx] = true;
 							break;
+						}
+					}
+				}
+				
+				// Store property overrides for later application during property setting
+				for (int j = 0; j < filtered_infos.size(); ++j) {
+					Dictionary info = filtered_infos[j];
+					if (info.has("id") && info.has("properties")) {
+						int node_id = info["id"];
+						Dictionary override_props = info["properties"];
+						if (!override_props.is_empty()) {
+							property_overrides[node_id] = override_props;
 						}
 					}
 				}
