@@ -188,6 +188,86 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 			ERR_FAIL_COND_V_MSG(n.type == TYPE_INSTANTIATED && base_scene_idx < 0, nullptr, vformat("Invalid scene: root node %s in an instance, but there's no base scene.", snames[n.name]));
 		}
 
+		// BEGIN procedural child filtering logic
+		// Only run for non-root nodes (i > 0) and if parent is valid, and not in editor
+		static Vector<bool> skip_node_init;
+		Vector<bool> &skip_node = skip_node_init;
+		if (i == 0) {
+			skip_node.resize(nc);
+			for (int k = 0; k < nc; ++k) skip_node.write[k] = false;
+		}
+
+		if (!Engine::get_singleton()->is_editor_hint() && parent && parent->has_method("_filter_scene_children")) {
+			Array child_infos;
+			Vector<StringName> allowed_names;
+			for (int child_idx = 0; child_idx < nc; ++child_idx) {
+				const NodeData &child_n = nodes[child_idx];
+				if(child_n.parent == -1)
+					continue; // Skip nodes without a parent
+				NODE_FROM_ID(local_parent, child_n.parent);
+				if (local_parent == parent) {
+					Dictionary info;
+					info["name"] = snames[child_n.name];
+					info["type"] = snames[child_n.type];
+					child_infos.push_back(info);
+				}
+			}
+			Variant filter_result = parent->call("_filter_scene_children", child_infos);
+			Array filtered_infos;
+			if (filter_result.get_type() == Variant::ARRAY) {
+				filtered_infos = filter_result;
+			} else {
+				filtered_infos = child_infos;
+			}
+			for (int j = 0; j < filtered_infos.size(); ++j) {
+				Dictionary info = filtered_infos[j];
+				if (info.has("name")) {
+					allowed_names.push_back(info["name"]);
+				}
+			}
+			// Mark children not in allowed_names for skipping (and their descendants)
+			for (int child_idx = 0; child_idx < nc; ++child_idx) {
+				const NodeData &child_n = nodes[child_idx];
+				if(child_n.parent == -1)
+					continue;
+				NODE_FROM_ID(local_parent, child_n.parent);
+				if (local_parent == parent) {
+					StringName cname = snames[child_n.name];
+					bool allowed = false;
+					for (int a = 0; a < allowed_names.size(); ++a) {
+						if (allowed_names[a] == cname) {
+							allowed = true;
+							break;
+						}
+					}
+					if (!allowed) {
+						// Mark this node and all its descendants to be skipped
+						Vector<int> to_skip;
+						to_skip.push_back(child_idx);
+						while (!to_skip.is_empty()) {
+							int idx = to_skip[to_skip.size() - 1];
+							to_skip.resize(to_skip.size() - 1);
+							if (skip_node[idx]) continue;
+							skip_node.write[idx] = true;
+							// Add children of idx
+							for (int k = 0; k < nc; ++k) {
+								if (nodes[k].parent == -1) continue;
+								NODE_FROM_ID(desc_parent, nodes[k].parent);
+								if (desc_parent == ret_nodes[idx]) {
+									to_skip.push_back(k);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		// END procedural child filtering logic
+
+		if (skip_node.size() > i && skip_node[i]) {
+			ret_nodes[i] = nullptr;
+			continue;
+		}
 		Node *node = nullptr;
 		MissingNode *missing_node = nullptr;
 		bool is_inherited_scene = false;
