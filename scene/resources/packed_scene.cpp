@@ -534,6 +534,18 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 						Dictionary info;
 						info["name"] = snames[child_n.name];
 						info["type"] = snames[child_n.type];
+						// Add properties dictionary
+						Dictionary prop_dict;
+						for (int p = 0; p < child_n.properties.size(); ++p) {
+							int prop_name_idx = child_n.properties[p].name;
+							int prop_value_idx = child_n.properties[p].value;
+							if (prop_name_idx >= 0 && prop_name_idx < sname_count && prop_value_idx >= 0 && prop_value_idx < variants.size()) {
+								StringName prop_name = snames[prop_name_idx];
+								Variant prop_value = variants[prop_value_idx];
+								prop_dict[prop_name] = prop_value;
+							}
+						}
+						info["properties"] = prop_dict;
 						child_infos.push_back(info);
 					}
 				}
