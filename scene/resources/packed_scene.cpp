@@ -550,7 +550,8 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 						allowed_names.push_back(info["name"]);
 					}
 				}
-				// Mark children not in allowed_names for skipping (and their descendants)
+				// NodePath-based exclusion: collect excluded NodePaths
+				Vector<NodePath> excluded_paths;
 				for (int child_idx = 0; child_idx < nc; ++child_idx) {
 					const NodeData &child_n = nodes[child_idx];
 					if(child_n.parent == -1)
@@ -566,23 +567,58 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 							}
 						}
 						if (!allowed) {
-							// Mark this node and all its descendants to be skipped
-							Vector<int> to_skip;
-							to_skip.push_back(child_idx);
-							while (!to_skip.is_empty()) {
-								int idx = to_skip[to_skip.size() - 1];
-								to_skip.resize(to_skip.size() - 1);
-								if (skip_node[idx]) continue;
-								skip_node.write[idx] = true;
-								// Add children of idx
-								for (int k = 0; k < nc; ++k) {
-									if (nodes[k].parent == -1) continue;
-									NODE_FROM_ID(desc_parent, nodes[k].parent);
-									if (desc_parent == ret_nodes[idx]) {
-										to_skip.push_back(k);
+							// Build the NodePath for this child
+							NodePath child_path;
+							if (child_n.parent & FLAG_ID_IS_PATH) {
+								child_path = node_paths[child_n.parent & FLAG_MASK];
+								child_path = NodePath(String(child_path) + "/" + String(snames[child_n.name]));
+							} else {
+								// Compose path from parent node's path and this node's name
+								// For root's direct children, parent is root (empty path)
+								if (i == 0) {
+									child_path = NodePath(String(snames[child_n.name]));
+								} else {
+									// Find parent's path
+									NodePath parent_path;
+									if (nodes[i].parent & FLAG_ID_IS_PATH) {
+										parent_path = node_paths[nodes[i].parent & FLAG_MASK];
+									} else {
+										parent_path = NodePath(String(snames[nodes[i].name]));
 									}
+									child_path = NodePath(String(parent_path) + "/" + String(snames[child_n.name]));
 								}
 							}
+							excluded_paths.push_back(child_path);
+						}
+					}
+				}
+				// Mark all nodes whose path starts with any excluded NodePath
+				for (int idx = 0; idx < nc; ++idx) {
+					if (skip_node[idx]) continue;
+					// Build the NodePath for this node
+					NodePath node_path;
+					 if (nodes[idx].parent != -1) {
+						if (nodes[idx].parent & FLAG_ID_IS_PATH) {
+							node_path = node_paths[nodes[idx].parent & FLAG_MASK];
+							node_path = NodePath(String(node_path) + "/" + String(snames[nodes[idx].name]));
+						} else {
+							NodePath parent_path;
+							if (nodes[nodes[idx].parent].parent & FLAG_ID_IS_PATH) {
+								parent_path = node_paths[nodes[nodes[idx].parent].parent & FLAG_MASK];
+							} else {
+								parent_path = NodePath(String(snames[nodes[nodes[idx].parent].name]));
+							}
+							node_path = NodePath(String(parent_path) + "/" + String(snames[nodes[idx].name]));
+						}
+					 } else {
+						node_path = NodePath(String(snames[nodes[idx].name]));
+						}
+					for (int ep = 0; ep < excluded_paths.size(); ++ep) {
+						String node_path_str = String(node_path);
+						String excluded_path_str = String(excluded_paths[ep]);
+						if (node_path_str.begins_with(excluded_path_str)) {
+							skip_node.write[idx] = true;
+							break;
 						}
 					}
 				}
