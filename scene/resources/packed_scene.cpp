@@ -187,20 +187,20 @@ Node *SceneState::create_duplicate_node(Node *original_node, const NodeData &n, 
 	return duplicate_node;
 }
 
-String SceneState::build_node_path(int node_idx, const Vector<NodeData> &nodes, const StringName *snames, const Vector<NodePath> &node_paths) const {
+String SceneState::build_node_path(int node_idx, const Vector<NodeData> &nodes_, const StringName *snames, const Vector<NodePath> &node_paths_) const {
 	if (node_idx == 0) {
 		return "."; // Root node
 	}
 	
 	// For NodePath-based parents, we can directly construct the path
-	int parent_raw = nodes[node_idx].parent;
+	int parent_raw = nodes_[node_idx].parent;
 	if (parent_raw & FLAG_ID_IS_PATH) {
-		NodePath parent_path = node_paths[parent_raw & FLAG_MASK];
+		NodePath parent_path = node_paths_[parent_raw & FLAG_MASK];
 		String parent_path_str = String(parent_path);
 		if (parent_path_str == ".") {
-			return "./" + String(snames[nodes[node_idx].name]);
+			return "./" + String(snames[nodes_[node_idx].name]);
 		} else {
-			return parent_path_str + "/" + String(snames[nodes[node_idx].name]);
+			return parent_path_str + "/" + String(snames[nodes_[node_idx].name]);
 		}
 	}
 	
@@ -209,15 +209,15 @@ String SceneState::build_node_path(int node_idx, const Vector<NodeData> &nodes, 
 	int current_idx = node_idx;
 	
 	while (current_idx != -1 && current_idx != 0) {
-		path_parts.push_back(String(snames[nodes[current_idx].name]));
+		path_parts.push_back(String(snames[nodes_[current_idx].name]));
 		
-		int parent_raw_local = nodes[current_idx].parent;
+		int parent_raw_local = nodes_[current_idx].parent;
 		if (parent_raw_local & FLAG_ID_IS_PATH) {
 			// We've hit a NodePath parent, stop here
 			break;
 		} else {
 			current_idx = parent_raw_local & FLAG_MASK;
-			if (current_idx >= nodes.size()) break;
+			if (current_idx >= nodes_.size()) break;
 		}
 	}
 	
@@ -292,6 +292,12 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 		String old_parent_path;
 
 		if (i > 0) {
+
+			if (skip_node.size() > i && skip_node[i]) {
+				ret_nodes[i] = nullptr;
+				continue;
+			}
+
 			ERR_FAIL_COND_V_MSG(n.parent == -1, nullptr, vformat("Invalid scene: node %s does not specify its parent node.", snames[n.name]));
 			NODE_FROM_ID(nparent, n.parent);
 #ifdef DEBUG_ENABLED
@@ -308,10 +314,6 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 			ERR_FAIL_COND_V_MSG(n.type == TYPE_INSTANTIATED && base_scene_idx < 0, nullptr, vformat("Invalid scene: root node %s in an instance, but there's no base scene.", snames[n.name]));
 		}
 
-		if (skip_node.size() > i && skip_node[i]) {
-			ret_nodes[i] = nullptr;
-			continue;
-		}
 		Node *node = nullptr;
 		MissingNode *missing_node = nullptr;
 		bool is_inherited_scene = false;
@@ -775,6 +777,32 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 					}
 				}
 				
+				// Additional pass: mark all descendants of skipped nodes
+				// This handles cases where nodes are skipped but their children weren't caught by the path-based exclusion
+				bool changed = true;
+				while (changed) {
+					changed = false;
+					for (int idx = 0; idx < nc; ++idx) {
+						if (skip_node[idx]) continue; // Already skipped
+						
+						// Check if this node's parent is skipped
+						int parent_raw = nodes[idx].parent;
+						if (parent_raw != -1) {
+							if (parent_raw & FLAG_ID_IS_PATH) {
+								// For NodePath parents, we need to find the actual parent node index
+								// This is more complex, but for now we rely on the path-based exclusion above
+								continue;
+							} else {
+								int parent_idx = parent_raw & FLAG_MASK;
+								if (parent_idx < nc && skip_node[parent_idx]) {
+									skip_node.write[idx] = true;
+									changed = true;
+								}
+							}
+						}
+					}
+				}
+				
 				// Store property overrides and duplication info for later application
 				for (int j = 0; j < filtered_infos.size(); ++j) {
 					Dictionary info = filtered_infos[j];
@@ -798,31 +826,9 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 				}
 				
 				// Mark all descendants of duplicated nodes for duplication
-				print_line("Scene has " + String::num(nc) + " nodes total");
-				
-				// Debug: Print all nodes and their parent relationships
-				for (int debug_idx = 0; debug_idx < nc; ++debug_idx) {
-					const NodeData &debug_node = nodes[debug_idx];
-					String parent_info = "no parent";
-					if (debug_node.parent != -1) {
-						if (debug_node.parent & FLAG_ID_IS_PATH) {
-							parent_info = "NodePath parent: " + String(node_paths[debug_node.parent & FLAG_MASK]);
-						} else {
-							int parent_idx = debug_node.parent & FLAG_MASK;
-							if (parent_idx < nc) {
-								parent_info = "Parent index: " + String::num(parent_idx) + " (" + String(snames[nodes[parent_idx].name]) + ")";
-							} else {
-								parent_info = "Invalid parent index: " + String::num(parent_idx);
-							}
-						}
-					}
-					print_line("Node " + String::num(debug_idx) + ": " + String(snames[debug_node.name]) + " - " + parent_info);
-				}
-				
 				for (const KeyValue<int, int> &kv : node_duplication_count) {
 					int duplicate_parent_id = kv.key;
 					if (kv.value > 1) { // Only process nodes that are actually duplicated
-						print_line("Looking for descendants of duplicate node " + String::num(duplicate_parent_id) + " (" + String(snames[nodes[duplicate_parent_id].name]) + ")");
 						// Find all descendants of this duplicated node
 						for (int desc_idx = 0; desc_idx < nc; ++desc_idx) {
 							if (desc_idx == duplicate_parent_id) continue;
@@ -842,21 +848,17 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 								// Build the expected path for the duplicate parent node
 								String duplicate_parent_path = build_node_path(duplicate_parent_id, nodes, snames, node_paths);
 								
-								print_line("Checking if " + String(snames[nodes[desc_idx].name]) + " (parent path: " + parent_path_str + ") is descendant of " + String(snames[nodes[duplicate_parent_id].name]) + " (expected path: " + duplicate_parent_path + ")");
-								
 								// Check if the parent path is exactly the duplicate parent path
 								// This means this node is a direct child of the duplicated parent
 								if (parent_path_str == duplicate_parent_path) {
 									descendant_of_duplicate[desc_idx] = duplicate_parent_id;
 									is_descendant = true;
-									print_line("Marked node " + String::num(desc_idx) + " (" + String(snames[nodes[desc_idx].name]) + ") as descendant of duplicate node " + String::num(duplicate_parent_id) + " (" + String(snames[nodes[duplicate_parent_id].name]) + ")");
 								}
 								// Also check if the parent path starts with the duplicate parent path followed by "/"
 								// This catches deeper descendants
 								else if (parent_path_str.begins_with(duplicate_parent_path + "/")) {
 									descendant_of_duplicate[desc_idx] = duplicate_parent_id;
 									is_descendant = true;
-									print_line("Marked node " + String::num(desc_idx) + " (" + String(snames[nodes[desc_idx].name]) + ") as descendant of duplicate node " + String::num(duplicate_parent_id) + " (" + String(snames[nodes[duplicate_parent_id].name]) + ")");
 								}
 							} else {
 								// Handle direct index parents (original logic)
@@ -867,7 +869,6 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 									if (parent_node_idx == duplicate_parent_id) {
 										descendant_of_duplicate[desc_idx] = duplicate_parent_id;
 										is_descendant = true;
-										print_line("Marked node " + String::num(desc_idx) + " (" + String(snames[nodes[desc_idx].name]) + ") as descendant of duplicate node " + String::num(duplicate_parent_id) + " (" + String(snames[nodes[duplicate_parent_id].name]) + ")");
 										break;
 									}
 									
@@ -890,10 +891,8 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 		// Handle descendant duplication - create additional instances for children of duplicated nodes
 		if (!Engine::get_singleton()->is_editor_hint() && node && descendant_of_duplicate.has(i)) {
 			int duplicate_parent_idx = descendant_of_duplicate[i];
-			print_line("Processing descendant node " + String::num(i) + " (" + String(snames[n.name]) + ") of duplicate parent " + String::num(duplicate_parent_idx));
 			if (additional_duplicate_nodes.has(duplicate_parent_idx)) {
 				Array parent_duplicates = additional_duplicate_nodes[duplicate_parent_idx];
-				print_line("Found " + String::num(parent_duplicates.size()) + " duplicate parents");
 				
 				// Create additional instances of this child node for each duplicate parent
 				for (int dup_idx = 0; dup_idx < parent_duplicates.size(); dup_idx++) {
@@ -901,7 +900,6 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 					if (duplicate_parent_node) {
 						Node *duplicate_child = create_duplicate_node(node, n, snames, props, p_edit_state);
 						if (duplicate_child) {
-							print_line("Created duplicate child " + String(snames[n.name]) + "_" + String::num(dup_idx + 1));
 							// Apply property overrides if available
 							if (property_overrides_per_node.has(i) && (dup_idx + 1) < property_overrides_per_node[i].size()) {
 								Dictionary override_props = property_overrides_per_node[i][dup_idx + 1];
@@ -911,9 +909,19 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 								}
 							}
 							
-							// Set name with suffix
-							String base_name = String(snames[n.name]);
-							duplicate_child->set_name(base_name + "_" + String::num(dup_idx + 1));
+							// Set name from user-provided name or use suffix
+							String child_name;
+							if (property_overrides_per_node.has(i) && (dup_idx + 1) < property_overrides_per_node[i].size()) {
+								Dictionary override_props = property_overrides_per_node[i][dup_idx + 1];
+								if (override_props.has("name")) {
+									child_name = String(override_props["name"]);
+								}
+							}
+							if (child_name.is_empty()) {
+								String base_name = String(snames[n.name]);
+								child_name = base_name + "_" + String::num(dup_idx + 1);
+							}
+							duplicate_child->set_name(child_name);
 							
 							// Add to the duplicate parent
 							duplicate_parent_node->add_child(duplicate_child, true);
@@ -926,8 +934,6 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 						}
 					}
 				}
-			} else {
-				print_line("No duplicate parents found for node " + String::num(duplicate_parent_idx));
 			}
 		}
 
@@ -936,14 +942,12 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 			// Only duplicate root-level nodes that were directly specified in filtering
 			// (not descendants of other duplicated nodes)
 			if (!descendant_of_duplicate.has(i)) {
-				print_line("Duplicating node " + String::num(i) + " (" + String(snames[n.name]) + ") " + String::num(node_duplication_count[i]) + " times");
 				Array duplicates;
 				// Create additional instances for duplication
 				for (int dup_idx = 1; dup_idx < node_duplication_count[i]; dup_idx++) {
 					Node *duplicate_node = create_duplicate_node(node, n, snames, props, p_edit_state);
 					
 					if (duplicate_node) {
-						print_line("Created duplicate " + String::num(dup_idx) + ": " + String(duplicate_node->get_name()));
 						// Apply duplicate-specific property overrides
 						if (property_overrides_per_node.has(i)) {
 							Array override_list = property_overrides_per_node[i];
@@ -956,9 +960,22 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 							}
 						}
 						
-						// Set name with suffix to make it unique
-						String base_name = String(snames[n.name]);
-						duplicate_node->set_name(base_name + "_" + String::num(dup_idx));
+						// Set name from user-provided name or use suffix
+						String node_name;
+						if (property_overrides_per_node.has(i)) {
+							Array override_list = property_overrides_per_node[i];
+							if (dup_idx < override_list.size()) {
+								Dictionary override_props = override_list[dup_idx];
+								if (override_props.has("name")) {
+									node_name = String(override_props["name"]);
+								}
+							}
+						}
+						if (node_name.is_empty()) {
+							String base_name = String(snames[n.name]);
+							node_name = base_name + "_" + String::num(dup_idx);
+						}
+						duplicate_node->set_name(node_name);
 						
 						// Add to parent
 						if (parent) {
@@ -976,7 +993,6 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 				// Store the duplicate nodes for later use when creating their children
 				if (duplicates.size() > 0) {
 					additional_duplicate_nodes[i] = duplicates;
-					print_line("Stored " + String::num(duplicates.size()) + " duplicates for node " + String::num(i));
 				}
 			}
 		}
