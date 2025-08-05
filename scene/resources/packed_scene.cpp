@@ -733,7 +733,12 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 						Dictionary info;
 						info["id"] = child_idx; // Use node index as unique id
 						info["name"] = snames[child_n.name];
-						info["type"] = snames[child_n.type];
+						// Handle type properly - check for TYPE_INSTANTIATED flag
+						if (child_n.type == TYPE_INSTANTIATED) {
+							info["type"] = "TYPE_INSTANTIATED";
+						} else {
+							info["type"] = snames[child_n.type];
+						}
 						// Add properties dictionary
 						Dictionary prop_dict;
 						for (int p = 0; p < child_n.properties.size(); ++p) {
