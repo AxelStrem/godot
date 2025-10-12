@@ -259,6 +259,7 @@ bool Object::_predelete() {
 		return false;
 	}
 
+	_deleting = true;
 	_gdtype_ptr = nullptr; // Must restore, so constructors/destructors have proper class name access at each stage.
 	notification(NOTIFICATION_PREDELETE_CLEANUP, true);
 
@@ -2349,11 +2350,11 @@ void Object::_construct_object(bool p_reference) {
 #endif
 }
 
-Object::Object(bool p_reference) {
+Object::Object(bool p_reference) : _deleting(false) {
 	_construct_object(p_reference);
 }
 
-Object::Object() {
+Object::Object() : _deleting(false) {
 	_construct_object(false);
 }
 

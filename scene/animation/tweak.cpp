@@ -171,7 +171,7 @@ public:
 };
 
 void PropertyTweaker::recalculate() {
-	if(p_owner!=nullptr)
+	if((p_owner!=nullptr)&&(!p_owner->_deleting))
 	{
 		tweaks.sort_custom<TweakSort>();
 		Variant val = evaluate();

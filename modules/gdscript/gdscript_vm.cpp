@@ -494,6 +494,11 @@ void (*type_init_function_table[])(Variant *) = {
 #define METHOD_CALL_ON_NULL_VALUE_ERROR(method_pointer) "Cannot call method '" + (method_pointer)->get_name() + "' on a null value."
 #define METHOD_CALL_ON_FREED_INSTANCE_ERROR(method_pointer) "Cannot call method '" + (method_pointer)->get_name() + "' on a previously freed instance."
 
+inline void temp_debug() {
+	int x = 0;
+	x++;
+}
+
 Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_args, int p_argcount, Callable::CallError &r_err, CallState *p_state) {
 	OPCODES_TABLE;
 
@@ -685,7 +690,8 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 			if (address_type == ADDR_TYPE_MEMBER && !p_instance) {                                  \
 				err_text = "Cannot access member without instance.";                                \
 			} else {                                                                                \
-				err_text = "Bad address index.";                                                    \
+				err_text = "Bad address index.";               								 		\
+				temp_debug();                                                 						\
 			}                                                                                       \
 			OPCODE_BREAK;                                                                           \
 		}                                                                                           \

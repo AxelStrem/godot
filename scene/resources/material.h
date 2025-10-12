@@ -660,7 +660,7 @@ public:
 	void set_roughness(float p_roughness);
 	float get_roughness() const;
 
-	void set_billboard_width(float p_roughness);
+	void set_billboard_width(float p_billboard_width);
 	float get_billboard_width() const;
 
 	void set_emission(const Color &p_emission);
