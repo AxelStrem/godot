@@ -333,18 +333,6 @@ Ref<TriangleMesh> Label3D::generate_triangle_mesh() const {
 	return triangle_mesh;
 }
 
-PackedVector3Array Label3D::generate_glyph_positions() const
-{
-	return glyph_positions;
-}
-
-
-PackedVector3Array Label3D::generate_glyph_sizes() const
-{
-	return glyph_sizes;
-}
-
-
 void Label3D::_generate_glyph_surfaces(const Glyph &p_glyph, Vector2 &r_offset, Vector2 &g_size, const Color &p_modulate, int p_priority, int p_outline_size) {
 	if (p_glyph.index == 0) {
 		g_size.x = p_glyph.advance * pixel_size * p_glyph.repeat;

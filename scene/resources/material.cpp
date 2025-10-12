@@ -613,7 +613,6 @@ void BaseMaterial3D::init_shaders() {
 	shader_names->uv2_offset = "uv2_offset";
 	shader_names->uv1_blend_sharpness = "uv1_blend_sharpness";
 	shader_names->uv2_blend_sharpness = "uv2_blend_sharpness";
-	shader_names->billboard_width = "billboard_width";
 
 	shader_names->particles_anim_h_frames = "particles_anim_h_frames";
 	shader_names->particles_anim_v_frames = "particles_anim_v_frames";
@@ -1201,11 +1200,6 @@ varying vec3 uv2_power_normal;
 )";
 	}
 
-	if(flags[FLAG_BILLBOARD_UV]){
-		code += R"(
-uniform float billboard_width : hint_range(0.0, 10.0, 0.01);
-)";
-	}
 
 	code += R"(
 uniform vec3 uv1_scale;
