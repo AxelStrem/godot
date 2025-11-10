@@ -90,6 +90,12 @@ const char *Image::format_names[Image::FORMAT_MAX] = {
 	"RGBA16Int",
 	"ASTC_6x6",
 	"ASTC_6x6_HDR",
+	// Custom formats. Must stay in step with the tail of the Format enum.
+	"Lum16",
+	"LumAlpha16",
+	"LumHalf",
+	"LumAlphaHalf",
+	"LumFloat",
 };
 
 // External VRAM compression function pointers.
@@ -233,6 +239,16 @@ int Image::get_format_pixel_size(Format p_format) {
 			return 6;
 		case FORMAT_RGBA16I:
 			return 8;
+		case FORMAT_L16:
+			return 2;
+		case FORMAT_LA16:
+			return 4;
+		case FORMAT_LH:
+			return 2;
+		case FORMAT_LAH:
+			return 4;
+		case FORMAT_LF:
+			return 4;
 		case FORMAT_MAX: {
 		}
 	}
@@ -1354,7 +1370,7 @@ void Image::resize(int p_width, int p_height, Interpolation p_interpolation) {
 						_scale_nearest<4, uint8_t>(r_ptr, w_ptr, width, height, p_width, p_height);
 						break;
 				}
-			} else if (format >= FORMAT_RF && format <= FORMAT_RGBAF) {
+			} else if ((format >= FORMAT_RF && format <= FORMAT_RGBAF) || format == FORMAT_LF) {
 				switch (get_format_pixel_size(format)) {
 					case 4:
 						_scale_nearest<1, float>(r_ptr, w_ptr, width, height, p_width, p_height);
@@ -1370,7 +1386,7 @@ void Image::resize(int p_width, int p_height, Interpolation p_interpolation) {
 						break;
 				}
 
-			} else if (format >= FORMAT_RH && format <= FORMAT_RGBAH) {
+			} else if ((format >= FORMAT_RH && format <= FORMAT_RGBAH) || format == FORMAT_LH || format == FORMAT_LAH) {
 				switch (get_format_pixel_size(format)) {
 					case 2:
 						_scale_nearest<1, uint16_t>(r_ptr, w_ptr, width, height, p_width, p_height);
@@ -1385,7 +1401,7 @@ void Image::resize(int p_width, int p_height, Interpolation p_interpolation) {
 						_scale_nearest<4, uint16_t>(r_ptr, w_ptr, width, height, p_width, p_height);
 						break;
 				}
-			} else if (format >= FORMAT_R16 && format <= FORMAT_RGBA16I) {
+			} else if ((format >= FORMAT_R16 && format <= FORMAT_RGBA16I) || format == FORMAT_L16 || format == FORMAT_LA16) {
 				switch (get_format_pixel_size(format)) {
 					case 2:
 						_scale_nearest<1, uint16_t>(r_ptr, w_ptr, width, height, p_width, p_height);
@@ -1456,7 +1472,7 @@ void Image::resize(int p_width, int p_height, Interpolation p_interpolation) {
 							_scale_bilinear<4, uint8_t, IMAGE_SCALING_INT>(src_ptr, w_ptr, src_width, src_height, p_width, p_height);
 							break;
 					}
-				} else if (format >= FORMAT_RF && format <= FORMAT_RGBAF) {
+				} else if ((format >= FORMAT_RF && format <= FORMAT_RGBAF) || format == FORMAT_LF) {
 					switch (get_format_pixel_size(format)) {
 						case 4:
 							_scale_bilinear<1, float, IMAGE_SCALING_FLOAT>(src_ptr, w_ptr, src_width, src_height, p_width, p_height);
@@ -1471,7 +1487,7 @@ void Image::resize(int p_width, int p_height, Interpolation p_interpolation) {
 							_scale_bilinear<4, float, IMAGE_SCALING_FLOAT>(src_ptr, w_ptr, src_width, src_height, p_width, p_height);
 							break;
 					}
-				} else if (format >= FORMAT_RH && format <= FORMAT_RGBAH) {
+				} else if ((format >= FORMAT_RH && format <= FORMAT_RGBAH) || format == FORMAT_LH || format == FORMAT_LAH) {
 					switch (get_format_pixel_size(format)) {
 						case 2:
 							_scale_bilinear<1, uint16_t, IMAGE_SCALING_FLOAT>(src_ptr, w_ptr, src_width, src_height, p_width, p_height);
@@ -1486,7 +1502,7 @@ void Image::resize(int p_width, int p_height, Interpolation p_interpolation) {
 							_scale_bilinear<4, uint16_t, IMAGE_SCALING_FLOAT>(src_ptr, w_ptr, src_width, src_height, p_width, p_height);
 							break;
 					}
-				} else if (format >= FORMAT_R16 && format <= FORMAT_RGBA16I) {
+				} else if ((format >= FORMAT_R16 && format <= FORMAT_RGBA16I) || format == FORMAT_L16 || format == FORMAT_LA16) {
 					switch (get_format_pixel_size(format)) {
 						case 2:
 							_scale_bilinear<1, uint16_t, IMAGE_SCALING_INT>(src_ptr, w_ptr, src_width, src_height, p_width, p_height);
@@ -1527,7 +1543,7 @@ void Image::resize(int p_width, int p_height, Interpolation p_interpolation) {
 						_scale_cubic<4, uint8_t, IMAGE_SCALING_INT>(r_ptr, w_ptr, width, height, p_width, p_height);
 						break;
 				}
-			} else if (format >= FORMAT_RF && format <= FORMAT_RGBAF) {
+			} else if ((format >= FORMAT_RF && format <= FORMAT_RGBAF) || format == FORMAT_LF) {
 				switch (get_format_pixel_size(format)) {
 					case 4:
 						_scale_cubic<1, float, IMAGE_SCALING_FLOAT>(r_ptr, w_ptr, width, height, p_width, p_height);
@@ -1542,7 +1558,7 @@ void Image::resize(int p_width, int p_height, Interpolation p_interpolation) {
 						_scale_cubic<4, float, IMAGE_SCALING_FLOAT>(r_ptr, w_ptr, width, height, p_width, p_height);
 						break;
 				}
-			} else if (format >= FORMAT_RH && format <= FORMAT_RGBAH) {
+			} else if ((format >= FORMAT_RH && format <= FORMAT_RGBAH) || format == FORMAT_LH || format == FORMAT_LAH) {
 				switch (get_format_pixel_size(format)) {
 					case 2:
 						_scale_cubic<1, uint16_t, IMAGE_SCALING_FLOAT>(r_ptr, w_ptr, width, height, p_width, p_height);
@@ -1557,7 +1573,7 @@ void Image::resize(int p_width, int p_height, Interpolation p_interpolation) {
 						_scale_cubic<4, uint16_t, IMAGE_SCALING_FLOAT>(r_ptr, w_ptr, width, height, p_width, p_height);
 						break;
 				}
-			} else if (format >= FORMAT_R16 && format <= FORMAT_RGBA16I) {
+			} else if ((format >= FORMAT_R16 && format <= FORMAT_RGBA16I) || format == FORMAT_L16 || format == FORMAT_LA16) {
 				switch (get_format_pixel_size(format)) {
 					case 2:
 						_scale_cubic<1, uint16_t, IMAGE_SCALING_INT>(r_ptr, w_ptr, width, height, p_width, p_height);
@@ -1590,7 +1606,7 @@ void Image::resize(int p_width, int p_height, Interpolation p_interpolation) {
 						_scale_lanczos<4, uint8_t, IMAGE_SCALING_INT>(r_ptr, w_ptr, width, height, p_width, p_height);
 						break;
 				}
-			} else if (format >= FORMAT_RF && format <= FORMAT_RGBAF) {
+			} else if ((format >= FORMAT_RF && format <= FORMAT_RGBAF) || format == FORMAT_LF) {
 				switch (get_format_pixel_size(format)) {
 					case 4:
 						_scale_lanczos<1, float, IMAGE_SCALING_FLOAT>(r_ptr, w_ptr, width, height, p_width, p_height);
@@ -1605,7 +1621,7 @@ void Image::resize(int p_width, int p_height, Interpolation p_interpolation) {
 						_scale_lanczos<4, float, IMAGE_SCALING_FLOAT>(r_ptr, w_ptr, width, height, p_width, p_height);
 						break;
 				}
-			} else if (format >= FORMAT_RH && format <= FORMAT_RGBAH) {
+			} else if ((format >= FORMAT_RH && format <= FORMAT_RGBAH) || format == FORMAT_LH || format == FORMAT_LAH) {
 				switch (get_format_pixel_size(format)) {
 					case 2:
 						_scale_lanczos<1, uint16_t, IMAGE_SCALING_FLOAT>(r_ptr, w_ptr, width, height, p_width, p_height);
@@ -1620,7 +1636,7 @@ void Image::resize(int p_width, int p_height, Interpolation p_interpolation) {
 						_scale_lanczos<4, uint16_t, IMAGE_SCALING_FLOAT>(r_ptr, w_ptr, width, height, p_width, p_height);
 						break;
 				}
-			} else if (format >= FORMAT_R16 && format <= FORMAT_RGBA16I) {
+			} else if ((format >= FORMAT_R16 && format <= FORMAT_RGBA16I) || format == FORMAT_L16 || format == FORMAT_LA16) {
 				switch (get_format_pixel_size(format)) {
 					case 2:
 						_scale_lanczos<1, uint16_t, IMAGE_SCALING_INT>(r_ptr, w_ptr, width, height, p_width, p_height);
@@ -2034,6 +2050,12 @@ void Image::_generate_mipmap_from_format(Image::Format p_format, const uint8_t *
 		case Image::FORMAT_LA8:
 			_generate_po2_mipmap<uint8_t, 2, false, Image::average_4_uint8, Image::renormalize_uint8>(p_src, p_dst, p_width, p_height);
 			break;
+		case Image::FORMAT_L16:
+			_generate_po2_mipmap<uint16_t, 1, false, Image::average_4_uint16, Image::renormalize_uint16>(src_u16, dst_u16, p_width, p_height);
+			break;
+		case Image::FORMAT_LA16:
+			_generate_po2_mipmap<uint16_t, 2, false, Image::average_4_uint16, Image::renormalize_uint16>(src_u16, dst_u16, p_width, p_height);
+			break;
 		case Image::FORMAT_RG8:
 			_generate_po2_mipmap<uint8_t, 2, false, Image::average_4_uint8, Image::renormalize_uint8>(p_src, p_dst, p_width, p_height);
 			break;
@@ -2083,6 +2105,12 @@ void Image::_generate_mipmap_from_format(Image::Format p_format, const uint8_t *
 		case Image::FORMAT_RGH:
 			_generate_po2_mipmap<uint16_t, 2, false, Image::average_4_half, Image::renormalize_half>(src_u16, dst_u16, p_width, p_height);
 			break;
+		case Image::FORMAT_LH:
+			_generate_po2_mipmap<uint16_t, 1, false, Image::average_4_half, Image::renormalize_half>(src_u16, dst_u16, p_width, p_height);
+			break;
+		case Image::FORMAT_LAH:
+			_generate_po2_mipmap<uint16_t, 2, false, Image::average_4_half, Image::renormalize_half>(src_u16, dst_u16, p_width, p_height);
+			break;
 		case Image::FORMAT_RGBH: {
 			if (p_renormalize) {
 				_generate_po2_mipmap<uint16_t, 3, true, Image::average_4_half, Image::renormalize_half>(src_u16, dst_u16, p_width, p_height);
@@ -2106,6 +2134,9 @@ void Image::_generate_mipmap_from_format(Image::Format p_format, const uint8_t *
 			break;
 		case Image::FORMAT_RG16:
 		case Image::FORMAT_RG16I:
+		case Image::FORMAT_LF:
+			_generate_po2_mipmap<float, 1, false, Image::average_4_float, Image::renormalize_float>(src_float, dst_float, p_width, p_height);
+			break;
 			_generate_po2_mipmap<uint16_t, 2, false, Image::average_4_uint16, Image::renormalize_uint16>(src_u16, dst_u16, p_width, p_height);
 			break;
 		case Image::FORMAT_RGB16:
@@ -3070,7 +3101,7 @@ Image::Image(int p_width, int p_height, bool p_mipmaps, Format p_format, const V
 }
 
 Rect2i Image::get_used_rect() const {
-	if (format != FORMAT_LA8 && format != FORMAT_RGBA8 && format != FORMAT_RGBAF && format != FORMAT_RGBAH && format != FORMAT_RGBA4444 && format != FORMAT_RGB565) {
+	if (format != FORMAT_LA8 && format != FORMAT_LA16 && format != FORMAT_LAH && format != FORMAT_RGBA8 && format != FORMAT_RGBAF && format != FORMAT_RGBAH && format != FORMAT_RGBA4444 && format != FORMAT_RGB565) {
 		return Rect2i(0, 0, width, height);
 	}
 
@@ -3471,6 +3502,15 @@ Color Image::_get_color_at_ofs(const uint8_t *p_ptr, uint32_t p_ofs) const {
 			float a = p_ptr[p_ofs * 2 + 1] / 255.0;
 			return Color(l, l, l, a);
 		}
+		case FORMAT_L16: {
+			float l = ((const uint16_t *)p_ptr)[p_ofs] / 65535.0f;
+			return Color(l, l, l, 1.0f);
+		}
+		case FORMAT_LA16: {
+			float l = ((const uint16_t *)p_ptr)[p_ofs * 2 + 0] / 65535.0f;
+			float a = ((const uint16_t *)p_ptr)[p_ofs * 2 + 1] / 65535.0f;
+			return Color(l, l, l, a);
+		}
 		case FORMAT_R8: {
 			float r = p_ptr[p_ofs] / 255.0;
 			return Color(r, 0, 0, 1);
@@ -3543,6 +3583,15 @@ Color Image::_get_color_at_ofs(const uint8_t *p_ptr, uint32_t p_ofs) const {
 			uint16_t a = ((uint16_t *)p_ptr)[p_ofs * 4 + 3];
 			return Color(Math::half_to_float(r), Math::half_to_float(g), Math::half_to_float(b), Math::half_to_float(a));
 		}
+		case FORMAT_LH: {
+			float l = Math::half_to_float(((const uint16_t *)p_ptr)[p_ofs]);
+			return Color(l, l, l, 1.0f);
+		}
+		case FORMAT_LAH: {
+			float l = Math::half_to_float(((const uint16_t *)p_ptr)[p_ofs * 2 + 0]);
+			float a = Math::half_to_float(((const uint16_t *)p_ptr)[p_ofs * 2 + 1]);
+			return Color(l, l, l, a);
+		}
 		case FORMAT_RGBE9995: {
 			return Color::from_rgbe9995(((uint32_t *)p_ptr)[p_ofs]);
 		}
@@ -3590,6 +3639,10 @@ Color Image::_get_color_at_ofs(const uint8_t *p_ptr, uint32_t p_ofs) const {
 			uint16_t a = ((uint16_t *)p_ptr)[p_ofs * 4 + 3];
 			return Color(r, g, b, a);
 		}
+		case FORMAT_LF: {
+			float l = ((const float *)p_ptr)[p_ofs];
+			return Color(l, l, l, 1.0f);
+		}
 
 		default: {
 			ERR_FAIL_V_MSG(Color(), "Can't get_pixel() on compressed image, sorry.");
@@ -3605,6 +3658,13 @@ void Image::_set_color_at_ofs(uint8_t *r_ptr, uint32_t p_ofs, const Color &p_col
 		case FORMAT_LA8: {
 			r_ptr[p_ofs * 2 + 0] = uint8_t(CLAMP(p_color.get_v() * 255.0, 0, 255));
 			r_ptr[p_ofs * 2 + 1] = uint8_t(CLAMP(p_color.a * 255.0, 0, 255));
+		} break;
+		case FORMAT_L16: {
+			((uint16_t *)r_ptr)[p_ofs] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
+		} break;
+		case FORMAT_LA16: {
+			((uint16_t *)r_ptr)[p_ofs * 2 + 0] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
+			((uint16_t *)r_ptr)[p_ofs * 2 + 1] = uint16_t(CLAMP(p_color.a * 65535.0, 0, 65535));
 		} break;
 		case FORMAT_R8: {
 			r_ptr[p_ofs] = uint8_t(CLAMP(p_color.r * 255.0, 0, 255));
@@ -3666,6 +3726,13 @@ void Image::_set_color_at_ofs(uint8_t *r_ptr, uint32_t p_ofs, const Color &p_col
 			((uint16_t *)r_ptr)[p_ofs * 4 + 2] = Math::make_half_float(p_color.b);
 			((uint16_t *)r_ptr)[p_ofs * 4 + 3] = Math::make_half_float(p_color.a);
 		} break;
+		case FORMAT_LH: {
+			((uint16_t *)r_ptr)[p_ofs] = Math::make_half_float(p_color.get_v());
+		} break;
+		case FORMAT_LAH: {
+			((uint16_t *)r_ptr)[p_ofs * 2 + 0] = Math::make_half_float(p_color.get_v());
+			((uint16_t *)r_ptr)[p_ofs * 2 + 1] = Math::make_half_float(p_color.a);
+		} break;
 		case FORMAT_RGBE9995: {
 			((uint32_t *)r_ptr)[p_ofs] = p_color.to_rgbe9995();
 		} break;
@@ -3704,6 +3771,9 @@ void Image::_set_color_at_ofs(uint8_t *r_ptr, uint32_t p_ofs, const Color &p_col
 			((uint16_t *)r_ptr)[p_ofs * 4 + 1] = uint16_t(CLAMP(p_color.g, 0, 65535));
 			((uint16_t *)r_ptr)[p_ofs * 4 + 2] = uint16_t(CLAMP(p_color.b, 0, 65535));
 			((uint16_t *)r_ptr)[p_ofs * 4 + 3] = uint16_t(CLAMP(p_color.a, 0, 65535));
+		} break;
+		case FORMAT_LF: {
+			((float *)r_ptr)[p_ofs] = p_color.get_v();
 		} break;
 
 		default: {
@@ -3778,13 +3848,13 @@ Image::UsedChannels Image::detect_used_channels(CompressSource p_source) const {
 		return USED_CHANNELS_RG; // Normal maps only use RG channels.
 	}
 
-	if (format == FORMAT_L8) {
-		return USED_CHANNELS_L; // Grayscale only cannot have any channel less.
+	if (format == FORMAT_L8 || format == FORMAT_L16 || format == FORMAT_LH || format == FORMAT_LF) {
+		return USED_CHANNELS_L; // Grayscale-only formats cannot have any channel less.
 	} else if (format == FORMAT_R8 || format == FORMAT_RH || format == FORMAT_RF || format == FORMAT_R16 || format == FORMAT_R16I) {
 		return USED_CHANNELS_R; // Red only cannot have any channel less.
 	}
 
-	const bool supports_alpha = format == FORMAT_RGBA8 || format == FORMAT_RGBA4444 || format == FORMAT_RGBAH || format == FORMAT_RGBAF || format == FORMAT_RGBA16 || format == FORMAT_RGBA16I;
+	const bool supports_alpha = format == FORMAT_LA8 || format == FORMAT_LA16 || format == FORMAT_LAH || format == FORMAT_RGBA8 || format == FORMAT_RGBA4444 || format == FORMAT_RGBAH || format == FORMAT_RGBAF || format == FORMAT_RGBA16 || format == FORMAT_RGBA16I;
 	bool r = false, g = false, b = false, a = false, c = false;
 
 	const uint8_t *data_ptr = data.ptr();
@@ -4470,6 +4540,16 @@ uint32_t Image::get_format_component_mask(Format p_format) {
 			return rgb;
 		case FORMAT_RGBA16I:
 			return rgba;
+		case FORMAT_L16:
+			return rgb;
+		case FORMAT_LA16:
+			return rgba;
+		case FORMAT_LH:
+			return rgb;
+		case FORMAT_LAH:
+			return rgba;
+		case FORMAT_LF:
+			return rgb;
 		default:
 			ERR_PRINT("Unhandled format.");
 			return rgba;

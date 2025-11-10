@@ -121,6 +121,12 @@ public:
 		FORMAT_RGBA16I,
 		FORMAT_ASTC_6x6,
 		FORMAT_ASTC_6x6_HDR,
+		// Custom formats. Keep these last so upstream ones keep their own numbering.
+		FORMAT_L16,
+		FORMAT_LA16,
+		FORMAT_LH,
+		FORMAT_LAH,
+		FORMAT_LF,
 		FORMAT_MAX
 	};
 
