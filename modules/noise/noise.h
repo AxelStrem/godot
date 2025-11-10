@@ -31,6 +31,7 @@
 #pragma once
 
 #include "core/io/image.h"
+#include "core/math/math_funcs.h"
 #include "core/variant/typed_array.h"
 
 class Noise : public Resource {
@@ -113,6 +114,38 @@ class Noise : public Resource {
 		int skirt_edge_y = half_height + skirt_height;
 
 		Image::Format format = p_src[0]->get_format();
+
+		auto blend_value = [&](T p_bg, T p_fg, int p_alpha) -> T {
+			if (p_alpha <= 0) {
+				return p_bg;
+			}
+			if (p_alpha >= 255) {
+				return p_fg;
+			}
+			float t = p_alpha / 255.0f;
+			switch (format) {
+				case Image::FORMAT_L8: {
+					float bg = float(p_bg) / 255.0f;
+					float fg = float(p_fg) / 255.0f;
+					return T(CLAMP(Math::round(Math::lerp(bg, fg, t) * 255.0f), 0.0, 255.0));
+				}
+				case Image::FORMAT_L16: {
+					float bg = float(p_bg) / 65535.0f;
+					float fg = float(p_fg) / 65535.0f;
+					return T(CLAMP(Math::round(Math::lerp(bg, fg, t) * 65535.0f), 0.0, 65535.0));
+				}
+				case Image::FORMAT_LH: {
+					float bg = Math::half_to_float(p_bg);
+					float fg = Math::half_to_float(p_fg);
+					return Math::make_half_float(Math::lerp(bg, fg, t));
+				}
+				case Image::FORMAT_LF: {
+					return Math::lerp((float)p_bg, (float)p_fg, t);
+				}
+				default:
+					return _alpha_blend<T>(p_bg, p_fg, p_alpha);
+			}
+		};
 		int pixel_size = Image::get_format_pixel_size(format);
 
 		Vector<Ref<Image>> images;
@@ -161,7 +194,7 @@ class Noise : public Resource {
 						y = skirt_edge_y - 1;
 					} else {
 						// Starts reading at s2, ALT_Y skips s3, and continues with s1.
-						wr(x, y) = _alpha_blend<T>(rd_dest(x, y), rd_src(x, y, img_buff<T>::ALT_Y), alpha);
+						wr(x, y) = blend_value(rd_dest(x, y), rd_src(x, y, img_buff<T>::ALT_Y), alpha);
 					}
 				}
 			}
@@ -175,7 +208,7 @@ class Noise : public Resource {
 						x = skirt_edge_x - 1;
 					} else {
 						// Starts reading at s4, skips s3, continues with s5.
-						wr(x, y) = _alpha_blend<T>(rd_dest(x, y), rd_src(x, y, img_buff<T>::ALT_X), alpha);
+						wr(x, y) = blend_value(rd_dest(x, y), rd_src(x, y, img_buff<T>::ALT_X), alpha);
 					}
 				}
 			}
@@ -187,11 +220,11 @@ class Noise : public Resource {
 					int ypos = 255 * (1 - Math::smoothstep(0.1f, 0.9f, float(y - half_height) / float(skirt_height)));
 
 					// Blend s3(Q1) onto s5(Q2) for the top half.
-					T top_blend = _alpha_blend<T>(rd_src(x, y, img_buff<T>::ALT_X), rd_src(x, y, img_buff<T>::DEFAULT), xpos);
+					T top_blend = blend_value(rd_src(x, y, img_buff<T>::ALT_X), rd_src(x, y, img_buff<T>::DEFAULT), xpos);
 					// Blend s1(Q3) onto Q4 for the bottom half.
-					T bottom_blend = _alpha_blend<T>(rd_src(x, y, img_buff<T>::ALT_XY), rd_src(x, y, img_buff<T>::ALT_Y), xpos);
+					T bottom_blend = blend_value(rd_src(x, y, img_buff<T>::ALT_XY), rd_src(x, y, img_buff<T>::ALT_Y), xpos);
 					// Blend the top half onto the bottom half.
-					wr(x, y) = _alpha_blend<T>(bottom_blend, top_blend, ypos);
+					wr(x, y) = blend_value(bottom_blend, top_blend, ypos);
 				}
 			}
 			Ref<Image> image = memnew(Image(p_width, p_height, false, format, dest));
@@ -222,21 +255,18 @@ class Noise : public Resource {
 				Vector<uint8_t> img = images[z % p_depth]->get_data();
 				Vector<uint8_t> skirt = images[(z - half_depth) + p_depth]->get_data();
 
+				int pixel_count = images[0]->get_width() * images[0]->get_height();
+				int pixel_size = Image::get_format_pixel_size(images[0]->get_format());
+
 				Vector<uint8_t> dest;
-				dest.resize(images[0]->get_width() * images[0]->get_height() * Image::get_format_pixel_size(images[0]->get_format()));
+				dest.resize(pixel_count * pixel_size);
 
-				for (int i = 0; i < img.size(); i++) {
-					uint8_t fg, bg, out;
+				const T *bg_ptr = reinterpret_cast<const T *>(img.ptr());
+				const T *fg_ptr = reinterpret_cast<const T *>(skirt.ptr());
+				T *dst_ptr = reinterpret_cast<T *>(dest.ptrw());
 
-					fg = skirt[i];
-					bg = img[i];
-
-					uint16_t a = alpha + 1;
-					uint16_t inv_a = 256 - alpha;
-
-					out = (uint8_t)((a * fg + inv_a * bg) >> 8);
-
-					dest.write[i] = out;
+				for (int i = 0; i < pixel_count; i++) {
+					dst_ptr[i] = blend_value(bg_ptr[i], fg_ptr[i], alpha);
 				}
 
 				Ref<Image> new_image = memnew(Image(images[0]->get_width(), images[0]->get_height(), false, images[0]->get_format(), dest));
@@ -289,11 +319,11 @@ public:
 	virtual real_t get_noise_3dv(Vector3 p_v) const = 0;
 	virtual real_t get_noise_3d(real_t p_x, real_t p_y, real_t p_z) const = 0;
 
-	Vector<Ref<Image>> _get_image(int p_width, int p_height, int p_depth, bool p_invert = false, bool p_in_3d_space = false, bool p_normalize = true) const;
-	virtual Ref<Image> get_image(int p_width, int p_height, bool p_invert = false, bool p_in_3d_space = false, bool p_normalize = true) const;
-	virtual TypedArray<Image> get_image_3d(int p_width, int p_height, int p_depth, bool p_invert = false, bool p_normalize = true) const;
+	Vector<Ref<Image>> _get_image(int p_width, int p_height, int p_depth, bool p_invert = false, bool p_in_3d_space = false, bool p_normalize = true, Image::Format p_format = Image::FORMAT_L8) const;
+	virtual Ref<Image> get_image(int p_width, int p_height, bool p_invert = false, bool p_in_3d_space = false, bool p_normalize = true, Image::Format p_format = Image::FORMAT_L8) const;
+	virtual TypedArray<Image> get_image_3d(int p_width, int p_height, int p_depth, bool p_invert = false, bool p_normalize = true, Image::Format p_format = Image::FORMAT_L8) const;
 
-	Vector<Ref<Image>> _get_seamless_image(int p_width, int p_height, int p_depth, bool p_invert = false, bool p_in_3d_space = false, real_t p_blend_skirt = 0.1, bool p_normalize = true) const;
-	virtual Ref<Image> get_seamless_image(int p_width, int p_height, bool p_invert = false, bool p_in_3d_space = false, real_t p_blend_skirt = 0.1, bool p_normalize = true) const;
-	virtual TypedArray<Image> get_seamless_image_3d(int p_width, int p_height, int p_depth, bool p_invert = false, real_t p_blend_skirt = 0.1, bool p_normalize = true) const;
+	Vector<Ref<Image>> _get_seamless_image(int p_width, int p_height, int p_depth, bool p_invert = false, bool p_in_3d_space = false, real_t p_blend_skirt = 0.1, bool p_normalize = true, Image::Format p_format = Image::FORMAT_L8) const;
+	virtual Ref<Image> get_seamless_image(int p_width, int p_height, bool p_invert = false, bool p_in_3d_space = false, real_t p_blend_skirt = 0.1, bool p_normalize = true, Image::Format p_format = Image::FORMAT_L8) const;
+	virtual TypedArray<Image> get_seamless_image_3d(int p_width, int p_height, int p_depth, bool p_invert = false, real_t p_blend_skirt = 0.1, bool p_normalize = true, Image::Format p_format = Image::FORMAT_L8) const;
 };

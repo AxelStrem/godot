@@ -32,6 +32,7 @@
 
 #include "../noise_texture_3d.h"
 
+#include "core/variant/variant.h"
 #include "tests/test_macros.h"
 
 namespace TestNoiseTexture3D {
@@ -123,6 +124,21 @@ public:
 			CHECK(avg_color.b == doctest::Approx(0.5).epsilon(0.05));
 		}
 	}
+
+	void check_precision_format(Image::Format p_expected_format) {
+		const Vector<Ref<Image>> noise_data = texture->get_data();
+		CHECK(!noise_data.is_empty());
+
+		for (int i = 0; i < noise_data.size(); i++) {
+			const Ref<Image> noise_image = noise_data[i];
+			CHECK(noise_image.is_valid());
+			CHECK(noise_image->get_width() == texture->get_width());
+			CHECK(noise_image->get_height() == texture->get_height());
+			CHECK(noise_image->get_format() == p_expected_format);
+		}
+
+		CHECK(texture->get_format() == p_expected_format);
+	}
 };
 
 TEST_CASE("[NoiseTexture][SceneTree] Getter and setter") {
@@ -174,6 +190,18 @@ TEST_CASE("[NoiseTexture][SceneTree] Getter and setter") {
 	CHECK(noise_texture->get_color_ramp() == gradient);
 	noise_texture->set_color_ramp(nullptr);
 	CHECK(noise_texture->get_color_ramp().is_null());
+
+	noise_texture->set_image_format(Image::FORMAT_L16);
+	CHECK(noise_texture->get_image_format() == Image::FORMAT_L16);
+	noise_texture->set_image_format(Image::FORMAT_LH);
+	CHECK(noise_texture->get_image_format() == Image::FORMAT_LH);
+	noise_texture->set_image_format(Image::FORMAT_LF);
+	CHECK(noise_texture->get_image_format() == Image::FORMAT_LF);
+
+	ERR_PRINT_OFF;
+	noise_texture->set_image_format(Image::FORMAT_RGBA8);
+	ERR_PRINT_ON;
+	CHECK(noise_texture->get_image_format() == Image::FORMAT_L8);
 }
 
 TEST_CASE("[NoiseTexture3D][SceneTree] Generating a basic noise texture with mipmaps and color ramp modulation") {
@@ -228,6 +256,38 @@ TEST_CASE("[NoiseTexture3D][SceneTree] Generating a seamless noise texture") {
 		noise_texture->set_color_ramp(gradient);
 		noise_texture->set_seamless_blend_skirt(1.0);
 		noise_texture->connect_changed(callable_mp(tester.ptr(), &NoiseTexture3DTester::check_seamless_texture_rgba));
+		MessageQueue::get_singleton()->flush();
+	}
+}
+
+TEST_CASE("[NoiseTexture3D][SceneTree] Supports high precision luminance formats") {
+	Ref<NoiseTexture3D> noise_texture = memnew(NoiseTexture3D);
+
+	Ref<FastNoiseLite> noise = memnew(FastNoiseLite);
+	noise->set_frequency(0.25);
+	noise_texture->set_noise(noise);
+	noise_texture->set_width(8);
+	noise_texture->set_height(8);
+	noise_texture->set_depth(4);
+	noise_texture->set_seamless(false);
+
+	Ref<NoiseTexture3DTester> tester = memnew(NoiseTexture3DTester(noise_texture.ptr()));
+
+	SUBCASE("FORMAT_L16") {
+		noise_texture->set_image_format(Image::FORMAT_L16);
+		noise_texture->connect_changed(callable_mp(tester.ptr(), &NoiseTexture3DTester::check_precision_format), varray(Image::FORMAT_L16));
+		MessageQueue::get_singleton()->flush();
+	}
+
+	SUBCASE("FORMAT_LH") {
+		noise_texture->set_image_format(Image::FORMAT_LH);
+		noise_texture->connect_changed(callable_mp(tester.ptr(), &NoiseTexture3DTester::check_precision_format), varray(Image::FORMAT_LH));
+		MessageQueue::get_singleton()->flush();
+	}
+
+	SUBCASE("FORMAT_LF") {
+		noise_texture->set_image_format(Image::FORMAT_LF);
+		noise_texture->connect_changed(callable_mp(tester.ptr(), &NoiseTexture3DTester::check_precision_format), varray(Image::FORMAT_LF));
 		MessageQueue::get_singleton()->flush();
 	}
 }
