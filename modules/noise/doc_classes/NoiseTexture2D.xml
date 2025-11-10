@@ -16,6 +16,14 @@
 	</description>
 	<tutorials>
 	</tutorials>
+	<methods>
+		<method name="get_format" qualifiers="const">
+			<return type="int" enum="Image.Format" />
+			<description>
+				Returns the format of the currently stored image if available, or the requested [member image_format] otherwise.
+			</description>
+		</method>
+	</methods>
 	<members>
 		<member name="as_normal_map" type="bool" setter="set_as_normal_map" getter="is_normal_map" default="false">
 			If [code]true[/code], the resulting texture contains a normal map created from the original noise interpreted as a bump map.
@@ -38,6 +46,10 @@
 		</member>
 		<member name="invert" type="bool" setter="set_invert" getter="get_invert" default="false">
 			If [code]true[/code], inverts the noise texture. White becomes black, black becomes white.
+		</member>
+		<member name="image_format" type="int" enum="Image.Format" setter="set_image_format" getter="get_image_format" default="0">
+			Determines the format used when writing the noise data. Supports [constant Image.FORMAT_L8], [constant Image.FORMAT_L16], [constant Image.FORMAT_LH], and [constant Image.FORMAT_LF].
+			[b]Note:[/b] When applying a [member color_ramp] or enabling [member as_normal_map], the generated texture may be converted internally to another format.
 		</member>
 		<member name="noise" type="Noise" setter="set_noise" getter="get_noise">
 			The instance of the [Noise] object.

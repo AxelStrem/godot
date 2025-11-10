@@ -59,6 +59,7 @@ private:
 	bool as_normal_map = false;
 	float bump_strength = 8.0;
 	bool normalize = true;
+	Image::Format image_format = Image::FORMAT_L8;
 
 	Ref<Gradient> color_ramp;
 	Ref<Noise> noise;
@@ -108,6 +109,9 @@ public:
 	void set_normalize(bool p_normalize);
 	bool is_normalized() const;
 
+	void set_image_format(Image::Format p_format);
+	Image::Format get_image_format() const;
+
 	void set_color_ramp(const Ref<Gradient> &p_gradient);
 	Ref<Gradient> get_color_ramp() const;
 
@@ -116,6 +120,7 @@ public:
 
 	virtual RID get_rid() const override;
 	virtual bool has_alpha() const override { return false; }
+	virtual Image::Format get_format() const;
 
 	virtual Ref<Image> get_image() const override;
 

@@ -1210,6 +1210,21 @@ RID TextureStorage::texture_create_from_native_handle(RS::TextureType p_type, Im
 
 		case Image::FORMAT_RGB8:
 			format = RD::DATA_FORMAT_R8G8B8_UNORM;
+		case Image::FORMAT_L16:
+			format = RD::DATA_FORMAT_R16_UNORM;
+			break;
+		case Image::FORMAT_LA16:
+			format = RD::DATA_FORMAT_R16G16_UNORM;
+			break;
+		case Image::FORMAT_LH:
+			format = RD::DATA_FORMAT_R16_SFLOAT;
+			break;
+		case Image::FORMAT_LAH:
+			format = RD::DATA_FORMAT_R16G16_SFLOAT;
+			break;
+		case Image::FORMAT_LF:
+			format = RD::DATA_FORMAT_R32_SFLOAT;
+			break;
 			break;
 
 		case Image::FORMAT_RGBA8:
@@ -1858,6 +1873,41 @@ Ref<Image> TextureStorage::_validate_texture_format(const Ref<Image> &p_image, T
 			r_format.swizzle_b = RD::TEXTURE_SWIZZLE_R;
 			r_format.swizzle_a = RD::TEXTURE_SWIZZLE_G;
 		} break; //luminance-alpha
+		case Image::FORMAT_L16: {
+			r_format.format = RD::DATA_FORMAT_R16_UNORM;
+			r_format.swizzle_r = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_g = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_b = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_a = RD::TEXTURE_SWIZZLE_ONE;
+		} break;
+		case Image::FORMAT_LA16: {
+			r_format.format = RD::DATA_FORMAT_R16G16_UNORM;
+			r_format.swizzle_r = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_g = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_b = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_a = RD::TEXTURE_SWIZZLE_G;
+		} break;
+		case Image::FORMAT_LH: {
+			r_format.format = RD::DATA_FORMAT_R16_SFLOAT;
+			r_format.swizzle_r = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_g = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_b = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_a = RD::TEXTURE_SWIZZLE_ONE;
+		} break;
+		case Image::FORMAT_LAH: {
+			r_format.format = RD::DATA_FORMAT_R16G16_SFLOAT;
+			r_format.swizzle_r = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_g = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_b = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_a = RD::TEXTURE_SWIZZLE_G;
+		} break;
+		case Image::FORMAT_LF: {
+			r_format.format = RD::DATA_FORMAT_R32_SFLOAT;
+			r_format.swizzle_r = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_g = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_b = RD::TEXTURE_SWIZZLE_R;
+			r_format.swizzle_a = RD::TEXTURE_SWIZZLE_ONE;
+		} break;
 		case Image::FORMAT_R8: {
 			r_format.format = RD::DATA_FORMAT_R8_UNORM;
 			r_format.swizzle_r = RD::TEXTURE_SWIZZLE_R;
