@@ -4172,17 +4172,31 @@ void Image::bump_map_to_normal_map(float bump_scale) {
 			if (py >= height) {
 				py -= height;
 			}
+			int my = ty - 1;
+			if (my < 0) {
+				my += height;
+			}
 
 			for (int tx = 0; tx < width; tx++) {
 				int px = tx + 1;
 				if (px >= width) {
 					px -= width;
 				}
-				float here = read_ptr[ty * width + tx];
-				float to_right = read_ptr[ty * width + px];
-				float above = read_ptr[py * width + tx];
-				Vector3 up = Vector3(0, 1, (here - above) * bump_scale);
-				Vector3 across = Vector3(1, 0, (to_right - here) * bump_scale);
+				int mx = tx - 1;
+				if (mx < 0) {
+					mx += width;
+				}
+
+				float right = read_ptr[ty * width + px];
+				float left = read_ptr[ty * width + mx];
+				float down = read_ptr[py * width + tx];
+				float up_height = read_ptr[my * width + tx];
+
+				float slope_x = (right - left) * 0.5f * bump_scale;
+				float slope_y = (down - up_height) * 0.5f * bump_scale;
+
+				Vector3 across = Vector3(1.0f, 0.0f, slope_x);
+				Vector3 up = Vector3(0.0f, 1.0f, -slope_y);
 
 				Vector3 normal = across.cross(up);
 				normal.normalize();
