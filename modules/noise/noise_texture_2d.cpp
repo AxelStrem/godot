@@ -33,6 +33,26 @@
 #include "noise.h"
 
 #include "core/math/math_funcs.h"
+namespace {
+
+static bool noise_texture_is_supported_height_format(Image::Format p_format) {
+	return p_format == Image::FORMAT_L8 || p_format == Image::FORMAT_L16 || p_format == Image::FORMAT_LH || p_format == Image::FORMAT_LF;
+}
+
+static Image::Format noise_texture_normal_map_format(Image::Format p_height_format) {
+	switch (p_height_format) {
+		case Image::FORMAT_L16:
+			return Image::FORMAT_RGB16;
+		case Image::FORMAT_LH:
+			return Image::FORMAT_RGBH;
+		case Image::FORMAT_LF:
+			return Image::FORMAT_RGBF;
+		default:
+			return Image::FORMAT_RGBA8;
+	}
+}
+
+} // namespace
 
 NoiseTexture2D::NoiseTexture2D() {
 	noise = Ref<Noise>();
@@ -186,7 +206,8 @@ Ref<Image> NoiseTexture2D::_generate_texture() {
 		new_image = _modulate_with_gradient(new_image, color_ramp);
 	}
 	if (as_normal_map) {
-		new_image->bump_map_to_normal_map(bump_strength);
+		Image::Format normal_format = noise_texture_normal_map_format(image_format);
+		new_image->bump_map_to_normal_map(bump_strength, normal_format);
 	}
 	if (generate_mipmaps) {
 		new_image->generate_mipmaps();
@@ -400,11 +421,7 @@ bool NoiseTexture2D::is_normalized() const {
 }
 
 void NoiseTexture2D::set_image_format(Image::Format p_format) {
-	auto is_supported_format = [](Image::Format p_format) {
-		return p_format == Image::FORMAT_L8 || p_format == Image::FORMAT_L16 || p_format == Image::FORMAT_LH || p_format == Image::FORMAT_LF;
-	};
-
-	if (!is_supported_format(p_format)) {
+	if (!noise_texture_is_supported_height_format(p_format)) {
 		ERR_PRINT("Unsupported image format for NoiseTexture2D, falling back to FORMAT_L8.");
 		p_format = Image::FORMAT_L8;
 	}

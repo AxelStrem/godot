@@ -33,6 +33,13 @@
 #include "noise.h"
 
 #include "core/math/math_funcs.h"
+namespace {
+
+static bool noise_texture_is_supported_height_format(Image::Format p_format) {
+	return p_format == Image::FORMAT_L8 || p_format == Image::FORMAT_L16 || p_format == Image::FORMAT_LH || p_format == Image::FORMAT_LF;
+}
+
+} // namespace
 
 NoiseTexture3D::NoiseTexture3D() {
 	noise = Ref<Noise>();
@@ -348,11 +355,7 @@ float NoiseTexture3D::get_blur_strength() const {
 }
 
 void NoiseTexture3D::set_image_format(Image::Format p_format) {
-	auto is_supported_format = [](Image::Format p_format) {
-		return p_format == Image::FORMAT_L8 || p_format == Image::FORMAT_L16 || p_format == Image::FORMAT_LH || p_format == Image::FORMAT_LF;
-	};
-
-	if (!is_supported_format(p_format)) {
+	if (!noise_texture_is_supported_height_format(p_format)) {
 		ERR_PRINT("Unsupported image format for NoiseTexture3D, falling back to FORMAT_L8.");
 		p_format = Image::FORMAT_L8;
 	}
