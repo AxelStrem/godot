@@ -296,4 +296,6 @@ public:
 	Vector<Ref<Image>> _get_seamless_image(int p_width, int p_height, int p_depth, bool p_invert = false, bool p_in_3d_space = false, real_t p_blend_skirt = 0.1, bool p_normalize = true) const;
 	virtual Ref<Image> get_seamless_image(int p_width, int p_height, bool p_invert = false, bool p_in_3d_space = false, real_t p_blend_skirt = 0.1, bool p_normalize = true) const;
 	virtual TypedArray<Image> get_seamless_image_3d(int p_width, int p_height, int p_depth, bool p_invert = false, real_t p_blend_skirt = 0.1, bool p_normalize = true) const;
+
+	static void apply_blur(Vector<Ref<Image>> &r_images, float p_strength, bool p_wrap_xy, bool p_wrap_z);
 };

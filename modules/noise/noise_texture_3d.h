@@ -55,6 +55,7 @@ private:
 	bool seamless = false;
 	real_t seamless_blend_skirt = 0.1;
 	bool normalize = true;
+	float blur_strength = 0.0f;
 
 	Ref<Gradient> color_ramp;
 	Ref<Noise> noise;
@@ -97,6 +98,9 @@ public:
 
 	void set_color_ramp(const Ref<Gradient> &p_gradient);
 	Ref<Gradient> get_color_ramp() const;
+
+	void set_blur_strength(float p_strength);
+	float get_blur_strength() const;
 
 	virtual int get_width() const override;
 	virtual int get_height() const override;

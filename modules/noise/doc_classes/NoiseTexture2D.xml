@@ -23,6 +23,9 @@
 		<member name="bump_strength" type="float" setter="set_bump_strength" getter="get_bump_strength" default="8.0">
 			Strength of the bump maps used in this texture. A higher value will make the bump maps appear larger while a lower value will make them appear softer.
 		</member>
+		<member name="blur_strength" type="float" setter="set_blur_strength" getter="get_blur_strength" default="0.0">
+			Applies an optional low-pass filter to the generated noise before any color ramp or normal map conversion. Higher values increase the blur radius and smooth out high frequencies, which helps reduce aliasing when using the noise as a heightmap. Set to [code]0.0[/code] to disable smoothing.
+		</member>
 		<member name="color_ramp" type="Gradient" setter="set_color_ramp" getter="get_color_ramp">
 			A [Gradient] which is used to map the luminance of each pixel to a color value.
 		</member>

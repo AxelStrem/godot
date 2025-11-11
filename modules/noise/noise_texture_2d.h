@@ -59,6 +59,7 @@ private:
 	bool as_normal_map = false;
 	float bump_strength = 8.0;
 	bool normalize = true;
+	float blur_strength = 0.0f;
 
 	Ref<Gradient> color_ramp;
 	Ref<Noise> noise;
@@ -110,6 +111,9 @@ public:
 
 	void set_color_ramp(const Ref<Gradient> &p_gradient);
 	Ref<Gradient> get_color_ramp() const;
+
+	void set_blur_strength(float p_strength);
+	float get_blur_strength() const;
 
 	int get_width() const override;
 	int get_height() const override;

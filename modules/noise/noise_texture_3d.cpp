@@ -32,6 +32,8 @@
 
 #include "noise.h"
 
+#include "core/math/math_funcs.h"
+
 NoiseTexture3D::NoiseTexture3D() {
 	noise = Ref<Noise>();
 
@@ -71,6 +73,9 @@ void NoiseTexture3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_seamless_blend_skirt", "seamless_blend_skirt"), &NoiseTexture3D::set_seamless_blend_skirt);
 	ClassDB::bind_method(D_METHOD("get_seamless_blend_skirt"), &NoiseTexture3D::get_seamless_blend_skirt);
 
+	ClassDB::bind_method(D_METHOD("set_blur_strength", "strength"), &NoiseTexture3D::set_blur_strength);
+	ClassDB::bind_method(D_METHOD("get_blur_strength"), &NoiseTexture3D::get_blur_strength);
+
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "width", PROPERTY_HINT_RANGE, "1,2048,1,or_greater,suffix:px"), "set_width", "get_width");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "height", PROPERTY_HINT_RANGE, "1,2048,1,or_greater,suffix:px"), "set_height", "get_height");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "depth", PROPERTY_HINT_RANGE, "1,2048,1,or_greater,suffix:px"), "set_depth", "get_depth");
@@ -80,6 +85,7 @@ void NoiseTexture3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "invert"), "set_invert", "get_invert");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "normalize"), "set_normalize", "is_normalized");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "seamless_blend_skirt", PROPERTY_HINT_RANGE, "0.05,1,0.001"), "set_seamless_blend_skirt", "get_seamless_blend_skirt");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "blur_strength", PROPERTY_HINT_RANGE, "0,8,0.1"), "set_blur_strength", "get_blur_strength");
 }
 
 void NoiseTexture3D::_validate_property(PropertyInfo &p_property) const {
@@ -153,6 +159,9 @@ TypedArray<Image> NoiseTexture3D::_generate_texture() {
 		images = ref_noise->_get_seamless_image(width, height, depth, invert, true, seamless_blend_skirt, normalize);
 	} else {
 		images = ref_noise->_get_image(width, height, depth, invert, true, normalize);
+	}
+	if (!images.is_empty() && !Math::is_zero_approx(blur_strength)) {
+		Noise::apply_blur(images, blur_strength, seamless, seamless);
 	}
 
 	if (color_ramp.is_valid()) {
@@ -319,6 +328,19 @@ void NoiseTexture3D::set_normalize(bool p_normalize) {
 
 bool NoiseTexture3D::is_normalized() const {
 	return normalize;
+}
+
+void NoiseTexture3D::set_blur_strength(float p_strength) {
+	float strength = MAX(p_strength, 0.0f);
+	if (Math::is_equal_approx(strength, blur_strength)) {
+		return;
+	}
+	blur_strength = strength;
+	_queue_update();
+}
+
+float NoiseTexture3D::get_blur_strength() const {
+	return blur_strength;
 }
 
 Ref<Gradient> NoiseTexture3D::get_color_ramp() const {

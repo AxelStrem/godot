@@ -185,6 +185,11 @@ TEST_CASE("[NoiseTexture][SceneTree] Getter and setter") {
 	noise_texture->set_bump_strength(0.168);
 	CHECK(noise_texture->get_bump_strength() == doctest::Approx(0.168));
 
+	noise_texture->set_blur_strength(1.25f);
+	CHECK(noise_texture->get_blur_strength() == doctest::Approx(1.25f));
+	noise_texture->set_blur_strength(-0.5f);
+	CHECK(noise_texture->get_blur_strength() == doctest::Approx(0.0f));
+
 	Ref<Gradient> gradient = memnew(Gradient);
 	noise_texture->set_color_ramp(gradient);
 	CHECK(noise_texture->get_color_ramp() == gradient);

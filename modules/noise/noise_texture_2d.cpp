@@ -32,6 +32,8 @@
 
 #include "noise.h"
 
+#include "core/math/math_funcs.h"
+
 NoiseTexture2D::NoiseTexture2D() {
 	noise = Ref<Noise>();
 
@@ -82,6 +84,9 @@ void NoiseTexture2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_bump_strength", "bump_strength"), &NoiseTexture2D::set_bump_strength);
 	ClassDB::bind_method(D_METHOD("get_bump_strength"), &NoiseTexture2D::get_bump_strength);
 
+	ClassDB::bind_method(D_METHOD("set_blur_strength", "strength"), &NoiseTexture2D::set_blur_strength);
+	ClassDB::bind_method(D_METHOD("get_blur_strength"), &NoiseTexture2D::get_blur_strength);
+
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "width", PROPERTY_HINT_RANGE, "1,2048,1,or_greater,suffix:px"), "set_width", "get_width");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "height", PROPERTY_HINT_RANGE, "1,2048,1,or_greater,suffix:px"), "set_height", "get_height");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "generate_mipmaps"), "set_generate_mipmaps", "is_generating_mipmaps");
@@ -94,6 +99,7 @@ void NoiseTexture2D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "normalize"), "set_normalize", "is_normalized");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "seamless_blend_skirt", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_seamless_blend_skirt", "get_seamless_blend_skirt");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bump_strength", PROPERTY_HINT_RANGE, "0,32,0.1,or_greater"), "set_bump_strength", "get_bump_strength");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "blur_strength", PROPERTY_HINT_RANGE, "0,8,0.1"), "set_blur_strength", "get_blur_strength");
 }
 
 void NoiseTexture2D::_validate_property(PropertyInfo &p_property) const {
@@ -164,6 +170,12 @@ Ref<Image> NoiseTexture2D::_generate_texture() {
 		new_image = ref_noise->get_seamless_image(size.x, size.y, invert, in_3d_space, seamless_blend_skirt, normalize);
 	} else {
 		new_image = ref_noise->get_image(size.x, size.y, invert, in_3d_space, normalize);
+	}
+	if (new_image.is_valid() && !Math::is_zero_approx(blur_strength)) {
+		Vector<Ref<Image>> slices;
+		slices.push_back(new_image);
+		Noise::apply_blur(slices, blur_strength, seamless, false);
+		new_image = slices[0];
 	}
 	if (color_ramp.is_valid()) {
 		new_image = _modulate_with_gradient(new_image, color_ramp);
@@ -341,6 +353,19 @@ void NoiseTexture2D::set_bump_strength(float p_bump_strength) {
 
 float NoiseTexture2D::get_bump_strength() {
 	return bump_strength;
+}
+
+void NoiseTexture2D::set_blur_strength(float p_strength) {
+	float strength = MAX(p_strength, 0.0f);
+	if (Math::is_equal_approx(strength, blur_strength)) {
+		return;
+	}
+	blur_strength = strength;
+	_queue_update();
+}
+
+float NoiseTexture2D::get_blur_strength() const {
+	return blur_strength;
 }
 
 void NoiseTexture2D::set_color_ramp(const Ref<Gradient> &p_gradient) {

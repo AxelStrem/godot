@@ -174,6 +174,11 @@ TEST_CASE("[NoiseTexture][SceneTree] Getter and setter") {
 	CHECK(noise_texture->get_color_ramp() == gradient);
 	noise_texture->set_color_ramp(nullptr);
 	CHECK(noise_texture->get_color_ramp().is_null());
+
+	noise_texture->set_blur_strength(1.5f);
+	CHECK(noise_texture->get_blur_strength() == doctest::Approx(1.5f));
+	noise_texture->set_blur_strength(-0.25f);
+	CHECK(noise_texture->get_blur_strength() == doctest::Approx(0.0f));
 }
 
 TEST_CASE("[NoiseTexture3D][SceneTree] Generating a basic noise texture with mipmaps and color ramp modulation") {
