@@ -345,6 +345,8 @@ void NoiseTexture3D::set_blur_strength(float p_strength) {
 
 float NoiseTexture3D::get_blur_strength() const {
 	return blur_strength;
+}
+
 void NoiseTexture3D::set_image_format(Image::Format p_format) {
 	auto is_supported_format = [](Image::Format p_format) {
 		return p_format == Image::FORMAT_L8 || p_format == Image::FORMAT_L16 || p_format == Image::FORMAT_LH || p_format == Image::FORMAT_LF;
