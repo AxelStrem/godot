@@ -213,6 +213,7 @@ void Noise::apply_blur(Vector<Ref<Image>> &r_images, float p_strength, bool p_wr
 
 
 Vector<Ref<Image>> Noise::_get_seamless_image(int p_width, int p_height, int p_depth, bool p_invert, bool p_in_3d_space, real_t p_blend_skirt, bool p_normalize) const {
+Vector<Ref<Image>> Noise::_get_seamless_image(int p_width, int p_height, int p_depth, bool p_invert, bool p_in_3d_space, real_t p_blend_skirt, bool p_normalize, Image::Format p_format) const {
 	ERR_FAIL_COND_V(p_width <= 0 || p_height <= 0 || p_depth <= 0, Vector<Ref<Image>>());
 
 	int skirt_width = MAX(1, p_width * p_blend_skirt);
@@ -222,26 +223,32 @@ Vector<Ref<Image>> Noise::_get_seamless_image(int p_width, int p_height, int p_d
 	int src_height = p_height + skirt_height;
 	int src_depth = p_depth + skirt_depth;
 
-	Vector<Ref<Image>> src = _get_image(src_width, src_height, src_depth, p_invert, p_in_3d_space, p_normalize);
-	bool grayscale = (src[0]->get_format() == Image::FORMAT_L8);
+	Vector<Ref<Image>> src = _get_image(src_width, src_height, src_depth, p_invert, p_in_3d_space, p_normalize, p_format);
+	Image::Format src_format = src[0]->get_format();
 
-	if (grayscale) {
-		return _generate_seamless_image<uint8_t>(src, p_width, p_height, p_depth, p_invert, p_blend_skirt);
-	} else {
-		return _generate_seamless_image<uint32_t>(src, p_width, p_height, p_depth, p_invert, p_blend_skirt);
+	switch (src_format) {
+		case Image::FORMAT_L8:
+			return _generate_seamless_image<uint8_t>(src, p_width, p_height, p_depth, p_invert, p_blend_skirt);
+		case Image::FORMAT_L16:
+		case Image::FORMAT_LH:
+			return _generate_seamless_image<uint16_t>(src, p_width, p_height, p_depth, p_invert, p_blend_skirt);
+		case Image::FORMAT_LF:
+			return _generate_seamless_image<float>(src, p_width, p_height, p_depth, p_invert, p_blend_skirt);
+		default:
+			return _generate_seamless_image<uint32_t>(src, p_width, p_height, p_depth, p_invert, p_blend_skirt);
 	}
 }
 
-Ref<Image> Noise::get_seamless_image(int p_width, int p_height, bool p_invert, bool p_in_3d_space, real_t p_blend_skirt, bool p_normalize) const {
-	Vector<Ref<Image>> images = _get_seamless_image(p_width, p_height, 1, p_invert, p_in_3d_space, p_blend_skirt, p_normalize);
+Ref<Image> Noise::get_seamless_image(int p_width, int p_height, bool p_invert, bool p_in_3d_space, real_t p_blend_skirt, bool p_normalize, Image::Format p_format) const {
+	Vector<Ref<Image>> images = _get_seamless_image(p_width, p_height, 1, p_invert, p_in_3d_space, p_blend_skirt, p_normalize, p_format);
 	if (images.is_empty()) {
 		return Ref<Image>();
 	}
 	return images[0];
 }
 
-TypedArray<Image> Noise::get_seamless_image_3d(int p_width, int p_height, int p_depth, bool p_invert, real_t p_blend_skirt, bool p_normalize) const {
-	Vector<Ref<Image>> images = _get_seamless_image(p_width, p_height, p_depth, p_invert, true, p_blend_skirt, p_normalize);
+TypedArray<Image> Noise::get_seamless_image_3d(int p_width, int p_height, int p_depth, bool p_invert, real_t p_blend_skirt, bool p_normalize, Image::Format p_format) const {
+	Vector<Ref<Image>> images = _get_seamless_image(p_width, p_height, p_depth, p_invert, true, p_blend_skirt, p_normalize, p_format);
 
 	TypedArray<Image> ret;
 	ret.resize(images.size());
@@ -260,11 +267,48 @@ uint8_t Noise::_alpha_blend<uint8_t>(uint8_t p_bg, uint8_t p_fg, int p_alpha) co
 	return (uint8_t)((alpha * p_fg + inv_alpha * p_bg) >> 8);
 }
 
-Vector<Ref<Image>> Noise::_get_image(int p_width, int p_height, int p_depth, bool p_invert, bool p_in_3d_space, bool p_normalize) const {
+Vector<Ref<Image>> Noise::_get_image(int p_width, int p_height, int p_depth, bool p_invert, bool p_in_3d_space, bool p_normalize, Image::Format p_format) const {
 	ERR_FAIL_COND_V(p_width <= 0 || p_height <= 0 || p_depth <= 0, Vector<Ref<Image>>());
+
+	auto is_supported_format = [](Image::Format p_format) {
+		return p_format == Image::FORMAT_L8 || p_format == Image::FORMAT_L16 || p_format == Image::FORMAT_LH || p_format == Image::FORMAT_LF;
+	};
+
+	Image::Format format = p_format;
+	if (!is_supported_format(format)) {
+		ERR_PRINT("Unsupported noise image format requested, defaulting to FORMAT_L8.");
+		format = Image::FORMAT_L8;
+	}
 
 	Vector<Ref<Image>> images;
 	images.resize(p_depth);
+
+	const int pixel_count_per_slice = p_width * p_height;
+	const int pixel_size = Image::get_format_pixel_size(format);
+
+	auto pack_normalized_value = [&](uint8_t *p_buffer, int p_index, real_t p_value) {
+		real_t normalized = CLAMP(p_value, 0.0, 1.0);
+		if (p_invert) {
+			normalized = 1.0 - normalized;
+		}
+		switch (format) {
+			case Image::FORMAT_L8: {
+				reinterpret_cast<uint8_t *>(p_buffer)[p_index] = uint8_t(CLAMP(Math::round(normalized * 255.0), 0.0, 255.0));
+			} break;
+			case Image::FORMAT_L16: {
+				reinterpret_cast<uint16_t *>(p_buffer)[p_index] = uint16_t(CLAMP(Math::round(normalized * 65535.0), 0.0, 65535.0));
+			} break;
+			case Image::FORMAT_LH: {
+				reinterpret_cast<uint16_t *>(p_buffer)[p_index] = Math::make_half_float((float)normalized);
+			} break;
+			case Image::FORMAT_LF: {
+				reinterpret_cast<float *>(p_buffer)[p_index] = (float)normalized;
+			} break;
+			default: {
+				reinterpret_cast<uint8_t *>(p_buffer)[p_index] = uint8_t(CLAMP(Math::round(normalized * 255.0), 0.0, 255.0));
+			} break;
+		}
+	};
 
 	if (p_normalize) {
 		// Get all values and identify min/max values.
@@ -292,28 +336,21 @@ Vector<Ref<Image>> Noise::_get_image(int p_width, int p_height, int p_depth, boo
 		// Normalize values and write to texture.
 		for (int d = 0; d < p_depth; d++) {
 			Vector<uint8_t> data;
-			data.resize(p_width * p_height);
+			data.resize(pixel_count_per_slice * pixel_size);
 
-			uint8_t *wd8 = data.ptrw();
-			uint8_t ivalue;
+			uint8_t *write_ptr = data.ptrw();
 
 			for (int y = 0; y < p_height; y++) {
 				for (int x = 0; x < p_width; x++) {
-					if (max_val == min_val) {
-						ivalue = 0;
-					} else {
-						ivalue = static_cast<uint8_t>(CLAMP((values[idx] - min_val) / (max_val - min_val) * 255.f, 0, 255));
+					real_t normalized = 0.0;
+					if (max_val != min_val) {
+						normalized = (values[idx] - min_val) / (max_val - min_val);
 					}
-
-					if (p_invert) {
-						ivalue = 255 - ivalue;
-					}
-
-					wd8[x + y * p_width] = ivalue;
+					pack_normalized_value(write_ptr, x + y * p_width, normalized);
 					idx++;
 				}
 			}
-			Ref<Image> img = memnew(Image(p_width, p_height, false, Image::FORMAT_L8, data));
+			Ref<Image> img = memnew(Image(p_width, p_height, false, format, data));
 			images.write[d] = img;
 		}
 	} else {
@@ -321,22 +358,20 @@ Vector<Ref<Image>> Noise::_get_image(int p_width, int p_height, int p_depth, boo
 
 		for (int d = 0; d < p_depth; d++) {
 			Vector<uint8_t> data;
-			data.resize(p_width * p_height);
+			data.resize(pixel_count_per_slice * pixel_size);
 
-			uint8_t *wd8 = data.ptrw();
-
-			uint8_t ivalue;
+			uint8_t *write_ptr = data.ptrw();
 			int idx = 0;
 			for (int y = 0; y < p_height; y++) {
 				for (int x = 0; x < p_width; x++) {
 					float value = (p_in_3d_space ? get_noise_3d(x, y, d) : get_noise_2d(x, y));
-					ivalue = static_cast<uint8_t>(CLAMP(value * 127.5f + 127.5f, 0.0f, 255.0f));
-					wd8[idx] = p_invert ? (255 - ivalue) : ivalue;
+					real_t normalized = CLAMP(real_t(value) * 0.5 + 0.5, 0.0, 1.0);
+					pack_normalized_value(write_ptr, idx, normalized);
 					idx++;
 				}
 			}
 
-			Ref<Image> img = memnew(Image(p_width, p_height, false, Image::FORMAT_L8, data));
+			Ref<Image> img = memnew(Image(p_width, p_height, false, format, data));
 			images.write[d] = img;
 		}
 	}
@@ -344,16 +379,16 @@ Vector<Ref<Image>> Noise::_get_image(int p_width, int p_height, int p_depth, boo
 	return images;
 }
 
-Ref<Image> Noise::get_image(int p_width, int p_height, bool p_invert, bool p_in_3d_space, bool p_normalize) const {
-	Vector<Ref<Image>> images = _get_image(p_width, p_height, 1, p_invert, p_in_3d_space, p_normalize);
+Ref<Image> Noise::get_image(int p_width, int p_height, bool p_invert, bool p_in_3d_space, bool p_normalize, Image::Format p_format) const {
+	Vector<Ref<Image>> images = _get_image(p_width, p_height, 1, p_invert, p_in_3d_space, p_normalize, p_format);
 	if (images.is_empty()) {
 		return Ref<Image>();
 	}
 	return images[0];
 }
 
-TypedArray<Image> Noise::get_image_3d(int p_width, int p_height, int p_depth, bool p_invert, bool p_normalize) const {
-	Vector<Ref<Image>> images = _get_image(p_width, p_height, p_depth, p_invert, true, p_normalize);
+TypedArray<Image> Noise::get_image_3d(int p_width, int p_height, int p_depth, bool p_invert, bool p_normalize, Image::Format p_format) const {
+	Vector<Ref<Image>> images = _get_image(p_width, p_height, p_depth, p_invert, true, p_normalize, p_format);
 
 	TypedArray<Image> ret;
 	ret.resize(images.size());
@@ -372,8 +407,8 @@ void Noise::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_noise_3dv", "v"), &Noise::get_noise_3dv);
 
 	// Textures.
-	ClassDB::bind_method(D_METHOD("get_image", "width", "height", "invert", "in_3d_space", "normalize"), &Noise::get_image, DEFVAL(false), DEFVAL(false), DEFVAL(true));
-	ClassDB::bind_method(D_METHOD("get_seamless_image", "width", "height", "invert", "in_3d_space", "skirt", "normalize"), &Noise::get_seamless_image, DEFVAL(false), DEFVAL(false), DEFVAL(0.1), DEFVAL(true));
-	ClassDB::bind_method(D_METHOD("get_image_3d", "width", "height", "depth", "invert", "normalize"), &Noise::get_image_3d, DEFVAL(false), DEFVAL(true));
-	ClassDB::bind_method(D_METHOD("get_seamless_image_3d", "width", "height", "depth", "invert", "skirt", "normalize"), &Noise::get_seamless_image_3d, DEFVAL(false), DEFVAL(0.1), DEFVAL(true));
+	ClassDB::bind_method(D_METHOD("get_image", "width", "height", "invert", "in_3d_space", "normalize", "format"), &Noise::get_image, DEFVAL(false), DEFVAL(false), DEFVAL(true), DEFVAL(Image::FORMAT_L8));
+	ClassDB::bind_method(D_METHOD("get_seamless_image", "width", "height", "invert", "in_3d_space", "skirt", "normalize", "format"), &Noise::get_seamless_image, DEFVAL(false), DEFVAL(false), DEFVAL(0.1), DEFVAL(true), DEFVAL(Image::FORMAT_L8));
+	ClassDB::bind_method(D_METHOD("get_image_3d", "width", "height", "depth", "invert", "normalize", "format"), &Noise::get_image_3d, DEFVAL(false), DEFVAL(true), DEFVAL(Image::FORMAT_L8));
+	ClassDB::bind_method(D_METHOD("get_seamless_image_3d", "width", "height", "depth", "invert", "skirt", "normalize", "format"), &Noise::get_seamless_image_3d, DEFVAL(false), DEFVAL(0.1), DEFVAL(true), DEFVAL(Image::FORMAT_L8));
 }

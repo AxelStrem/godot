@@ -386,6 +386,31 @@ static inline Error _get_gl_uncompressed_format(const Ref<Image> &p_image, Image
 				r_gl_type = GL_UNSIGNED_BYTE;
 			}
 		} break;
+		case Image::FORMAT_L16: {
+			r_gl_internal_format = GL_R16;
+			r_gl_format = GL_RED;
+			r_gl_type = GL_UNSIGNED_SHORT;
+		} break;
+		case Image::FORMAT_LA16: {
+			r_gl_internal_format = GL_RG16;
+			r_gl_format = GL_RG;
+			r_gl_type = GL_UNSIGNED_SHORT;
+		} break;
+		case Image::FORMAT_LH: {
+			r_gl_internal_format = GL_R16F;
+			r_gl_format = GL_RED;
+			r_gl_type = GL_HALF_FLOAT;
+		} break;
+		case Image::FORMAT_LAH: {
+			r_gl_internal_format = GL_RG16F;
+			r_gl_format = GL_RG;
+			r_gl_type = GL_HALF_FLOAT;
+		} break;
+		case Image::FORMAT_LF: {
+			r_gl_internal_format = GL_R32F;
+			r_gl_format = GL_RED;
+			r_gl_type = GL_FLOAT;
+		} break;
 		case Image::FORMAT_R8: {
 			r_gl_internal_format = GL_R8;
 			r_gl_format = GL_RED;
@@ -1899,7 +1924,10 @@ void TextureStorage::_texture_set_3d_data(RID p_texture, const Vector<Ref<Image>
 void TextureStorage::_texture_set_swizzle(GLES3::Texture *p_texture, Image::Format p_real_format) {
 #ifndef WEB_ENABLED
 	switch (p_texture->format) {
-		case Image::FORMAT_L8: {
+		case Image::FORMAT_L8:
+		case Image::FORMAT_L16:
+		case Image::FORMAT_LH:
+		case Image::FORMAT_LF: {
 			if (RasterizerGLES3::is_gles_over_gl()) {
 				glTexParameteri(p_texture->target, GL_TEXTURE_SWIZZLE_R, GL_RED);
 				glTexParameteri(p_texture->target, GL_TEXTURE_SWIZZLE_G, GL_RED);
@@ -1912,7 +1940,9 @@ void TextureStorage::_texture_set_swizzle(GLES3::Texture *p_texture, Image::Form
 				glTexParameteri(p_texture->target, GL_TEXTURE_SWIZZLE_A, GL_ALPHA);
 			}
 		} break;
-		case Image::FORMAT_LA8: {
+		case Image::FORMAT_LA8:
+		case Image::FORMAT_LA16:
+		case Image::FORMAT_LAH: {
 			if (RasterizerGLES3::is_gles_over_gl()) {
 				glTexParameteri(p_texture->target, GL_TEXTURE_SWIZZLE_R, GL_RED);
 				glTexParameteri(p_texture->target, GL_TEXTURE_SWIZZLE_G, GL_RED);

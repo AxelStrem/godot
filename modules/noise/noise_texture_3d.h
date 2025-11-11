@@ -56,6 +56,7 @@ private:
 	real_t seamless_blend_skirt = 0.1;
 	bool normalize = true;
 	float blur_strength = 0.0f;
+	Image::Format image_format = Image::FORMAT_L8;
 
 	Ref<Gradient> color_ramp;
 	Ref<Noise> noise;
@@ -101,6 +102,8 @@ public:
 
 	void set_blur_strength(float p_strength);
 	float get_blur_strength() const;
+	void set_image_format(Image::Format p_format);
+	Image::Format get_image_format() const;
 
 	virtual int get_width() const override;
 	virtual int get_height() const override;
