@@ -32,6 +32,15 @@
 
 #include "noise.h"
 
+#include "core/math/math_funcs.h"
+namespace {
+
+static bool noise_texture_is_supported_height_format(Image::Format p_format) {
+	return p_format == Image::FORMAT_L8 || p_format == Image::FORMAT_L16 || p_format == Image::FORMAT_LH || p_format == Image::FORMAT_LF;
+}
+
+} // namespace
+
 NoiseTexture3D::NoiseTexture3D() {
 	noise = Ref<Noise>();
 
@@ -71,6 +80,8 @@ void NoiseTexture3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_seamless_blend_skirt", "seamless_blend_skirt"), &NoiseTexture3D::set_seamless_blend_skirt);
 	ClassDB::bind_method(D_METHOD("get_seamless_blend_skirt"), &NoiseTexture3D::get_seamless_blend_skirt);
 
+	ClassDB::bind_method(D_METHOD("set_blur_strength", "strength"), &NoiseTexture3D::set_blur_strength);
+	ClassDB::bind_method(D_METHOD("get_blur_strength"), &NoiseTexture3D::get_blur_strength);
 	ClassDB::bind_method(D_METHOD("set_image_format", "format"), &NoiseTexture3D::set_image_format);
 	ClassDB::bind_method(D_METHOD("get_image_format"), &NoiseTexture3D::get_image_format);
 
@@ -83,6 +94,7 @@ void NoiseTexture3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "invert"), "set_invert", "get_invert");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "normalize"), "set_normalize", "is_normalized");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "seamless_blend_skirt", PROPERTY_HINT_RANGE, "0.05,1,0.001"), "set_seamless_blend_skirt", "get_seamless_blend_skirt");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "blur_strength", PROPERTY_HINT_RANGE, "0,8,0.1"), "set_blur_strength", "get_blur_strength");
 	const String format_hint = "L8:" + itos(Image::FORMAT_L8) + ",L16:" + itos(Image::FORMAT_L16) + ",LH:" + itos(Image::FORMAT_LH) + ",LF:" + itos(Image::FORMAT_LF);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "image_format", PROPERTY_HINT_ENUM, format_hint), "set_image_format", "get_image_format");
 }
@@ -158,6 +170,9 @@ TypedArray<Image> NoiseTexture3D::_generate_texture() {
 		images = ref_noise->_get_seamless_image(width, height, depth, invert, true, seamless_blend_skirt, normalize, image_format);
 	} else {
 		images = ref_noise->_get_image(width, height, depth, invert, true, normalize, image_format);
+	}
+	if (!images.is_empty() && !Math::is_zero_approx(blur_strength)) {
+		Noise::apply_blur(images, blur_strength, seamless, seamless);
 	}
 
 	if (color_ramp.is_valid()) {
@@ -326,12 +341,21 @@ bool NoiseTexture3D::is_normalized() const {
 	return normalize;
 }
 
-void NoiseTexture3D::set_image_format(Image::Format p_format) {
-	auto is_supported_format = [](Image::Format p_format) {
-		return p_format == Image::FORMAT_L8 || p_format == Image::FORMAT_L16 || p_format == Image::FORMAT_LH || p_format == Image::FORMAT_LF;
-	};
+void NoiseTexture3D::set_blur_strength(float p_strength) {
+	float strength = MAX(p_strength, 0.0f);
+	if (Math::is_equal_approx(strength, blur_strength)) {
+		return;
+	}
+	blur_strength = strength;
+	_queue_update();
+}
 
-	if (!is_supported_format(p_format)) {
+float NoiseTexture3D::get_blur_strength() const {
+	return blur_strength;
+}
+
+void NoiseTexture3D::set_image_format(Image::Format p_format) {
+	if (!noise_texture_is_supported_height_format(p_format)) {
 		ERR_PRINT("Unsupported image format for NoiseTexture3D, falling back to FORMAT_L8.");
 		p_format = Image::FORMAT_L8;
 	}

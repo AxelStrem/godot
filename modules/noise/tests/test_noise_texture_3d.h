@@ -191,6 +191,10 @@ TEST_CASE("[NoiseTexture][SceneTree] Getter and setter") {
 	noise_texture->set_color_ramp(nullptr);
 	CHECK(noise_texture->get_color_ramp().is_null());
 
+	noise_texture->set_blur_strength(1.5f);
+	CHECK(noise_texture->get_blur_strength() == doctest::Approx(1.5f));
+	noise_texture->set_blur_strength(-0.25f);
+	CHECK(noise_texture->get_blur_strength() == doctest::Approx(0.0f));
 	noise_texture->set_image_format(Image::FORMAT_L16);
 	CHECK(noise_texture->get_image_format() == Image::FORMAT_L16);
 	noise_texture->set_image_format(Image::FORMAT_LH);

@@ -412,7 +412,7 @@ public:
 	void normal_map_to_xy();
 	Ref<Image> rgbe_to_srgb();
 	Ref<Image> get_image_from_mipmap(int p_mipmap) const;
-	void bump_map_to_normal_map(float bump_scale = 1.0);
+	void bump_map_to_normal_map(float bump_scale = 1.0, Format p_target_format = FORMAT_RGBA8);
 
 	bool detect_signed(bool p_include_mips = true) const;
 

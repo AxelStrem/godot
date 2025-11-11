@@ -2374,6 +2374,134 @@ Error Image::generate_mipmap_roughness(RoughnessChannel p_roughness_channel, con
 	return OK;
 }
 
+void Image::bump_map_to_normal_map(float bump_scale, Format p_target_format) {
+	ERR_FAIL_COND(is_compressed());
+	clear_mipmaps();
+	convert(Image::FORMAT_RF);
+
+	int pixel_size = 0;
+	bool supported = true;
+
+	if (p_target_format < 0 || p_target_format >= FORMAT_MAX) {
+		WARN_PRINT_ONCE(vformat("Unsupported target format index %d for bump_map_to_normal_map(). Falling back to FORMAT_RGBA8.", p_target_format));
+		supported = false;
+	} else {
+		switch (p_target_format) {
+			case FORMAT_RGB8:
+				pixel_size = 3;
+				break;
+			case FORMAT_RGBA8:
+				pixel_size = 4;
+				break;
+			case FORMAT_RGB16:
+			case FORMAT_RGBH:
+				pixel_size = 6;
+				break;
+			case FORMAT_RGBF:
+				pixel_size = 12;
+				break;
+			default:
+				WARN_PRINT_ONCE(vformat("Unsupported target format '%s' for bump_map_to_normal_map(). Falling back to FORMAT_RGBA8.", format_names[p_target_format]));
+				supported = false;
+				break;
+		}
+	}
+
+	if (!supported) {
+		p_target_format = FORMAT_RGBA8;
+		pixel_size = 4;
+	}
+
+	const uint8_t *rp = data.ptr();
+	ERR_FAIL_NULL(rp);
+	const float *read_ptr = reinterpret_cast<const float *>(rp);
+
+	Vector<uint8_t> result_image;
+	result_image.resize(width * height * pixel_size);
+	uint8_t *write_ptr_bytes = result_image.ptrw();
+
+	for (int ty = 0; ty < height; ty++) {
+		int py = ty + 1;
+		if (py >= height) {
+			py -= height;
+		}
+		int my = ty - 1;
+		if (my < 0) {
+			my += height;
+		}
+
+		for (int tx = 0; tx < width; tx++) {
+			int px = tx + 1;
+			if (px >= width) {
+				px -= width;
+			}
+			int mx = tx - 1;
+			if (mx < 0) {
+				mx += width;
+			}
+
+			float right = read_ptr[ty * width + px];
+			float left = read_ptr[ty * width + mx];
+			float down = read_ptr[py * width + tx];
+			float up_height = read_ptr[my * width + tx];
+
+			float slope_x = (right * bump_scale - left * bump_scale) * 0.5f;
+			float slope_y = (down * bump_scale - up_height * bump_scale) * 0.5f;
+
+			Vector3 across = Vector3(1.0f, 0.0f, slope_x);
+			Vector3 up = Vector3(0.0f, 1.0f, -slope_y);
+
+			Vector3 normal = across.cross(up);
+			normal.normalize();
+
+			float nx = CLAMP(normal.x * 0.5f + 0.5f, 0.0f, 1.0f);
+			float ny = CLAMP(normal.y * 0.5f + 0.5f, 0.0f, 1.0f);
+			float nz = CLAMP(normal.z * 0.5f + 0.5f, 0.0f, 1.0f);
+
+			int index = ty * width + tx;
+			switch (p_target_format) {
+				case FORMAT_RGB8: {
+					uint8_t *dst = write_ptr_bytes + index * 3;
+					dst[0] = uint8_t(CLAMP(Math::round(nx * 255.0f), 0.0, 255.0));
+					dst[1] = uint8_t(CLAMP(Math::round(ny * 255.0f), 0.0, 255.0));
+					dst[2] = uint8_t(CLAMP(Math::round(nz * 255.0f), 0.0, 255.0));
+				} break;
+				case FORMAT_RGBA8: {
+					uint8_t *dst = write_ptr_bytes + index * 4;
+					dst[0] = uint8_t(CLAMP(Math::round(nx * 255.0f), 0.0, 255.0));
+					dst[1] = uint8_t(CLAMP(Math::round(ny * 255.0f), 0.0, 255.0));
+					dst[2] = uint8_t(CLAMP(Math::round(nz * 255.0f), 0.0, 255.0));
+					dst[3] = 255;
+				} break;
+				case FORMAT_RGB16: {
+					uint16_t *dst = reinterpret_cast<uint16_t *>(write_ptr_bytes) + index * 3;
+					dst[0] = uint16_t(CLAMP(Math::round(nx * 65535.0f), 0.0, 65535.0));
+					dst[1] = uint16_t(CLAMP(Math::round(ny * 65535.0f), 0.0, 65535.0));
+					dst[2] = uint16_t(CLAMP(Math::round(nz * 65535.0f), 0.0, 65535.0));
+				} break;
+				case FORMAT_RGBH: {
+					uint16_t *dst = reinterpret_cast<uint16_t *>(write_ptr_bytes) + index * 3;
+					dst[0] = Math::make_half_float(nx);
+					dst[1] = Math::make_half_float(ny);
+					dst[2] = Math::make_half_float(nz);
+				} break;
+				case FORMAT_RGBF: {
+					float *dst = reinterpret_cast<float *>(write_ptr_bytes) + index * 3;
+					dst[0] = nx;
+					dst[1] = ny;
+					dst[2] = nz;
+				} break;
+				default:
+					// Already handled above.
+					break;
+			}
+		}
+	}
+
+	format = p_target_format;
+	data = result_image;
+}
+
 void Image::clear_mipmaps() {
 	if (!mipmaps) {
 		return;
@@ -3963,7 +4091,7 @@ void Image::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("linear_to_srgb"), &Image::linear_to_srgb);
 	ClassDB::bind_method(D_METHOD("normal_map_to_xy"), &Image::normal_map_to_xy);
 	ClassDB::bind_method(D_METHOD("rgbe_to_srgb"), &Image::rgbe_to_srgb);
-	ClassDB::bind_method(D_METHOD("bump_map_to_normal_map", "bump_scale"), &Image::bump_map_to_normal_map, DEFVAL(1.0));
+	ClassDB::bind_method(D_METHOD("bump_map_to_normal_map", "bump_scale", "format"), &Image::bump_map_to_normal_map, DEFVAL(1.0), DEFVAL(Image::FORMAT_RGBA8));
 
 	ClassDB::bind_method(D_METHOD("compute_image_metrics", "compared_image", "use_luma"), &Image::compute_image_metrics);
 
@@ -4150,53 +4278,6 @@ Ref<Image> Image::get_image_from_mipmap(int p_mipmap) const {
 	return image;
 }
 
-void Image::bump_map_to_normal_map(float bump_scale) {
-	ERR_FAIL_COND(is_compressed());
-	clear_mipmaps();
-	convert(Image::FORMAT_RF);
-
-	Vector<uint8_t> result_image; //rgba output
-	result_image.resize(width * height * 4);
-
-	{
-		const uint8_t *rp = data.ptr();
-		uint8_t *wp = result_image.ptrw();
-
-		ERR_FAIL_NULL(rp);
-
-		unsigned char *write_ptr = wp;
-		float *read_ptr = (float *)rp;
-
-		for (int ty = 0; ty < height; ty++) {
-			int py = ty + 1;
-			if (py >= height) {
-				py -= height;
-			}
-
-			for (int tx = 0; tx < width; tx++) {
-				int px = tx + 1;
-				if (px >= width) {
-					px -= width;
-				}
-				float here = read_ptr[ty * width + tx];
-				float to_right = read_ptr[ty * width + px];
-				float above = read_ptr[py * width + tx];
-				Vector3 up = Vector3(0, 1, (here - above) * bump_scale);
-				Vector3 across = Vector3(1, 0, (to_right - here) * bump_scale);
-
-				Vector3 normal = across.cross(up);
-				normal.normalize();
-
-				write_ptr[((ty * width + tx) << 2) + 0] = (127.5 + normal.x * 127.5);
-				write_ptr[((ty * width + tx) << 2) + 1] = (127.5 + normal.y * 127.5);
-				write_ptr[((ty * width + tx) << 2) + 2] = (127.5 + normal.z * 127.5);
-				write_ptr[((ty * width + tx) << 2) + 3] = 255;
-			}
-		}
-	}
-	format = FORMAT_RGBA8;
-	data = result_image;
-}
 
 bool Image::detect_signed(bool p_include_mips) const {
 	ERR_FAIL_COND_V(is_compressed(), false);

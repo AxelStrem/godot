@@ -32,6 +32,28 @@
 
 #include "noise.h"
 
+#include "core/math/math_funcs.h"
+namespace {
+
+static bool noise_texture_is_supported_height_format(Image::Format p_format) {
+	return p_format == Image::FORMAT_L8 || p_format == Image::FORMAT_L16 || p_format == Image::FORMAT_LH || p_format == Image::FORMAT_LF;
+}
+
+static Image::Format noise_texture_normal_map_format(Image::Format p_height_format) {
+	switch (p_height_format) {
+		case Image::FORMAT_L16:
+			return Image::FORMAT_RGB16;
+		case Image::FORMAT_LH:
+			return Image::FORMAT_RGBH;
+		case Image::FORMAT_LF:
+			return Image::FORMAT_RGBF;
+		default:
+			return Image::FORMAT_RGBA8;
+	}
+}
+
+} // namespace
+
 NoiseTexture2D::NoiseTexture2D() {
 	noise = Ref<Noise>();
 
@@ -82,6 +104,8 @@ void NoiseTexture2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_bump_strength", "bump_strength"), &NoiseTexture2D::set_bump_strength);
 	ClassDB::bind_method(D_METHOD("get_bump_strength"), &NoiseTexture2D::get_bump_strength);
 
+	ClassDB::bind_method(D_METHOD("set_blur_strength", "strength"), &NoiseTexture2D::set_blur_strength);
+	ClassDB::bind_method(D_METHOD("get_blur_strength"), &NoiseTexture2D::get_blur_strength);
 	ClassDB::bind_method(D_METHOD("set_image_format", "format"), &NoiseTexture2D::set_image_format);
 	ClassDB::bind_method(D_METHOD("get_image_format"), &NoiseTexture2D::get_image_format);
 	ClassDB::bind_method(D_METHOD("get_format"), &NoiseTexture2D::get_format);
@@ -98,6 +122,7 @@ void NoiseTexture2D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "normalize"), "set_normalize", "is_normalized");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "seamless_blend_skirt", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_seamless_blend_skirt", "get_seamless_blend_skirt");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "bump_strength", PROPERTY_HINT_RANGE, "0,32,0.1,or_greater"), "set_bump_strength", "get_bump_strength");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "blur_strength", PROPERTY_HINT_RANGE, "0,8,0.1"), "set_blur_strength", "get_blur_strength");
 	const String format_hint = "L8:" + itos(Image::FORMAT_L8) + ",L16:" + itos(Image::FORMAT_L16) + ",LH:" + itos(Image::FORMAT_LH) + ",LF:" + itos(Image::FORMAT_LF);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "image_format", PROPERTY_HINT_ENUM, format_hint), "set_image_format", "get_image_format");
 }
@@ -171,11 +196,18 @@ Ref<Image> NoiseTexture2D::_generate_texture() {
 	} else {
 		new_image = ref_noise->get_image(size.x, size.y, invert, in_3d_space, normalize, image_format);
 	}
+	if (new_image.is_valid() && !Math::is_zero_approx(blur_strength)) {
+		Vector<Ref<Image>> slices;
+		slices.push_back(new_image);
+		Noise::apply_blur(slices, blur_strength, seamless, false);
+		new_image = slices[0];
+	}
 	if (color_ramp.is_valid()) {
 		new_image = _modulate_with_gradient(new_image, color_ramp);
 	}
 	if (as_normal_map) {
-		new_image->bump_map_to_normal_map(bump_strength);
+		Image::Format normal_format = noise_texture_normal_map_format(image_format);
+		new_image->bump_map_to_normal_map(bump_strength, normal_format);
 	}
 	if (generate_mipmaps) {
 		new_image->generate_mipmaps();
@@ -349,6 +381,19 @@ float NoiseTexture2D::get_bump_strength() {
 	return bump_strength;
 }
 
+void NoiseTexture2D::set_blur_strength(float p_strength) {
+	float strength = MAX(p_strength, 0.0f);
+	if (Math::is_equal_approx(strength, blur_strength)) {
+		return;
+	}
+	blur_strength = strength;
+	_queue_update();
+}
+
+float NoiseTexture2D::get_blur_strength() const {
+	return blur_strength;
+}
+
 void NoiseTexture2D::set_color_ramp(const Ref<Gradient> &p_gradient) {
 	if (p_gradient == color_ramp) {
 		return;
@@ -376,11 +421,7 @@ bool NoiseTexture2D::is_normalized() const {
 }
 
 void NoiseTexture2D::set_image_format(Image::Format p_format) {
-	auto is_supported_format = [](Image::Format p_format) {
-		return p_format == Image::FORMAT_L8 || p_format == Image::FORMAT_L16 || p_format == Image::FORMAT_LH || p_format == Image::FORMAT_LF;
-	};
-
-	if (!is_supported_format(p_format)) {
+	if (!noise_texture_is_supported_height_format(p_format)) {
 		ERR_PRINT("Unsupported image format for NoiseTexture2D, falling back to FORMAT_L8.");
 		p_format = Image::FORMAT_L8;
 	}

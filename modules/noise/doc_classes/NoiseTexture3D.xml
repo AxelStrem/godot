@@ -48,6 +48,9 @@
 			Used for the default/fallback implementation of the seamless texture generation. It determines the distance over which the seams are blended. High values may result in less details and contrast. See [Noise] for further details.
 			[b]Note:[/b] If using a [member width], [member height] or [member depth] lower than the default, you may need to increase [member seamless_blend_skirt] to make seamless blending more effective.
 		</member>
+		<member name="blur_strength" type="float" setter="set_blur_strength" getter="get_blur_strength" default="0.0">
+			Applies an optional smoothing pass to the generated noise volume before any color ramp modulation. Increasing this value raises the blur radius and softens high-frequency details across all three axes. Set to [code]0.0[/code] to keep the original unsmoothed noise.
+		</member>
 		<member name="width" type="int" setter="set_width" getter="get_width" default="64">
 			Width of the generated texture (in pixels).
 		</member>

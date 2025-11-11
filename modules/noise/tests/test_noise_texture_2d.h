@@ -41,10 +41,15 @@ class NoiseTextureTester : public RefCounted {
 	GDCLASS(NoiseTextureTester, RefCounted);
 
 	const NoiseTexture2D *const texture;
+	Image::Format expected_normal_map_format = Image::FORMAT_RGBA8;
 
 public:
 	NoiseTextureTester(const NoiseTexture2D *const p_texture) :
 			texture{ p_texture } {}
+
+	void set_expected_normal_map_format(Image::Format p_format) {
+		expected_normal_map_format = p_format;
+	}
 
 	Color compute_average_color(const Ref<Image> &p_noise_image) {
 		Color r_avg_color{};
@@ -84,7 +89,8 @@ public:
 		CHECK(noise_image->get_width() == texture->get_width());
 		CHECK(noise_image->get_height() == texture->get_height());
 
-		CHECK(noise_image->get_format() == Image::FORMAT_RGBA8);
+		CHECK(noise_image->get_format() == expected_normal_map_format);
+		CHECK(texture->get_format() == expected_normal_map_format);
 		CHECK_FALSE(noise_image->has_mipmaps());
 
 		Color avg_color = compute_average_color(noise_image);
@@ -196,6 +202,11 @@ TEST_CASE("[NoiseTexture][SceneTree] Getter and setter") {
 	noise_texture->set_bump_strength(0.168);
 	CHECK(noise_texture->get_bump_strength() == doctest::Approx(0.168));
 
+	noise_texture->set_blur_strength(1.25f);
+	CHECK(noise_texture->get_blur_strength() == doctest::Approx(1.25f));
+	noise_texture->set_blur_strength(-0.5f);
+	CHECK(noise_texture->get_blur_strength() == doctest::Approx(0.0f));
+
 	Ref<Gradient> gradient = memnew(Gradient);
 	noise_texture->set_color_ramp(gradient);
 	CHECK(noise_texture->get_color_ramp() == gradient);
@@ -252,6 +263,49 @@ TEST_CASE("[NoiseTexture2D][SceneTree] Generating a normal map without mipmaps")
 	Ref<NoiseTextureTester> tester = memnew(NoiseTextureTester(noise_texture.ptr()));
 	noise_texture->connect_changed(callable_mp(tester.ptr(), &NoiseTextureTester::check_normal_map));
 	MessageQueue::get_singleton()->flush();
+}
+
+TEST_CASE("[NoiseTexture2D][SceneTree] Normal map format matches height precision") {
+	Ref<NoiseTexture2D> noise_texture = memnew(NoiseTexture2D);
+
+	Ref<FastNoiseLite> noise = memnew(FastNoiseLite);
+	noise->set_frequency(0.5);
+	noise_texture->set_noise(noise);
+	noise_texture->set_width(16);
+	noise_texture->set_height(16);
+	noise_texture->set_as_normal_map(true);
+	noise_texture->set_bump_strength(0.5);
+	noise_texture->set_generate_mipmaps(false);
+
+	Ref<NoiseTextureTester> tester = memnew(NoiseTextureTester(noise_texture.ptr()));
+
+	SUBCASE("FORMAT_L8 -> FORMAT_RGBA8") {
+		tester->set_expected_normal_map_format(Image::FORMAT_RGBA8);
+		noise_texture->set_image_format(Image::FORMAT_L8);
+		noise_texture->connect_changed(callable_mp(tester.ptr(), &NoiseTextureTester::check_normal_map));
+		MessageQueue::get_singleton()->flush();
+	}
+
+	SUBCASE("FORMAT_L16 -> FORMAT_RGB16") {
+		tester->set_expected_normal_map_format(Image::FORMAT_RGB16);
+		noise_texture->set_image_format(Image::FORMAT_L16);
+		noise_texture->connect_changed(callable_mp(tester.ptr(), &NoiseTextureTester::check_normal_map));
+		MessageQueue::get_singleton()->flush();
+	}
+
+	SUBCASE("FORMAT_LH -> FORMAT_RGBH") {
+		tester->set_expected_normal_map_format(Image::FORMAT_RGBH);
+		noise_texture->set_image_format(Image::FORMAT_LH);
+		noise_texture->connect_changed(callable_mp(tester.ptr(), &NoiseTextureTester::check_normal_map));
+		MessageQueue::get_singleton()->flush();
+	}
+
+	SUBCASE("FORMAT_LF -> FORMAT_RGBF") {
+		tester->set_expected_normal_map_format(Image::FORMAT_RGBF);
+		noise_texture->set_image_format(Image::FORMAT_LF);
+		noise_texture->connect_changed(callable_mp(tester.ptr(), &NoiseTextureTester::check_normal_map));
+		MessageQueue::get_singleton()->flush();
+	}
 }
 
 TEST_CASE("[NoiseTexture2D][SceneTree] Generating a seamless noise texture") {

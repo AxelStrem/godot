@@ -30,6 +30,188 @@
 
 #include "noise.h"
 
+#include <cstring>
+
+#include "core/math/math_funcs.h"
+#include "core/string/print_string.h"
+
+namespace {
+
+template <typename T>
+static void blur_slice(const T *p_src, T *p_dst, int p_width, int p_height, const Vector<float> &p_kernel, bool p_wrap_xy, float p_max_value) {
+	ERR_FAIL_NULL(p_src);
+	ERR_FAIL_NULL(p_dst);
+	const int radius = p_kernel.size() / 2;
+	Vector<float> temp;
+	temp.resize(p_width * p_height);
+	float *temp_ptr = temp.ptrw();
+	auto wrap_index = [](int p_value, int p_limit, bool p_wrap) {
+		if (p_wrap && p_limit > 0) {
+			int value = p_value % p_limit;
+			if (value < 0) {
+				value += p_limit;
+			}
+			return value;
+		}
+		return CLAMP(p_value, 0, p_limit - 1);
+	};
+
+	for (int y = 0; y < p_height; y++) {
+		for (int x = 0; x < p_width; x++) {
+			float value = 0.0f;
+			for (int k = -radius; k <= radius; k++) {
+				const int sample_x = wrap_index(x + k, p_width, p_wrap_xy);
+				value += p_kernel[radius + k] * static_cast<float>(p_src[sample_x + y * p_width]);
+			}
+			temp_ptr[x + y * p_width] = value;
+		}
+	}
+
+	const float *temp_read = temp.ptr();
+	for (int y = 0; y < p_height; y++) {
+		for (int x = 0; x < p_width; x++) {
+			float value = 0.0f;
+			for (int k = -radius; k <= radius; k++) {
+				const int sample_y = wrap_index(y + k, p_height, p_wrap_xy);
+				value += p_kernel[radius + k] * temp_read[x + sample_y * p_width];
+			}
+			value = CLAMP(value, 0.0f, p_max_value);
+			p_dst[x + y * p_width] = static_cast<T>(Math::round(value));
+		}
+	}
+}
+
+static void build_gaussian_kernel(Vector<float> &r_kernel, float p_strength) {
+	const float sigma = MAX(p_strength, 0.01f);
+	const int radius = CLAMP(Math::ceil(sigma * 3.0f), 1, 64);
+	const int kernel_size = radius * 2 + 1;
+	r_kernel.resize(kernel_size);
+	float weight_sum = 0.0f;
+	for (int i = -radius; i <= radius; i++) {
+		const float weight = Math::exp(-(i * i) / (2.0f * sigma * sigma));
+		r_kernel.write[i + radius] = weight;
+		weight_sum += weight;
+	}
+	const float inv_sum = 1.0f / weight_sum;
+	for (int i = 0; i < kernel_size; i++) {
+		r_kernel.write[i] *= inv_sum;
+	}
+}
+
+template <typename T>
+static void blur_images_impl(Vector<Ref<Image>> &r_images, float p_strength, bool p_wrap_xy, bool p_wrap_z) {
+	if (r_images.is_empty()) {
+		return;
+	}
+
+	const int width = r_images[0]->get_width();
+	const int height = r_images[0]->get_height();
+	const int depth = r_images.size();
+	const float max_value = sizeof(T) == 1 ? 255.0f : 65535.0f;
+
+	Vector<float> kernel;
+	build_gaussian_kernel(kernel, p_strength);
+	const int radius = kernel.size() / 2;
+
+	Vector<Vector<T>> slices;
+	slices.resize(depth);
+
+	auto wrap_index = [](int p_value, int p_limit, bool p_wrap) {
+		if (p_wrap && p_limit > 0) {
+			int value = p_value % p_limit;
+			if (value < 0) {
+				value += p_limit;
+			}
+			return value;
+		}
+		return CLAMP(p_value, 0, p_limit - 1);
+	};
+
+	for (int z = 0; z < depth; z++) {
+		const Ref<Image> img = r_images[z];
+		ERR_CONTINUE(img.is_null());
+		ERR_CONTINUE(img->get_width() != width || img->get_height() != height);
+
+		const Vector<uint8_t> raw = img->get_data();
+		ERR_CONTINUE(raw.size() != width * height * sizeof(T));
+		const T *src = reinterpret_cast<const T *>(raw.ptr());
+
+		Vector<T> dst;
+		dst.resize(width * height);
+		blur_slice(src, dst.ptrw(), width, height, kernel, p_wrap_xy, max_value);
+		slices.write[z] = dst;
+	}
+
+	if (depth > 1) {
+		Vector<Vector<T>> depth_src = slices;
+		Vector<Vector<T>> depth_dst;
+		depth_dst.resize(depth);
+
+		for (int z = 0; z < depth; z++) {
+			Vector<T> dest;
+			dest.resize(width * height);
+			T *dest_ptr = dest.ptrw();
+
+			for (int idx = 0; idx < width * height; idx++) {
+				float value = 0.0f;
+				for (int k = -radius; k <= radius; k++) {
+					const int sample_z = wrap_index(z + k, depth, p_wrap_z);
+					value += kernel[radius + k] * static_cast<float>(depth_src[sample_z][idx]);
+				}
+				value = CLAMP(value, 0.0f, max_value);
+				dest_ptr[idx] = static_cast<T>(Math::round(value));
+			}
+			depth_dst.write[z] = dest;
+		}
+		slices = depth_dst;
+	}
+
+	for (int z = 0; z < depth; z++) {
+		const Vector<T> &slice = slices[z];
+		Vector<uint8_t> dest_bytes;
+		dest_bytes.resize(slice.size() * sizeof(T));
+		std::memcpy(dest_bytes.ptrw(), slice.ptr(), dest_bytes.size());
+		Ref<Image> new_image = memnew(Image(width, height, false, r_images[z]->get_format(), dest_bytes));
+		r_images.write[z] = new_image;
+	}
+}
+
+} // namespace
+
+void Noise::apply_blur(Vector<Ref<Image>> &r_images, float p_strength, bool p_wrap_xy, bool p_wrap_z) {
+	if (r_images.is_empty()) {
+		return;
+	}
+	if (Math::is_zero_approx(p_strength)) {
+		return;
+	}
+
+	Image::Format format = r_images[0]->get_format();
+	for (int i = 0; i < r_images.size(); i++) {
+		if (r_images[i].is_null()) {
+			return;
+		}
+		if (r_images[i]->get_format() != format) {
+			ERR_FAIL_MSG("Noise::apply_blur requires all images to share the same format.");
+		}
+	}
+
+	switch (format) {
+		case Image::FORMAT_L8:
+		case Image::FORMAT_R8:
+			blur_images_impl<uint8_t>(r_images, p_strength, p_wrap_xy, p_wrap_z);
+			break;
+		case Image::FORMAT_L16:
+		case Image::FORMAT_R16:
+			blur_images_impl<uint16_t>(r_images, p_strength, p_wrap_xy, p_wrap_z);
+			break;
+		default:
+			WARN_PRINT_ONCE(vformat("Noise smoothing currently supports single-channel 8-bit or 16-bit formats. Skipping blur for %s.", Image::format_names[format]));
+			break;
+	}
+}
+
+
 Vector<Ref<Image>> Noise::_get_seamless_image(int p_width, int p_height, int p_depth, bool p_invert, bool p_in_3d_space, real_t p_blend_skirt, bool p_normalize, Image::Format p_format) const {
 	ERR_FAIL_COND_V(p_width <= 0 || p_height <= 0 || p_depth <= 0, Vector<Ref<Image>>());
 
