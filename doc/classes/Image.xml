@@ -65,8 +65,9 @@
 		<method name="bump_map_to_normal_map">
 			<return type="void" />
 			<param index="0" name="bump_scale" type="float" default="1.0" />
+			<param index="1" name="format" type="int" enum="Image.Format" default="5" />
 			<description>
-				Converts a bump map to a normal map. A bump map provides a height offset per-pixel, while a normal map provides a normal direction per pixel.
+				Converts a bump map to a normal map. A bump map provides a height offset per-pixel, while a normal map provides a normal direction per pixel. The optional [param format] lets you pick the precision of the generated normal map, for example [constant FORMAT_RGB16] or [constant FORMAT_RGBF].
 			</description>
 		</method>
 		<method name="clear_mipmaps">
