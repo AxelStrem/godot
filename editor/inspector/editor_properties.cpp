@@ -3442,6 +3442,11 @@ void EditorPropertyResource::setup(Object *p_object, const String &p_path, const
 		shader_picker->set_edited_material(Object::cast_to<ShaderMaterial>(p_object));
 		resource_picker = shader_picker;
 		connect(SceneStringName(ready), callable_mp(this, &EditorPropertyResource::_update_preferred_shader));
+	} else if (p_path == "shader" && p_base_type == "Shader" && p_object->is_class("ShaderTexture2D")) {
+		EditorShaderPicker *shader_picker = memnew(EditorShaderPicker);
+		shader_picker->set_edited_object(p_object);
+		shader_picker->set_preferred_mode(Shader::MODE_CANVAS_ITEM);
+		resource_picker = shader_picker;
 	} else if (ClassDB::is_parent_class(p_base_type, "AudioStream")) {
 		EditorAudioStreamPicker *astream_picker = memnew(EditorAudioStreamPicker);
 		resource_picker = astream_picker;

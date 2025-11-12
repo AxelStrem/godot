@@ -34,6 +34,7 @@
 #include "editor/scene/scene_tree_editor.h"
 #include "editor/script/script_create_dialog.h"
 #include "scene/resources/animation.h"
+#include "core/io/resource.h"
 
 class CheckBox;
 class EditorData;
@@ -187,7 +188,7 @@ class SceneTreeDock : public EditorDock {
 	VBoxContainer *create_root_dialog = nullptr;
 	String selected_favorite_root;
 
-	Ref<ShaderMaterial> selected_shader_material;
+	ObjectID selected_shader_owner_id;
 
 	void _add_children_to_popup(Object *p_obj, int p_depth);
 
@@ -350,6 +351,7 @@ public:
 	void open_script_dialog(Node *p_for_node, bool p_extend);
 
 	void attach_shader_to_selected(int p_preferred_mode = -1);
+	void open_shader_dialog(const Ref<Resource> &p_for_resource, int p_preferred_mode = -1);
 	void open_shader_dialog(const Ref<ShaderMaterial> &p_for_material, int p_preferred_mode = -1);
 
 	void open_add_child_dialog();
