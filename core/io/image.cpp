@@ -2440,18 +2440,21 @@ void Image::bump_map_to_normal_map(float bump_scale, Format p_target_format) {
 				mx += width;
 			}
 
-			float right = read_ptr[ty * width + px];
-			float left = read_ptr[ty * width + mx];
-			float down = read_ptr[py * width + tx];
-			float up_height = read_ptr[my * width + tx];
+			float center_right = read_ptr[ty * width + px];
+			float center_left = read_ptr[ty * width + mx];
+			float center_down = read_ptr[py * width + tx];
+			float center_up = read_ptr[my * width + tx];
 
-			float slope_x = (right * bump_scale - left * bump_scale) * 0.5f;
-			float slope_y = (down * bump_scale - up_height * bump_scale) * 0.5f;
+			float down_right = read_ptr[py * width + px];
+			float down_left = read_ptr[py * width + mx];
+			float up_right = read_ptr[my * width + px];
+			float up_left = read_ptr[my * width + mx];
 
-			Vector3 across = Vector3(1.0f, 0.0f, slope_x);
-			Vector3 up = Vector3(0.0f, 1.0f, -slope_y);
+			// Sobel-style filter reduces axis bias compared to a 2-sample central difference.
+			float slope_x = ((down_right + 2.0f * center_right + up_right) - (down_left + 2.0f * center_left + up_left)) * 0.125f * bump_scale;
+			float slope_y = ((down_left + 2.0f * center_down + down_right) - (up_left + 2.0f * center_up + up_right)) * 0.125f * bump_scale;
 
-			Vector3 normal = across.cross(up);
+			Vector3 normal(-slope_x, -slope_y, 1.0f);
 			normal.normalize();
 
 			float nx = CLAMP(normal.x * 0.5f + 0.5f, 0.0f, 1.0f);
