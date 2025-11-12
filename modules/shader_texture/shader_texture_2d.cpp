@@ -556,7 +556,7 @@ Image::Format ShaderTexture2D::_get_target_format() const {
 }
 
 bool ShaderTexture2D::_needs_hdr_buffer() const {
-	return precision == PRECISION_HALF || precision == PRECISION_FLOAT;
+	return precision == PRECISION_16 || precision == PRECISION_HALF || precision == PRECISION_FLOAT;
 }
 
 void ShaderTexture2D::set_width(int p_width) {
