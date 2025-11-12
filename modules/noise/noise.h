@@ -115,14 +115,14 @@ class Noise : public Resource {
 
 		Image::Format format = p_src[0]->get_format();
 
-		auto blend_value = [&](T p_bg, T p_fg, int p_alpha) -> T {
-			if (p_alpha <= 0) {
+		auto blend_value = [&](T p_bg, T p_fg, float p_weight) -> T {
+			float t = CLAMP(p_weight, 0.0f, 1.0f);
+			if (t <= 0.0f) {
 				return p_bg;
 			}
-			if (p_alpha >= 255) {
+			if (t >= 1.0f) {
 				return p_fg;
 			}
-			float t = p_alpha / 255.0f;
 			switch (format) {
 				case Image::FORMAT_L8: {
 					float bg = float(p_bg) / 255.0f;
@@ -143,7 +143,7 @@ class Noise : public Resource {
 					return Math::lerp((float)p_bg, (float)p_fg, t);
 				}
 				default:
-					return _alpha_blend<T>(p_bg, p_fg, p_alpha);
+					return _alpha_blend<T>(p_bg, p_fg, int(Math::round(t * 255.0f)));
 			}
 		};
 		int pixel_size = Image::get_format_pixel_size(format);
@@ -187,28 +187,28 @@ class Noise : public Resource {
 
 			// Blend the vertical skirt over the middle seam.
 			for (int x = half_width; x < skirt_edge_x; x++) {
-				int alpha = 255 * (1 - Math::smoothstep(0.1f, 0.9f, float(x - half_width) / float(skirt_width)));
+				float weight = 1.0f - Math::smoothstep(0.1f, 0.9f, float(x - half_width) / float(skirt_width));
 				for (int y = 0; y < p_height; y++) {
 					// Skip the center square
 					if (y == half_height) {
 						y = skirt_edge_y - 1;
 					} else {
 						// Starts reading at s2, ALT_Y skips s3, and continues with s1.
-						wr(x, y) = blend_value(rd_dest(x, y), rd_src(x, y, img_buff<T>::ALT_Y), alpha);
+						wr(x, y) = blend_value(rd_dest(x, y), rd_src(x, y, img_buff<T>::ALT_Y), weight);
 					}
 				}
 			}
 
 			// Blend the horizontal skirt over the middle seam.
 			for (int y = half_height; y < skirt_edge_y; y++) {
-				int alpha = 255 * (1 - Math::smoothstep(0.1f, 0.9f, float(y - half_height) / float(skirt_height)));
+				float weight = 1.0f - Math::smoothstep(0.1f, 0.9f, float(y - half_height) / float(skirt_height));
 				for (int x = 0; x < p_width; x++) {
 					// Skip the center square
 					if (x == half_width) {
 						x = skirt_edge_x - 1;
 					} else {
 						// Starts reading at s4, skips s3, continues with s5.
-						wr(x, y) = blend_value(rd_dest(x, y), rd_src(x, y, img_buff<T>::ALT_X), alpha);
+						wr(x, y) = blend_value(rd_dest(x, y), rd_src(x, y, img_buff<T>::ALT_X), weight);
 					}
 				}
 			}
@@ -216,8 +216,8 @@ class Noise : public Resource {
 			// Fill in the center square. Wr starts at the top left of Q4, which is the equivalent of the top left of s3, unless a modulo is used.
 			for (int y = half_height; y < skirt_edge_y; y++) {
 				for (int x = half_width; x < skirt_edge_x; x++) {
-					int xpos = 255 * (1 - Math::smoothstep(0.1f, 0.9f, float(x - half_width) / float(skirt_width)));
-					int ypos = 255 * (1 - Math::smoothstep(0.1f, 0.9f, float(y - half_height) / float(skirt_height)));
+					float xpos = 1.0f - Math::smoothstep(0.1f, 0.9f, float(x - half_width) / float(skirt_width));
+					float ypos = 1.0f - Math::smoothstep(0.1f, 0.9f, float(y - half_height) / float(skirt_height));
 
 					// Blend s3(Q1) onto s5(Q2) for the top half.
 					T top_blend = blend_value(rd_src(x, y, img_buff<T>::ALT_X), rd_src(x, y, img_buff<T>::DEFAULT), xpos);
@@ -250,7 +250,7 @@ class Noise : public Resource {
 
 			// Scale seamless generation to third dimension.
 			for (int z = half_depth; z < skirt_edge_z; z++) {
-				int alpha = 255 * (1 - Math::smoothstep(0.1f, 0.9f, float(z - half_depth) / float(skirt_depth)));
+				float weight = 1.0f - Math::smoothstep(0.1f, 0.9f, float(z - half_depth) / float(skirt_depth));
 
 				Vector<uint8_t> img = images[z % p_depth]->get_data();
 				Vector<uint8_t> skirt = images[(z - half_depth) + p_depth]->get_data();
@@ -266,7 +266,7 @@ class Noise : public Resource {
 				T *dst_ptr = reinterpret_cast<T *>(dest.ptrw());
 
 				for (int i = 0; i < pixel_count; i++) {
-					dst_ptr[i] = blend_value(bg_ptr[i], fg_ptr[i], alpha);
+					dst_ptr[i] = blend_value(bg_ptr[i], fg_ptr[i], weight);
 				}
 
 				Ref<Image> new_image = memnew(Image(images[0]->get_width(), images[0]->get_height(), false, images[0]->get_format(), dest));
