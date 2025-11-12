@@ -30,7 +30,10 @@
 
 #pragma once
 
+#include "core/object/object_id.h"
 #include "core/object/ref_counted.h"
+#include "core/templates/hash_map.h"
+#include "core/templates/list.h"
 #include "scene/resources/shader.h"
 #include "scene/resources/texture.h"
 
@@ -62,7 +65,11 @@ private:
 	Precision precision = PRECISION_8;
 
 	Ref<Shader> shader;
-	Dictionary shader_parameters;
+	mutable Dictionary shader_parameters;
+	mutable HashMap<StringName, Variant> param_cache;
+	mutable HashMap<StringName, StringName> remap_cache;
+	mutable HashMap<StringName, ObjectID> parameter_resource_map;
+	mutable HashMap<ObjectID, int> resource_connection_counts;
 
 	bool update_queued = false;
 
@@ -70,9 +77,23 @@ private:
 	void _update_texture();
 	Ref<Image> _generate_image();
 	void _set_texture_image(const Ref<Image> &p_image);
+	void _shader_changed();
+	void _update_parameter_dependency(const StringName &p_param, const Variant &p_value);
+	void _remove_parameter_dependency(const StringName &p_param);
+	void _clear_parameter_dependencies();
+	void _rebuild_parameter_dependencies();
+	void _dependency_resource_changed();
 
 	Image::Format _get_target_format() const;
 	bool _needs_hdr_buffer() const;
+
+protected:
+	bool _set(const StringName &p_name, const Variant &p_value);
+	bool _get(const StringName &p_name, Variant &r_ret) const;
+	void _get_property_list(List<PropertyInfo> *p_list) const;
+	bool _property_can_revert(const StringName &p_name) const;
+	bool _property_get_revert(const StringName &p_name, Variant &r_property) const;
+	void _validate_property(PropertyInfo &p_property) const;
 
 protected:
 	static void _bind_methods();
@@ -95,6 +116,9 @@ public:
 
 	void set_shader(const Ref<Shader> &p_shader);
 	Ref<Shader> get_shader() const;
+
+	void set_shader_parameter(const StringName &p_param, const Variant &p_value);
+	Variant get_shader_parameter(const StringName &p_param) const;
 
 	void set_shader_parameters(const Dictionary &p_parameters);
 	Dictionary get_shader_parameters() const;
