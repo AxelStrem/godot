@@ -48,6 +48,7 @@
 #include "scene/gui/texture_rect.h"
 #include "scene/resources/gradient_texture.h"
 #include "scene/resources/image_texture.h"
+#include "scene/resources/shader.h"
 
 static bool _has_sub_resources(const Ref<Resource> &p_res) {
 	List<PropertyInfo> property_list;
@@ -1280,13 +1281,20 @@ void EditorShaderPicker::set_create_options(Object *p_menu_node) {
 }
 
 bool EditorShaderPicker::handle_menu_selected(int p_which) {
-	Ref<ShaderMaterial> ed_material = Ref<ShaderMaterial>(get_edited_material());
-
+	Object *edited_object = get_edited_object();
 	switch (p_which) {
 		case OBJ_MENU_NEW_SHADER: {
-			if (ed_material.is_valid()) {
-				SceneTreeDock::get_singleton()->open_shader_dialog(ed_material, preferred_mode);
-				return true;
+			Resource *resource = Object::cast_to<Resource>(edited_object);
+			if (resource) {
+				Ref<Resource> resource_ref(resource);
+				if (resource_ref.is_valid()) {
+					int mode = preferred_mode;
+					if (mode < 0 && edited_object && edited_object->is_class("ShaderTexture2D")) {
+						mode = Shader::MODE_CANVAS_ITEM;
+					}
+					SceneTreeDock::get_singleton()->open_shader_dialog(resource_ref, mode);
+					return true;
+				}
 			}
 		} break;
 		default:
@@ -1296,11 +1304,19 @@ bool EditorShaderPicker::handle_menu_selected(int p_which) {
 }
 
 void EditorShaderPicker::set_edited_material(ShaderMaterial *p_material) {
-	edited_material = p_material;
+	set_edited_object(p_material);
 }
 
 ShaderMaterial *EditorShaderPicker::get_edited_material() const {
-	return edited_material;
+	return Object::cast_to<ShaderMaterial>(get_edited_object());
+}
+
+void EditorShaderPicker::set_edited_object(Object *p_object) {
+	edited_object_id = p_object ? p_object->get_instance_id() : ObjectID();
+}
+
+Object *EditorShaderPicker::get_edited_object() const {
+	return ObjectDB::get_instance(edited_object_id);
 }
 
 void EditorShaderPicker::set_preferred_mode(int p_mode) {

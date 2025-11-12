@@ -34,6 +34,7 @@
 #include "core/input/input.h"
 #include "core/io/resource_saver.h"
 #include "core/object/class_db.h"
+#include "core/object/object.h"
 #include "core/os/keyboard.h"
 #include "editor/animation/animation_player_editor_plugin.h"
 #include "editor/debugger/editor_debugger_node.h"
@@ -59,6 +60,7 @@
 #include "editor/settings/editor_feature_profile.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/shader/shader_create_dialog.h"
+#include "scene/resources/material.h"
 #include "editor/themes/editor_scale.h"
 #include "scene/2d/node_2d.h"
 #include "scene/animation/animation_tree.h"
@@ -2600,16 +2602,21 @@ void SceneTreeDock::_script_created(Ref<Script> p_script) {
 }
 
 void SceneTreeDock::_shader_created(Ref<Shader> p_shader) {
-	if (selected_shader_material.is_null()) {
+	Object *shader_owner = ObjectDB::get_instance(selected_shader_owner_id);
+	if (!shader_owner) {
 		return;
 	}
 
-	Ref<Shader> existing = selected_shader_material->get_shader();
+	Variant existing_var;
+	if (shader_owner->has_method("get_shader")) {
+		existing_var = shader_owner->call("get_shader");
+	}
+	Ref<Shader> existing = existing_var;
 
 	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
 	undo_redo->create_action(TTR("Set Shader"));
-	undo_redo->add_do_method(selected_shader_material.ptr(), "set_shader", p_shader);
-	undo_redo->add_undo_method(selected_shader_material.ptr(), "set_shader", existing);
+	undo_redo->add_do_method(shader_owner, "set_shader", p_shader);
+	undo_redo->add_undo_method(shader_owner, "set_shader", existing);
 	undo_redo->commit_action();
 }
 
@@ -2623,6 +2630,7 @@ void SceneTreeDock::_shader_creation_closed() {
 	shader_create_dialog->disconnect("shader_created", callable_mp(this, &SceneTreeDock::_shader_created));
 	shader_create_dialog->disconnect(SceneStringName(confirmed), callable_mp(this, &SceneTreeDock::_shader_creation_closed));
 	shader_create_dialog->disconnect("canceled", callable_mp(this, &SceneTreeDock::_shader_creation_closed));
+	selected_shader_owner_id = ObjectID();
 }
 
 void SceneTreeDock::_toggle_editable_children_from_selection() {
@@ -4204,21 +4212,27 @@ void SceneTreeDock::open_script_dialog(Node *p_for_node, bool p_extend) {
 }
 
 void SceneTreeDock::attach_shader_to_selected(int p_preferred_mode) {
-	if (selected_shader_material.is_null()) {
+	Object *shader_owner = ObjectDB::get_instance(selected_shader_owner_id);
+	if (!shader_owner) {
 		return;
 	}
 
-	String path = selected_shader_material->get_path();
+	Resource *resource = Object::cast_to<Resource>(shader_owner);
+	if (!resource) {
+		return;
+	}
+
+	String path = resource->get_path();
 	if (path.get_base_dir().is_empty()) {
 		String root_path;
 		if (editor_data->get_edited_scene_root()) {
 			root_path = editor_data->get_edited_scene_root()->get_scene_file_path();
 		}
 		String shader_name;
-		if (selected_shader_material->get_name().is_empty()) {
+		if (resource->get_name().is_empty()) {
 			shader_name = root_path.get_file();
 		} else {
-			shader_name = selected_shader_material->get_name();
+			shader_name = resource->get_name();
 		}
 		if (shader_name.is_empty()) {
 			shader_name = "new_shader";
@@ -4237,9 +4251,14 @@ void SceneTreeDock::attach_shader_to_selected(int p_preferred_mode) {
 	shader_create_dialog->popup_centered();
 }
 
-void SceneTreeDock::open_shader_dialog(const Ref<ShaderMaterial> &p_for_material, int p_preferred_mode) {
-	selected_shader_material = p_for_material;
+void SceneTreeDock::open_shader_dialog(const Ref<Resource> &p_for_resource, int p_preferred_mode) {
+	selected_shader_owner_id = p_for_resource.is_valid() ? p_for_resource->get_instance_id() : ObjectID();
 	attach_shader_to_selected(p_preferred_mode);
+}
+
+void SceneTreeDock::open_shader_dialog(const Ref<ShaderMaterial> &p_for_material, int p_preferred_mode) {
+	Ref<Resource> resource = p_for_material;
+	open_shader_dialog(resource, p_preferred_mode);
 }
 
 void SceneTreeDock::open_add_child_dialog() {

@@ -30,6 +30,7 @@
 
 #pragma once
 
+#include "core/object/object.h"
 #include "scene/gui/box_container.h"
 
 class Button;
@@ -181,7 +182,7 @@ class EditorShaderPicker : public EditorResourcePicker {
 		OBJ_MENU_NEW_SHADER = 50,
 	};
 
-	ShaderMaterial *edited_material = nullptr;
+	ObjectID edited_object_id;
 	int preferred_mode = -1;
 
 public:
@@ -190,6 +191,8 @@ public:
 
 	void set_edited_material(ShaderMaterial *p_material);
 	ShaderMaterial *get_edited_material() const;
+	void set_edited_object(Object *p_object);
+	Object *get_edited_object() const;
 	void set_preferred_mode(int p_preferred_mode);
 };
 
