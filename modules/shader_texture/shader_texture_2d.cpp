@@ -54,10 +54,8 @@ ShaderTexture2D::~ShaderTexture2D() {
 
 void ShaderTexture2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_width", "width"), &ShaderTexture2D::set_width);
-	ClassDB::bind_method(D_METHOD("get_width"), &ShaderTexture2D::get_width);
 
 	ClassDB::bind_method(D_METHOD("set_height", "height"), &ShaderTexture2D::set_height);
-	ClassDB::bind_method(D_METHOD("get_height"), &ShaderTexture2D::get_height);
 
 	ClassDB::bind_method(D_METHOD("set_generate_mipmaps", "enable"), &ShaderTexture2D::set_generate_mipmaps);
 	ClassDB::bind_method(D_METHOD("is_generating_mipmaps"), &ShaderTexture2D::is_generating_mipmaps);
