@@ -3608,10 +3608,14 @@ void TextureStorage::_update_render_target(RenderTarget *rt) {
 		return;
 	}
 
-	rt->color_format = render_target_get_color_format(rt->use_hdr, false);
-	rt->color_format_srgb = render_target_get_color_format(rt->use_hdr, true);
+	bool use_full_precision_hdr = rt->use_hdr && rt->use_hdr_full_precision;
 
-	if (rt->use_hdr) {
+	rt->color_format = render_target_get_color_format(rt->use_hdr, false, use_full_precision_hdr);
+	rt->color_format_srgb = render_target_get_color_format(rt->use_hdr, true, use_full_precision_hdr);
+
+	if (use_full_precision_hdr) {
+		rt->image_format = rt->is_transparent ? Image::FORMAT_RGBAF : Image::FORMAT_RGBF;
+	} else if (rt->use_hdr) {
 		rt->image_format = rt->is_transparent ? Image::FORMAT_RGBAH : Image::FORMAT_RGBH;
 	} else {
 		rt->image_format = rt->is_transparent ? Image::FORMAT_RGBA8 : Image::FORMAT_RGB8;
@@ -3697,7 +3701,7 @@ void TextureStorage::_update_render_target(RenderTarget *rt) {
 		tex->rd_format = rt->color_format;
 		tex->rd_format_srgb = rt->color_format_srgb;
 		tex->format = rt->image_format;
-		tex->validated_format = rt->use_hdr ? Image::FORMAT_RGBAH : Image::FORMAT_RGBA8;
+		tex->validated_format = use_full_precision_hdr ? Image::FORMAT_RGBAF : (rt->use_hdr ? Image::FORMAT_RGBAH : Image::FORMAT_RGBA8);
 
 		Vector<RID> proxies = tex->proxies; //make a copy, since update may change it
 		for (int i = 0; i < proxies.size(); i++) {
@@ -3976,6 +3980,9 @@ void TextureStorage::render_target_set_use_hdr(RID p_render_target, bool p_use_h
 	}
 
 	rt->use_hdr = p_use_hdr;
+	if (!rt->use_hdr) {
+		rt->use_hdr_full_precision = false;
+	}
 	_update_render_target(rt);
 }
 
@@ -3984,6 +3991,26 @@ bool TextureStorage::render_target_is_using_hdr(RID p_render_target) const {
 	ERR_FAIL_NULL_V(rt, false);
 
 	return rt->use_hdr;
+}
+
+void TextureStorage::render_target_set_use_hdr_full_precision(RID p_render_target, bool p_use_full_precision) {
+	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
+	ERR_FAIL_NULL(rt);
+
+	bool new_value = p_use_full_precision && rt->use_hdr;
+	if (new_value == rt->use_hdr_full_precision) {
+		return;
+	}
+
+	rt->use_hdr_full_precision = new_value;
+	_update_render_target(rt);
+}
+
+bool TextureStorage::render_target_is_using_hdr_full_precision(RID p_render_target) const {
+	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
+	ERR_FAIL_NULL_V(rt, false);
+
+	return rt->use_hdr && rt->use_hdr_full_precision;
 }
 
 void TextureStorage::render_target_set_use_debanding(RID p_render_target, bool p_use_debanding) {
@@ -4581,9 +4608,13 @@ RID TextureStorage::render_target_get_vrs_texture(RID p_render_target) const {
 	return rt->vrs_texture;
 }
 
-RD::DataFormat TextureStorage::render_target_get_color_format(bool p_use_hdr, bool p_srgb) {
+RD::DataFormat TextureStorage::render_target_get_color_format(bool p_use_hdr, bool p_srgb, bool p_use_full_precision) {
 	if (p_use_hdr) {
-		return RendererSceneRenderRD::get_singleton()->_render_buffers_get_color_format();
+		RendererSceneRenderRD *scene_renderer = RendererSceneRenderRD::get_singleton();
+		if (p_use_full_precision && scene_renderer && scene_renderer->_render_buffers_supports_full_precision_color()) {
+			return scene_renderer->_render_buffers_get_full_precision_color_format();
+		}
+		return scene_renderer ? scene_renderer->_render_buffers_get_color_format() : RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 	} else {
 		return p_srgb ? RD::DATA_FORMAT_R8G8B8A8_SRGB : RD::DATA_FORMAT_R8G8B8A8_UNORM;
 	}

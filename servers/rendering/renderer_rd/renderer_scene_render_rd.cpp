@@ -1123,6 +1123,14 @@ RD::DataFormat RendererSceneRenderRD::_render_buffers_get_color_format() {
 	return RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
 }
 
+RD::DataFormat RendererSceneRenderRD::_render_buffers_get_full_precision_color_format() {
+	return RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
+}
+
+bool RendererSceneRenderRD::_render_buffers_supports_full_precision_color() const {
+	return true;
+}
+
 bool RendererSceneRenderRD::_render_buffers_can_be_storage() {
 	return true;
 }

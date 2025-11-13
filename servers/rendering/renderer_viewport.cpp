@@ -1362,7 +1362,13 @@ void RendererViewport::viewport_set_use_hdr_2d(RID p_viewport, bool p_use_hdr_2d
 		return;
 	}
 	viewport->use_hdr_2d = p_use_hdr_2d;
+	if (!p_use_hdr_2d) {
+		viewport->use_hdr_2d_full_precision = false;
+	}
 	RSG::texture_storage->render_target_set_use_hdr(viewport->render_target, p_use_hdr_2d);
+	if (!p_use_hdr_2d) {
+		RSG::texture_storage->render_target_set_use_hdr_full_precision(viewport->render_target, false);
+	}
 	_configure_3d_render_buffers(viewport);
 }
 
@@ -1371,6 +1377,27 @@ bool RendererViewport::viewport_is_using_hdr_2d(RID p_viewport) const {
 	ERR_FAIL_NULL_V(viewport, false);
 
 	return viewport->use_hdr_2d;
+}
+
+void RendererViewport::viewport_set_use_hdr_2d_full_precision(RID p_viewport, bool p_use_hdr_full_precision) {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL(viewport);
+
+	bool new_value = p_use_hdr_full_precision && viewport->use_hdr_2d;
+	if (viewport->use_hdr_2d_full_precision == new_value) {
+		return;
+	}
+
+	viewport->use_hdr_2d_full_precision = new_value;
+	RSG::texture_storage->render_target_set_use_hdr_full_precision(viewport->render_target, new_value);
+	_configure_3d_render_buffers(viewport);
+}
+
+bool RendererViewport::viewport_is_using_hdr_2d_full_precision(RID p_viewport) const {
+	Viewport *viewport = viewport_owner.get_or_null(p_viewport);
+	ERR_FAIL_NULL_V(viewport, false);
+
+	return viewport->use_hdr_2d && viewport->use_hdr_2d_full_precision;
 }
 
 void RendererViewport::viewport_set_screen_space_aa(RID p_viewport, RS::ViewportScreenSpaceAA p_mode) {

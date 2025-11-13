@@ -462,6 +462,7 @@ Ref<Image> ShaderTexture2D::_generate_image() {
 	rs->viewport_set_size(viewport, size.x, size.y);
 	rs->viewport_set_update_mode(viewport, RS::VIEWPORT_UPDATE_ONCE);
 	rs->viewport_set_use_hdr_2d(viewport, _needs_hdr_buffer());
+	rs->viewport_set_use_hdr_2d_full_precision(viewport, precision == PRECISION_FLOAT);
 	rs->viewport_set_transparent_background(viewport, true);
 	rs->viewport_set_active(viewport, true);
 

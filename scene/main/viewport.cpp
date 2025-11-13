@@ -1259,12 +1259,31 @@ bool Viewport::has_transparent_background() const {
 void Viewport::set_use_hdr_2d(bool p_enable) {
 	ERR_MAIN_THREAD_GUARD;
 	use_hdr_2d = p_enable;
+	if (!use_hdr_2d) {
+		use_hdr_2d_full_precision = false;
+	}
 	RS::get_singleton()->viewport_set_use_hdr_2d(viewport, p_enable);
+	RS::get_singleton()->viewport_set_use_hdr_2d_full_precision(viewport, use_hdr_2d_full_precision && use_hdr_2d);
 }
 
 bool Viewport::is_using_hdr_2d() const {
 	ERR_READ_THREAD_GUARD_V(false);
 	return use_hdr_2d;
+}
+
+void Viewport::set_use_hdr_2d_full_precision(bool p_enable) {
+	ERR_MAIN_THREAD_GUARD;
+	bool new_value = p_enable && use_hdr_2d;
+	if (use_hdr_2d_full_precision == new_value) {
+		return;
+	}
+	use_hdr_2d_full_precision = new_value;
+	RS::get_singleton()->viewport_set_use_hdr_2d_full_precision(viewport, use_hdr_2d_full_precision);
+}
+
+bool Viewport::is_using_hdr_2d_full_precision() const {
+	ERR_READ_THREAD_GUARD_V(false);
+	return use_hdr_2d_full_precision;
 }
 
 void Viewport::set_world_2d(const Ref<World2D> &p_world_2d) {
@@ -4914,6 +4933,8 @@ void Viewport::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_transparent_background"), &Viewport::has_transparent_background);
 	ClassDB::bind_method(D_METHOD("set_use_hdr_2d", "enable"), &Viewport::set_use_hdr_2d);
 	ClassDB::bind_method(D_METHOD("is_using_hdr_2d"), &Viewport::is_using_hdr_2d);
+	ClassDB::bind_method(D_METHOD("set_use_hdr_2d_full_precision", "enable"), &Viewport::set_use_hdr_2d_full_precision);
+	ClassDB::bind_method(D_METHOD("is_using_hdr_2d_full_precision"), &Viewport::is_using_hdr_2d_full_precision);
 
 	ClassDB::bind_method(D_METHOD("set_msaa_2d", "msaa"), &Viewport::set_msaa_2d);
 	ClassDB::bind_method(D_METHOD("get_msaa_2d"), &Viewport::get_msaa_2d);
@@ -5107,6 +5128,7 @@ void Viewport::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mesh_lod_threshold", PROPERTY_HINT_RANGE, "0,1024,0.1"), "set_mesh_lod_threshold", "get_mesh_lod_threshold");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "debug_draw", PROPERTY_HINT_ENUM, "Disabled,Unshaded,Lighting,Overdraw,Wireframe,Normal Buffer,VoxelGI Albedo,VoxelGI Lighting,VoxelGI Emission,Shadow Atlas,Directional Shadow Map,Scene Luminance,SSAO,SSIL,Directional Shadow Splits,Decal Atlas,SDFGI Cascades,SDFGI Probes,VoxelGI/SDFGI Buffer,Disable Mesh LOD,OmniLight3D Cluster,SpotLight3D Cluster,Decal Cluster,ReflectionProbe Cluster,Occlusion Culling Buffer,Motion Vectors,Internal Buffer"), "set_debug_draw", "get_debug_draw");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_hdr_2d"), "set_use_hdr_2d", "is_using_hdr_2d");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "use_hdr_2d_full_precision"), "set_use_hdr_2d_full_precision", "is_using_hdr_2d_full_precision");
 
 #ifndef _3D_DISABLED
 	ADD_GROUP("Scaling 3D", "");

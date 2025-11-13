@@ -96,6 +96,8 @@ private:
 	};
 
 	virtual void setup_render_buffer_data(Ref<RenderSceneBuffersRD> p_render_buffers) override;
+	virtual RD::DataFormat _render_buffers_get_full_precision_color_format() override;
+	virtual bool _render_buffers_supports_full_precision_color() const override;
 
 	/* Rendering */
 
