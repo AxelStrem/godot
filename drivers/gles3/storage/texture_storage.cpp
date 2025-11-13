@@ -2995,6 +2995,25 @@ bool TextureStorage::render_target_is_using_hdr(RID p_render_target) const {
 	return rt->hdr;
 }
 
+void TextureStorage::render_target_set_use_hdr_full_precision(RID p_render_target, bool p_use_full_precision) {
+	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
+	ERR_FAIL_NULL(rt);
+	ERR_FAIL_COND(rt->direct_to_screen);
+
+	if (p_use_full_precision && !rt->hdr_full_precision) {
+		WARN_PRINT_ONCE("Full precision HDR buffers are not supported by the GLES3 renderer; falling back to half precision.");
+	}
+
+	rt->hdr_full_precision = false;
+}
+
+bool TextureStorage::render_target_is_using_hdr_full_precision(RID p_render_target) const {
+	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
+	ERR_FAIL_NULL_V(rt, false);
+
+	return false;
+}
+
 GLuint TextureStorage::render_target_get_color_internal_format(RID p_render_target) const {
 	RenderTarget *rt = render_target_owner.get_or_null(p_render_target);
 	ERR_FAIL_NULL_V(rt, GL_RGBA8);

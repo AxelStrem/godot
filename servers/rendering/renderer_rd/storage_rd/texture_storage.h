@@ -370,6 +370,7 @@ private:
 
 		bool is_transparent = false;
 		bool use_hdr = false;
+		bool use_hdr_full_precision = false;
 		bool use_debanding = false;
 
 		bool sdf_enabled = false;
@@ -764,6 +765,8 @@ public:
 	virtual void render_target_do_msaa_resolve(RID p_render_target) override;
 	virtual void render_target_set_use_hdr(RID p_render_target, bool p_use_hdr) override;
 	virtual bool render_target_is_using_hdr(RID p_render_target) const override;
+	virtual void render_target_set_use_hdr_full_precision(RID p_render_target, bool p_use_full_precision) override;
+	virtual bool render_target_is_using_hdr_full_precision(RID p_render_target) const override;
 	virtual void render_target_set_use_debanding(RID p_render_target, bool p_use_debanding) override;
 	virtual bool render_target_is_using_debanding(RID p_render_target) const override;
 
@@ -822,7 +825,7 @@ public:
 	void render_target_set_framebuffer_uniform_set(RID p_render_target, RID p_uniform_set);
 	void render_target_set_backbuffer_uniform_set(RID p_render_target, RID p_uniform_set);
 
-	static RD::DataFormat render_target_get_color_format(bool p_use_hdr, bool p_srgb);
+	static RD::DataFormat render_target_get_color_format(bool p_use_hdr, bool p_srgb, bool p_use_full_precision = false);
 	static uint32_t render_target_get_color_usage_bits(bool p_msaa);
 };
 

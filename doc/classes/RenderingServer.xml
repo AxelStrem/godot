@@ -3906,6 +3906,13 @@
 				[b]Note:[/b] When GPU utilization is low enough during a certain period of time, GPUs will decrease their power state (which in turn decreases core and memory clock speeds). This can cause the reported GPU time to increase if GPU utilization is kept low enough by a framerate cap (compared to what it would be at the GPU's highest power state). Keep this in mind when benchmarking using [method viewport_get_measured_render_time_gpu]. This behavior can be overridden in the graphics driver settings at the cost of higher power usage.
 			</description>
 		</method>
+		<method name="viewport_is_using_hdr_2d_full_precision">
+			<return type="bool" />
+			<param index="0" name="viewport" type="RID" />
+			<description>
+				Returns [code]true[/code] if the viewport is currently rendering 2D content into a 32-bit floating-point HDR buffer. This returns [code]false[/code] when HDR is disabled or when the renderer falls back to half-float precision.
+			</description>
+		</method>
 		<method name="viewport_get_render_info">
 			<return type="int" />
 			<param index="0" name="viewport" type="RID" />
@@ -4259,6 +4266,15 @@
 				If [code]true[/code], 2D rendering will use a high dynamic range (HDR) format framebuffer matching the bit depth of the 3D framebuffer. When using the Forward+ or Compatibility renderer, this will be an [code]RGBA16[/code] framebuffer. When using the Mobile renderer, it will be an [code]RGB10_A2[/code] framebuffer.
 				Additionally, 2D rendering will be performed on linear values and will be converted using the appropriate transfer function immediately before blitting to the screen (if the Viewport is attached to the screen).
 				Practically speaking, this means that the end result of the Viewport will not be clamped to the [code]0-1[/code] range and can be used in 3D rendering without color encoding adjustments. This allows 2D rendering to take advantage of effects requiring high dynamic range (e.g. 2D glow) as well as substantially improves the appearance of effects requiring highly detailed gradients. This setting has the same effect as [member Viewport.use_hdr_2d].
+			</description>
+		</method>
+		<method name="viewport_set_use_hdr_2d_full_precision">
+			<return type="void" />
+			<param index="0" name="viewport" type="RID" />
+			<param index="1" name="enabled" type="bool" />
+			<description>
+				Requests a full 32-bit floating-point color buffer for 2D rendering when HDR is enabled on the viewport. When supported by the active renderer (Forward+ or Forward Clustered), this removes the precision limits of half-float buffers and is suitable for storing high-range data such as packed coordinates.
+				If the renderer cannot provide a 32-bit buffer (for example, when using the Mobile renderer), the request is ignored and half-float precision is used instead.
 			</description>
 		</method>
 		<method name="viewport_set_use_occlusion_culling">
