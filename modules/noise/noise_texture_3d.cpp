@@ -32,6 +32,8 @@
 
 #include "noise.h"
 
+#include "servers/rendering/rendering_server.h"
+
 #include "core/math/math_funcs.h"
 namespace {
 

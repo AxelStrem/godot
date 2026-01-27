@@ -32,6 +32,7 @@
 
 #include "scene/main/node.h"
 #include "scene/resources/texture.h"
+#include "servers/display/display_server.h"
 
 #ifndef _3D_DISABLED
 class Camera3D;
@@ -373,8 +374,8 @@ private:
 		BitField<MouseButtonMask> mouse_focus_mask = MouseButtonMask::NONE;
 		Control *key_focus = nullptr;
 		bool hide_focus = false;
-		Control *mouse_over = nullptr;
-		LocalVector<Control *> mouse_over_hierarchy;
+		ObjectID mouse_over;
+		LocalVector<ObjectID> mouse_over_hierarchy;
 		bool sending_mouse_enter_exit_notifications = false;
 		Window *subwindow_over = nullptr; // mouse_over and subwindow_over are mutually exclusive. At all times at least one of them is nullptr.
 		Window *windowmanager_window_over = nullptr; // Only used in root Viewport.
@@ -401,6 +402,7 @@ private:
 		bool drag_successful = false;
 		Control *target_control = nullptr; // Control that the mouse is over in the innermost nested Viewport. Only used in root-Viewport and SubViewports, that are not children of a SubViewportContainer.
 		bool embed_subwindows_hint = false;
+		int drag_threshold = 10;
 
 		Window *subwindow_focused = nullptr;
 		Window *currently_dragged_subwindow = nullptr;
@@ -487,7 +489,7 @@ private:
 	bool _sub_windows_forward_input(const Ref<InputEvent> &p_event);
 	SubWindowResize _sub_window_get_resize_margin(Window *p_subwindow, const Point2 &p_point);
 
-	void _update_mouse_over();
+	void _update_mouse_over(const Ref<InputEventMouse> &p_mm);
 	virtual void _update_mouse_over(Vector2 p_pos);
 	virtual void _mouse_leave_viewport();
 
@@ -609,10 +611,11 @@ public:
 	Vector2 get_camera_coords(const Vector2 &p_viewport_coords) const;
 	Vector2 get_camera_rect_size() const;
 
+	void _push_text_input(const String &p_text, bool p_emit_text_changed_signal = false);
 	void push_text_input(const String &p_text);
-	void push_input(const Ref<InputEvent> &p_event, bool p_local_coords = false);
+	void push_input(RequiredParam<InputEvent> rp_event, bool p_local_coords = false);
 #ifndef DISABLE_DEPRECATED
-	void push_unhandled_input(const Ref<InputEvent> &p_event, bool p_local_coords = false);
+	void push_unhandled_input(RequiredParam<InputEvent> rp_event, bool p_local_coords = false);
 #endif // DISABLE_DEPRECATED
 	void notify_mouse_entered();
 	void notify_mouse_exited();
@@ -708,6 +711,9 @@ public:
 	void subwindow_set_popup_safe_rect(Window *p_window, const Rect2i &p_rect);
 	Rect2i subwindow_get_popup_safe_rect(Window *p_window) const;
 
+	void set_drag_threshold(int p_threshold);
+	int get_drag_threshold() const;
+
 	Viewport *get_parent_viewport() const;
 	Window *get_base_window();
 
@@ -791,7 +797,9 @@ public:
 #ifndef _3D_DISABLED
 private:
 	// 3D audio, camera, physics, and world.
+#ifndef XR_DISABLED
 	bool use_xr = false;
+#endif // XR_DISABLED
 	friend class AudioListener3D;
 	AudioListener3D *audio_listener_3d = nullptr;
 	HashSet<AudioListener3D *> audio_listener_3d_set;
@@ -849,8 +857,10 @@ public:
 	void set_use_own_world_3d(bool p_use_own_world_3d);
 	bool is_using_own_world_3d() const;
 
+#ifndef XR_DISABLED
 	void set_use_xr(bool p_use_xr);
 	bool is_using_xr();
+#endif // XR_DISABLED
 #endif // _3D_DISABLED
 
 	Viewport();

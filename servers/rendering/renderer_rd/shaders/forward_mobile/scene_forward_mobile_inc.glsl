@@ -2,6 +2,7 @@
 #define MAX_VIEWS 2
 
 #include "../decal_data_inc.glsl"
+#include "../oct_inc.glsl"
 #include "../scene_data_inc.glsl"
 
 #if !defined(MODE_RENDER_DEPTH) || defined(MODE_RENDER_MATERIAL) || defined(TANGENT_USED) || defined(NORMAL_MAP_USED) || defined(BENT_NORMAL_MAP_USED) || defined(LIGHT_ANISOTROPY_USED)
@@ -116,32 +117,36 @@ bool sc_use_lightmap_bicubic_filter() {
 	return ((sc_packed_0() >> 10) & 1U) != 0;
 }
 
-bool sc_multimesh() {
+bool sc_use_material_debanding() {
 	return ((sc_packed_0() >> 11) & 1U) != 0;
 }
 
-bool sc_multimesh_format_2d() {
+bool sc_multimesh() {
 	return ((sc_packed_0() >> 12) & 1U) != 0;
 }
 
-bool sc_multimesh_has_color() {
+bool sc_multimesh_format_2d() {
 	return ((sc_packed_0() >> 13) & 1U) != 0;
 }
 
-bool sc_multimesh_has_custom_data() {
+bool sc_multimesh_has_color() {
 	return ((sc_packed_0() >> 14) & 1U) != 0;
 }
 
-bool sc_scene_use_ambient_cubemap() {
+bool sc_multimesh_has_custom_data() {
 	return ((sc_packed_0() >> 15) & 1U) != 0;
 }
 
-bool sc_scene_use_reflection_cubemap() {
+bool sc_scene_use_ambient_cubemap() {
 	return ((sc_packed_0() >> 16) & 1U) != 0;
 }
 
-bool sc_scene_roughness_limiter_enabled() {
+bool sc_scene_use_reflection_cubemap() {
 	return ((sc_packed_0() >> 17) & 1U) != 0;
+}
+
+bool sc_scene_roughness_limiter_enabled() {
+	return ((sc_packed_0() >> 18) & 1U) != 0;
 }
 
 uint sc_soft_shadow_samples() {
@@ -210,6 +215,24 @@ bool sc_directional_light_blend_split(uint i) {
 half sc_luminance_multiplier() {
 	return half(sc_packed_2());
 }
+
+layout(constant_id = 3) const bool sc_emulate_point_size = false;
+
+#ifdef POINT_SIZE_USED
+
+#define VERTEX_INDEX (sc_emulate_point_size ? gl_InstanceIndex : gl_VertexIndex)
+#define INSTANCE_INDEX (sc_emulate_point_size ? (gl_VertexIndex / 6) : gl_InstanceIndex)
+
+#else
+
+#define VERTEX_INDEX gl_VertexIndex
+#define INSTANCE_INDEX gl_InstanceIndex
+
+#endif
+
+// Like the luminance multiplier, but it is only for sky and reflection probes
+// since they are always LDR.
+#define REFLECTION_MULTIPLIER half(2.0)
 
 /* Set 0: Base Pass (never changes) */
 
@@ -329,17 +352,17 @@ layout(set = 1, binding = 1, std430) buffer restrict readonly InstanceDataBuffer
 }
 instances;
 
-#ifdef USE_RADIANCE_CUBEMAP_ARRAY
+#ifdef USE_RADIANCE_OCTMAP_ARRAY
 
-layout(set = 1, binding = 2) uniform textureCubeArray radiance_cubemap;
+layout(set = 1, binding = 2) uniform texture2DArray radiance_octmap;
 
 #else
 
-layout(set = 1, binding = 2) uniform textureCube radiance_cubemap;
+layout(set = 1, binding = 2) uniform texture2D radiance_octmap;
 
 #endif
 
-layout(set = 1, binding = 3) uniform textureCubeArray reflection_atlas;
+layout(set = 1, binding = 3) uniform texture2DArray reflection_atlas;
 
 layout(set = 1, binding = 4) uniform texture2D shadow_atlas;
 

@@ -112,16 +112,9 @@ protected:
 	void _render_buffers_ensure_depth_texture(const RenderDataRD *p_render_data);
 	void _render_buffers_copy_depth_texture(const RenderDataRD *p_render_data, bool p_use_msaa = false);
 	void _render_buffers_post_process_and_tonemap(const RenderDataRD *p_render_data, bool p_use_msaa = false);
+// Moved to public below
 	void _post_process_subpass(RID p_source_texture, RID p_framebuffer, const RenderDataRD *p_render_data);
 	void _disable_clear_request(const RenderDataRD *p_render_data);
-
-	_FORCE_INLINE_ bool _is_8bit_data_format(RD::DataFormat p_data_format) {
-		return p_data_format >= RD::DATA_FORMAT_R8_UNORM && p_data_format <= RD::DATA_FORMAT_A8B8G8R8_SRGB_PACK32;
-	}
-
-	_FORCE_INLINE_ bool _is_10bit_data_format(RD::DataFormat p_data_format) {
-		return p_data_format >= RD::DATA_FORMAT_A2R10G10B10_UNORM_PACK32 && p_data_format <= RD::DATA_FORMAT_A2B10G10R10_SINT_PACK32;
-	}
 
 	// needed for a single argument calls (material and uv2)
 	PagedArrayPool<RenderGeometryInstance *> cull_argument_pool;
@@ -154,6 +147,7 @@ private:
 	int soft_shadow_samples = 0;
 	RS::DecalFilter decals_filter = RS::DECAL_FILTER_LINEAR_MIPMAPS;
 	RS::LightProjectorFilter light_projectors_filter = RS::LIGHT_PROJECTOR_FILTER_LINEAR_MIPMAPS;
+	bool material_use_debanding = false;
 
 	/* RENDER BUFFERS */
 
@@ -175,6 +169,7 @@ private:
 	bool volumetric_fog_filter_active = true;
 
 public:
+		virtual RD::DataFormat _render_buffers_get_preferred_color_format();
 	static RendererSceneRenderRD *get_singleton() { return singleton; }
 
 	/* LIGHTING */
@@ -280,6 +275,7 @@ public:
 	virtual void decals_set_filter(RS::DecalFilter p_filter) override;
 	virtual void light_projectors_set_filter(RS::LightProjectorFilter p_filter) override;
 	virtual void lightmaps_set_bicubic_filter(bool p_enable) override;
+	virtual void material_set_use_debanding(bool p_enable) override;
 
 	_FORCE_INLINE_ RS::ShadowQuality shadows_quality_get() const {
 		return shadows_quality;
@@ -330,8 +326,12 @@ public:
 		return decals_filter;
 	}
 
+	_FORCE_INLINE_ bool material_use_debanding_get() const {
+		return material_use_debanding;
+	}
+
 	int get_roughness_layers() const;
-	bool is_using_radiance_cubemap_array() const;
+	bool is_using_radiance_octmap_array() const;
 
 	virtual TypedArray<Image> bake_render_uv2(RID p_base, const TypedArray<RID> &p_material_overrides, const Size2i &p_image_size) override;
 

@@ -31,6 +31,7 @@
 #include "collision_object_3d.h"
 
 #include "scene/resources/3d/shape_3d.h"
+#include "scene/resources/mesh.h"
 
 void CollisionObject3D::_notification(int p_what) {
 	switch (p_what) {
@@ -607,9 +608,9 @@ Object *CollisionObject3D::shape_owner_get_owner(uint32_t p_owner) const {
 	return ObjectDB::get_instance(shapes[p_owner].owner_id);
 }
 
-void CollisionObject3D::shape_owner_add_shape(uint32_t p_owner, const Ref<Shape3D> &p_shape) {
+void CollisionObject3D::shape_owner_add_shape(uint32_t p_owner, RequiredParam<Shape3D> rp_shape) {
 	ERR_FAIL_COND(!shapes.has(p_owner));
-	ERR_FAIL_COND(p_shape.is_null());
+	EXTRACT_PARAM_OR_FAIL(p_shape, rp_shape);
 
 	ShapeData &sd = shapes[p_owner];
 	ShapeData::ShapeBase s;

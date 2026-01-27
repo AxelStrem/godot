@@ -38,6 +38,7 @@
 #include "editor/themes/editor_scale.h"
 #include "scene/gui/dialogs.h"
 #include "scene/gui/menu_button.h"
+#include "scene/resources/mesh.h"
 
 void Path2DEditor::_notification(int p_what) {
 	switch (p_what) {
@@ -849,7 +850,7 @@ Path2DEditor::Path2DEditor() {
 	curve_edit->set_toggle_mode(true);
 	curve_edit->set_pressed(true);
 	curve_edit->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
-	curve_edit->set_tooltip_text(TTR("Select Points") + "\n" + TTR("Shift+Drag: Select Control Points") + "\n" + keycode_get_string((Key)KeyModifierMask::CMD_OR_CTRL) + TTR("Click: Add Point") + "\n" + TTR("Left Click: Split Segment (in curve)") + "\n" + TTR("Right Click: Delete Point"));
+	curve_edit->set_tooltip_text(TTR("Select Points") + "\n" + TTR("Shift+Drag: Select Control Points") + "\n" + vformat(TTR("%s+Click: Add Point"), keycode_get_string((Key)KeyModifierMask::CMD_OR_CTRL)) + "\n" + TTR("Left Click: Split Segment (in curve)") + "\n" + TTR("Right Click: Delete Point"));
 	curve_edit->set_accessibility_name(TTRC("Select Points"));
 	curve_edit->connect(SceneStringName(pressed), callable_mp(this, &Path2DEditor::_mode_selected).bind(MODE_EDIT));
 	toolbar->add_child(curve_edit);
