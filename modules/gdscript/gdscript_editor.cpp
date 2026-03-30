@@ -29,7 +29,6 @@
 /**************************************************************************/
 
 #include "gdscript.h"
-
 #include "gdscript_analyzer.h"
 #include "gdscript_parser.h"
 #include "gdscript_tokenizer.h"
@@ -43,7 +42,9 @@
 #include "core/config/engine.h"
 #include "core/core_constants.h"
 #include "core/io/file_access.h"
+#include "core/io/resource_loader.h"
 #include "core/math/expression.h"
+#include "core/object/class_db.h"
 #include "core/variant/container_type_validate.h"
 
 #ifdef TOOLS_ENABLED
@@ -169,8 +170,8 @@ bool GDScriptLanguage::validate(const String &p_script, const String &p_path, Li
 			for (const GDScriptParser::ParserError &pe : parser.get_errors()) {
 				ScriptLanguage::ScriptError e;
 				e.path = p_path;
-				e.line = pe.line;
-				e.column = pe.column;
+				e.line = pe.start_line;
+				e.column = pe.start_column;
 				e.message = pe.message;
 				r_errors->push_back(e);
 			}
@@ -180,8 +181,8 @@ bool GDScriptLanguage::validate(const String &p_script, const String &p_path, Li
 				for (const GDScriptParser::ParserError &pe : depended_parser->get_errors()) {
 					ScriptLanguage::ScriptError e;
 					e.path = E.key;
-					e.line = pe.line;
-					e.column = pe.column;
+					e.line = pe.start_line;
+					e.column = pe.start_column;
 					e.message = pe.message;
 					r_errors->push_back(e);
 				}
@@ -244,10 +245,6 @@ int GDScriptLanguage::find_function(const String &p_function, const String &p_co
 		current = tokenizer.scan();
 	}
 	return -1;
-}
-
-Script *GDScriptLanguage::create_script() const {
-	return memnew(GDScript);
 }
 
 /* DEBUGGER FUNCTIONS */
@@ -345,7 +342,12 @@ void GDScriptLanguage::debug_get_stack_level_locals(int p_level, List<String> *p
 	f->debug_get_stack_member_state(*cl->line, &locals);
 	for (const Pair<StringName, int> &E : locals) {
 		p_locals->push_back(E.first);
-		p_values->push_back(cl->stack[E.second]);
+
+		if (f->constant_map.has(E.first)) {
+			p_values->push_back(f->constant_map[E.first]);
+		} else {
+			p_values->push_back(cl->stack[E.second]);
+		}
 	}
 }
 
@@ -476,7 +478,7 @@ void GDScriptLanguage::get_public_functions(List<MethodInfo> *p_functions) const
 		MethodInfo mi;
 		mi.name = "preload";
 		mi.arguments.push_back(PropertyInfo(Variant::STRING, "path"));
-		mi.return_val = PropertyInfo(Variant::OBJECT, "", PROPERTY_HINT_RESOURCE_TYPE, "Resource");
+		mi.return_val = PropertyInfo(Variant::OBJECT, "", PROPERTY_HINT_RESOURCE_TYPE, Resource::get_class_static());
 		p_functions->push_back(mi);
 	}
 	{
@@ -938,7 +940,7 @@ static void _find_annotation_arguments(const GDScriptParser::AnnotationNode *p_a
 			ScriptLanguage::CodeCompletionOption hint1("attenuation", ScriptLanguage::CODE_COMPLETION_KIND_PLAIN_TEXT);
 			hint1.insert_text = hint1.display.quote(p_quote_style);
 			r_result.insert(hint1.display, hint1);
-			ScriptLanguage::CodeCompletionOption hint2("inout", ScriptLanguage::CODE_COMPLETION_KIND_PLAIN_TEXT);
+			ScriptLanguage::CodeCompletionOption hint2("positive_only", ScriptLanguage::CODE_COMPLETION_KIND_PLAIN_TEXT);
 			hint2.insert_text = hint2.display.quote(p_quote_style);
 			r_result.insert(hint2.display, hint2);
 		}
@@ -1123,7 +1125,7 @@ static void _list_available_types(bool p_inherit_only, GDScriptParser::Completio
 	}
 
 	// Autoload singletons
-	HashMap<StringName, ProjectSettings::AutoloadInfo> autoloads = ProjectSettings::get_singleton()->get_autoload_list();
+	HashMap<StringName, ProjectSettings::AutoloadInfo> autoloads(ProjectSettings::get_singleton()->get_autoload_list());
 
 	for (const KeyValue<StringName, ProjectSettings::AutoloadInfo> &E : autoloads) {
 		const ProjectSettings::AutoloadInfo &info = E.value;
@@ -3343,7 +3345,7 @@ static void _find_call_arguments(GDScriptParser::CompletionContext &p_context, c
 			_get_directory_contents(EditorFileSystem::get_singleton()->get_filesystem(), r_result);
 		}
 
-		MethodInfo mi(PropertyInfo(Variant::OBJECT, "resource", PROPERTY_HINT_RESOURCE_TYPE, "Resource"), "preload", PropertyInfo(Variant::STRING, "path"));
+		MethodInfo mi(PropertyInfo(Variant::OBJECT, "resource", PROPERTY_HINT_RESOURCE_TYPE, Resource::get_class_static()), "preload", PropertyInfo(Variant::STRING, "path"));
 		r_arghint = _make_arguments_hint(mi, p_argidx);
 		return;
 	} else if (p_call->type != GDScriptParser::Node::CALL) {
@@ -3464,6 +3466,7 @@ static void _find_call_arguments(GDScriptParser::CompletionContext &p_context, c
 
 	switch (completion_context.type) {
 		case GDScriptParser::COMPLETION_NONE:
+		case GDScriptParser::COMPLETION_DECLARATION:
 			break;
 		case GDScriptParser::COMPLETION_ANNOTATION: {
 			List<MethodInfo> annotations;
@@ -4411,6 +4414,8 @@ static Error _lookup_symbol_from_base(const GDScriptParser::DataType &p_base, co
 		case GDScriptParser::COMPLETION_METHOD:
 		case GDScriptParser::COMPLETION_ASSIGN:
 		case GDScriptParser::COMPLETION_CALL_ARGUMENTS:
+		case GDScriptParser::COMPLETION_DECLARATION:
+		case GDScriptParser::COMPLETION_INHERIT_TYPE:
 		case GDScriptParser::COMPLETION_IDENTIFIER:
 		case GDScriptParser::COMPLETION_PROPERTY_METHOD:
 		case GDScriptParser::COMPLETION_SUBSCRIPT: {
@@ -4603,8 +4608,14 @@ static Error _lookup_symbol_from_base(const GDScriptParser::DataType &p_base, co
 			}
 		} break;
 		case GDScriptParser::COMPLETION_OVERRIDE_METHOD: {
+			// This logic applies to any method declaration (override or not),
+			// but shows parent documentation on virtual method overrides.
 			GDScriptParser::DataType base_type = context.current_class->base_type;
+			if (_lookup_symbol_from_base(base_type, p_symbol, r_result) == OK) {
+				return OK;
+			}
 
+			base_type = context.current_class->get_datatype();
 			if (_lookup_symbol_from_base(base_type, p_symbol, r_result) == OK) {
 				return OK;
 			}

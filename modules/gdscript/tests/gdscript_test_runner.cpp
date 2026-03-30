@@ -39,17 +39,19 @@
 #include "core/config/project_settings.h"
 #include "core/core_globals.h"
 #include "core/io/dir_access.h"
-#include "core/io/file_access_pack.h"
+#include "core/io/file_access.h"
+#include "core/io/resource_loader.h"
+#include "core/io/resource_uid.h"
+#include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/string/string_builder.h"
 #include "scene/resources/packed_scene.h"
-
 #include "tests/test_macros.h"
 
 namespace GDScriptTests {
 
 void init_autoloads() {
-	HashMap<StringName, ProjectSettings::AutoloadInfo> autoloads = ProjectSettings::get_singleton()->get_autoload_list();
+	HashMap<StringName, ProjectSettings::AutoloadInfo> autoloads(ProjectSettings::get_singleton()->get_autoload_list());
 
 	// First pass, add the constants so they exist before any script is loaded.
 	for (const KeyValue<StringName, ProjectSettings::AutoloadInfo> &E : ProjectSettings::get_singleton()->get_autoload_list()) {
@@ -575,7 +577,7 @@ GDScriptTest::TestResult GDScriptTest::execute_test_code(bool p_is_generating) {
 
 		StringBuilder error_string;
 		for (const GDScriptParser::ParserError &error : parser.get_errors()) {
-			error_string.append(vformat(">> ERROR at line %d: %s\n", error.line, error.message));
+			error_string.append(vformat(">> ERROR at line %d: %s\n", error.start_line, error.message));
 		}
 		result.output += error_string.as_string();
 		if (!p_is_generating) {

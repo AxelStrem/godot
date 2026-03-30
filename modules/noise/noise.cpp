@@ -33,7 +33,10 @@
 #include <cstring>
 
 #include "core/math/math_funcs.h"
+#include "core/object/class_db.h"
 #include "core/string/print_string.h"
+
+#include <cfloat> // FLT_MAX
 
 namespace {
 
