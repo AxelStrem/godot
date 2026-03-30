@@ -30,7 +30,7 @@
 
 #include "shader_texture_2d.h"
 
-#include "core/object/callable_method_pointer.h"
+#include "core/object/callable_mp.h"
 #include "core/templates/list.h"
 #include "core/templates/local_vector.h"
 #include "core/templates/pair.h"
