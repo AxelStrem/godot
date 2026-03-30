@@ -1831,3 +1831,11 @@ RendererSceneRenderRD::~RendererSceneRenderRD() {
 	RSG::light_storage->directional_shadow_atlas_set_size(0);
 	cull_argument.reset(); //avoid exit error
 }
+
+float RendererSceneRenderRD::_render_buffers_get_luminance_multiplier() {
+	return 1.0f;
+}
+
+RD::DataFormat RendererSceneRenderRD::_render_buffers_get_color_format() {
+	return _render_buffers_get_preferred_color_format();
+}

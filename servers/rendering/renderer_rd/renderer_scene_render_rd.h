@@ -169,7 +169,7 @@ private:
 	bool volumetric_fog_filter_active = true;
 
 public:
-		virtual RD::DataFormat _render_buffers_get_preferred_color_format();
+	virtual RD::DataFormat _render_buffers_get_preferred_color_format();
 	static RendererSceneRenderRD *get_singleton() { return singleton; }
 
 	/* LIGHTING */

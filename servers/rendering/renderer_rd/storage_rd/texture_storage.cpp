@@ -4617,7 +4617,14 @@ RID TextureStorage::render_target_get_vrs_texture(RID p_render_target) const {
 
 RD::DataFormat TextureStorage::render_target_get_color_format(bool p_use_hdr, bool p_srgb, bool p_use_full_precision) {
 	if (p_use_hdr) {
-		return RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
+		// When using HDR, choose between half-precision and full-precision formats.
+		// Half-precision (16-bit float per channel).
+		if (p_use_full_precision) {
+			// Full-precision (32-bit float per channel) to match Image::FORMAT_RGBAF.
+			return RD::DATA_FORMAT_R32G32B32A32_SFLOAT;
+		} else {
+			return RD::DATA_FORMAT_R16G16B16A16_SFLOAT;
+		}
 	} else {
 		return p_srgb ? RD::DATA_FORMAT_R8G8B8A8_SRGB : RD::DATA_FORMAT_R8G8B8A8_UNORM;
 	}
