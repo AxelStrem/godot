@@ -2913,6 +2913,9 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 					}
 				}
 				prop_info.usage |= PROPERTY_USAGE_SCRIPT_VARIABLE;
+				if (variable->tweakable) {
+					prop_info.usage |= PROPERTY_USAGE_TWEAKABLE;
+				}
 				minfo.property_info = prop_info;
 
 				if (variable->is_static) {
