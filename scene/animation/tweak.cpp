@@ -45,6 +45,24 @@ Tweak::Tweak(Object* p_object, const StringName& p_property, const Variant &p_va
 		return;
 	}
 
+#ifdef DEBUG_ENABLED
+	// Warn if tweaking a script variable that isn't marked @tweakable.
+	{
+		List<PropertyInfo> plist;
+		p_object->get_property_list(&plist);
+		for (const PropertyInfo &pi : plist) {
+			if (pi.name == p_property && (pi.usage & PROPERTY_USAGE_SCRIPT_VARIABLE)) {
+				if (!(pi.usage & PROPERTY_USAGE_TWEAKABLE)) {
+					WARN_PRINT(vformat("Creating a tweak on script variable '%s' which is not marked @tweakable. "
+						"GDScript assignments to this variable will bypass the tweak pipeline. "
+						"Add @tweakable annotation to the variable declaration to fix this.", p_property));
+				}
+				break;
+			}
+		}
+	}
+#endif
+
 	ObjectTweaker* p_obj_tweaker = p_object->get_object_tweaker();
 	if(p_obj_tweaker == nullptr)
 	{
