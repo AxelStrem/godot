@@ -30,12 +30,14 @@
 
 #pragma once
 
-#include "editor/doc/editor_help.h"
-#include "scene/gui/button.h"
 #include "scene/gui/dialogs.h"
-#include "scene/gui/item_list.h"
-#include "scene/gui/line_edit.h"
-#include "scene/gui/tree.h"
+
+class Button;
+class EditorHelpBit;
+class FilterLineEdit;
+class ItemList;
+class Tree;
+class TreeItem;
 
 class CreateDialog : public ConfirmationDialog {
 	GDCLASS(CreateDialog, ConfirmationDialog);
@@ -51,11 +53,12 @@ class CreateDialog : public ConfirmationDialog {
 		PackedStringArray search_keywords;
 	};
 
-	LineEdit *search_box = nullptr;
+	FilterLineEdit *search_box = nullptr;
 	Tree *search_options = nullptr;
 
 	String base_type;
 	bool is_base_type_node = false;
+	bool allow_abstract_scripts = false;
 	String icon_fallback;
 	String preferred_search_result_type;
 
@@ -116,6 +119,7 @@ protected:
 public:
 	Variant instantiate_selected();
 	String get_selected_type();
+	String get_selected_type_name();
 
 	void set_base_type(const String &p_base);
 	String get_base_type() const { return base_type; }
@@ -125,6 +129,7 @@ public:
 	void set_preferred_search_result_type(const String &p_preferred_type) { preferred_search_result_type = p_preferred_type; }
 
 	void popup_create(bool p_dont_clear, bool p_replace_mode = false, const String &p_current_type = "", const String &p_current_name = "");
+	void for_inherit();
 
 	CreateDialog();
 };
