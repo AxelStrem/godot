@@ -362,6 +362,25 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 
 				incr += 3;
 			} break;
+			case OPCODE_SET_TWEAKABLE_MEMBER: {
+				text += "set_tweakable_member ";
+				text += "[\"";
+				text += _global_names_ptr[_code_ptr[ip + 2]];
+				text += "\"] = ";
+				text += DADDR(1);
+
+				incr += 3;
+			} break;
+			case OPCODE_GET_TWEAKABLE_MEMBER_BASE: {
+				text += "get_tweakable_member_base ";
+				text += DADDR(1);
+				text += " = ";
+				text += "[\"";
+				text += _global_names_ptr[_code_ptr[ip + 2]];
+				text += "\"]";
+
+				incr += 3;
+			} break;
 			case OPCODE_SET_STATIC_VARIABLE: {
 				Ref<GDScript> gdscript;
 				if (_code_ptr[ip + 2] == ADDR_CLASS) {

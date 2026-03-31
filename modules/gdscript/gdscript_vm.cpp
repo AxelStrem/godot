@@ -273,6 +273,8 @@ void (*type_init_function_table[])(Variant *) = {
 		&&OPCODE_GET_NAMED_VALIDATED, \
 		&&OPCODE_SET_MEMBER, \
 		&&OPCODE_GET_MEMBER, \
+		&&OPCODE_SET_TWEAKABLE_MEMBER, \
+		&&OPCODE_GET_TWEAKABLE_MEMBER_BASE, \
 		&&OPCODE_SET_STATIC_VARIABLE, \
 		&&OPCODE_GET_STATIC_VARIABLE, \
 		&&OPCODE_ASSIGN, \
@@ -1346,6 +1348,38 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 					OPCODE_BREAK;
 				}
 #endif
+				ip += 3;
+			}
+			DISPATCH_OPCODE;
+
+			OPCODE(OPCODE_SET_TWEAKABLE_MEMBER) {
+				CHECK_SPACE(3);
+				GET_VARIANT_PTR(src, 0);
+				int indexname = _code_ptr[ip + 2];
+				GD_ERR_BREAK(indexname < 0 || indexname >= _global_names_count);
+				const StringName *index = &_global_names_ptr[indexname];
+
+				bool valid;
+				p_instance->owner->set(*index, *src, &valid);
+#ifdef DEBUG_ENABLED
+				if (!valid) {
+					err_text = "Error setting tweakable property '" + String(*index) + "' with value of type " + Variant::get_type_name(src->get_type()) + ".";
+					OPCODE_BREAK;
+				}
+#endif
+				ip += 3;
+			}
+			DISPATCH_OPCODE;
+
+			OPCODE(OPCODE_GET_TWEAKABLE_MEMBER_BASE) {
+				CHECK_SPACE(3);
+				GET_VARIANT_PTR(dst, 0);
+				int indexname = _code_ptr[ip + 2];
+				GD_ERR_BREAK(indexname < 0 || indexname >= _global_names_count);
+				const StringName *index = &_global_names_ptr[indexname];
+
+				*dst = p_instance->owner->get_base_value(*index);
+
 				ip += 3;
 			}
 			DISPATCH_OPCODE;

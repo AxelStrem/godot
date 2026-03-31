@@ -66,6 +66,7 @@ class GDScript : public Script {
 		int index = 0;
 		StringName setter;
 		StringName getter;
+		bool tweakable = false;
 		GDScriptDataType data_type;
 		PropertyInfo property_info;
 	};

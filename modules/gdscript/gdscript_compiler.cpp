@@ -1288,6 +1288,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				bool has_setter = false;
 				bool is_in_setter = false;
 				bool is_static = false;
+				bool is_tweakable = false;
 				GDScriptCodeGenerator::Address static_var_class;
 				int static_var_index = 0;
 				GDScriptDataType static_var_data_type;
@@ -1302,6 +1303,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 						setter_function = minfo.setter;
 						has_setter = setter_function != StringName();
 						is_in_setter = has_setter && setter_function == codegen.function_name;
+						is_tweakable = minfo.tweakable;
 						member.mode = GDScriptCodeGenerator::Address::MEMBER;
 						member.address = minfo.index;
 						member.type = minfo.data_type;
@@ -1346,7 +1348,14 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				if (has_operation) {
 					// Perform operation.
 					GDScriptCodeGenerator::Address op_result = codegen.add_temporary(_gdtype_from_datatype(assignment->get_datatype(), codegen.script));
-					GDScriptCodeGenerator::Address og_value = _parse_expression(codegen, r_error, assignment->assignee);
+					GDScriptCodeGenerator::Address og_value;
+					if (is_tweakable && is_member && !is_static) {
+						// For @tweakable vars, read the base value (pre-tweak) for compound assignment.
+						og_value = codegen.add_temporary(_gdtype_from_datatype(assignment->assignee->get_datatype(), codegen.script));
+						gen->write_get_tweakable_member_base(og_value, var_name);
+					} else {
+						og_value = _parse_expression(codegen, r_error, assignment->assignee);
+					}
 					gen->write_binary_operator(op_result, assignment->variant_op, og_value, assigned_value);
 					to_assign = op_result;
 
@@ -1372,6 +1381,9 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 					}
 					gen->write_set_static_variable(temp, static_var_class, static_var_index);
 					gen->pop_temporary();
+				} else if (is_tweakable) {
+					// @tweakable: route through Object::set() for tweak pipeline.
+					gen->write_set_tweakable_member(to_assign, var_name);
 				} else {
 					// Just assign.
 					if (assignment->use_conversion_assign) {
@@ -2860,6 +2872,8 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 						}
 						break;
 				}
+
+				minfo.tweakable = variable->tweakable;
 
 				const GDScriptParser::DataType variable_type = variable->get_datatype();
 				minfo.data_type = _gdtype_from_datatype(variable_type, p_script);
