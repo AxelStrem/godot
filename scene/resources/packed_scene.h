@@ -44,6 +44,7 @@ class SceneState : public RefCounted {
 	Vector<PackedInt32Array> id_paths;
 	mutable PackedInt32Array ids;
 	Vector<NodePath> editable_instances;
+	Vector<NodePath> exposed_children;
 	mutable HashMap<NodePath, int> node_path_cache;
 	mutable HashMap<int, int> base_scene_node_remap;
 
@@ -213,6 +214,9 @@ public:
 	bool has_connection(const NodePath &p_node_from, const StringName &p_signal, const NodePath &p_node_to, const StringName &p_method, bool p_no_inheritance = false);
 
 	Vector<NodePath> get_editable_instances() const;
+
+	void add_exposed_child(const NodePath &p_path);
+	Vector<NodePath> get_exposed_children() const;
 	Ref<Resource> get_sub_resource(const String &p_path);
 	Vector<Ref<Resource>> get_sub_resources();
 

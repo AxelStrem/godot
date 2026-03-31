@@ -2693,6 +2693,35 @@ bool Node::is_editable_instance(const Node *p_node) const {
 	return p_node->data.editable_instance;
 }
 
+bool Node::_has_exposed_descendant(const Node *p_node) {
+	if (p_node->data.exposed_to_owner) {
+		return true;
+	}
+	for (const KeyValue<StringName, Node *> &K : p_node->data.children) {
+		if (_has_exposed_descendant(K.value)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void Node::set_exposed_to_owner(bool p_exposed) {
+	data.exposed_to_owner = p_exposed;
+}
+
+bool Node::is_exposed_to_owner() const {
+	return data.exposed_to_owner;
+}
+
+bool Node::has_exposed_children() const {
+	for (const KeyValue<StringName, Node *> &K : data.children) {
+		if (_has_exposed_descendant(K.value)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 Node *Node::get_deepest_editable_node(Node *p_start_node) const {
 	ERR_THREAD_GUARD_V(nullptr);
 	ERR_FAIL_NULL_V(p_start_node, nullptr);
@@ -2830,6 +2859,7 @@ Node *Node::_duplicate(int p_flags, HashMap<const Node *, Node *> *r_duplimap) c
 		node->set_scene_file_path(get_scene_file_path());
 		node->data.editable_instance = data.editable_instance;
 	}
+	node->data.exposed_to_owner = data.exposed_to_owner;
 
 	List<const Node *> hidden_roots;
 	List<const Node *> node_tree;
@@ -2874,6 +2904,7 @@ Node *Node::_duplicate(int p_flags, HashMap<const Node *, Node *> *r_duplimap) c
 			ERR_CONTINUE(!duplicated_node);
 
 			duplicated_node->data.editable_instance = source_node->data.editable_instance;
+			duplicated_node->data.exposed_to_owner = source_node->data.exposed_to_owner;
 		}
 	}
 
@@ -3879,6 +3910,9 @@ void Node::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_editable_instance", "node", "is_editable"), &Node::set_editable_instance);
 	ClassDB::bind_method(D_METHOD("is_editable_instance", "node"), &Node::is_editable_instance);
 
+	ClassDB::bind_method(D_METHOD("set_exposed_to_owner", "exposed"), &Node::set_exposed_to_owner);
+	ClassDB::bind_method(D_METHOD("is_exposed_to_owner"), &Node::is_exposed_to_owner);
+
 	ClassDB::bind_method(D_METHOD("get_viewport"), &Node::get_viewport);
 
 	ClassDB::bind_method(D_METHOD("queue_free"), &Node::queue_free);
@@ -4131,6 +4165,7 @@ Node::Node() {
 
 	data.display_folded = false;
 	data.editable_instance = false;
+	data.exposed_to_owner = false;
 
 	data.ready_notified = false; // This is a small hack, so if a node is added during _ready() to the tree, it correctly gets the _ready() notification.
 	data.ready_first = true;

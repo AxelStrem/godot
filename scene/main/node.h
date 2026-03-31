@@ -285,6 +285,7 @@ private:
 
 		bool display_folded : 1;
 		bool editable_instance : 1;
+		bool exposed_to_owner : 1;
 
 		bool ready_notified : 1;
 		bool ready_first : 1;
@@ -636,6 +637,11 @@ public:
 	void set_editable_instance(RequiredParam<Node> rp_node, bool p_editable);
 	bool is_editable_instance(const Node *p_node) const;
 	Node *get_deepest_editable_node(Node *p_start_node) const;
+
+	void set_exposed_to_owner(bool p_exposed);
+	bool is_exposed_to_owner() const;
+	bool has_exposed_children() const;
+	static bool _has_exposed_descendant(const Node *p_node);
 
 #ifdef TOOLS_ENABLED
 	void set_property_pinned(const String &p_property, bool p_pinned);
