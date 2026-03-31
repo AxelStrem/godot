@@ -212,6 +212,14 @@ Variant ObjectTweaker::get_tweaked(const StringName &property, const Variant &ad
 	return ptr->get_tweaked(add_to_base);
 }
 
+Variant ObjectTweaker::get_base_value(const StringName &property) const {
+	const PropertyTweaker *ptr = props.getptr(property);
+	if (ptr == nullptr) {
+		return p_owner->get(property);
+	}
+	return ptr->get_base();
+}
+
 ObjectTweaker::~ObjectTweaker() {
 	for(auto& p : props)
 	{

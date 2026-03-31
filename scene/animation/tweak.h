@@ -124,6 +124,7 @@ class PropertyTweaker
 public:
 	Variant evaluate();
 	Variant set_base(const Variant& p_value);
+	Variant get_base() const { return base; }
 
 	void recalculate();
 
@@ -147,6 +148,7 @@ public:
 	PropertyTweaker* get_property_tweaker(const StringName& property);
 	void set_owning_object(Object* p_object);
 	Variant get_tweaked(const StringName& property, const Variant& add_to_base);
+	Variant get_base_value(const StringName& property) const;
 
 	~ObjectTweaker();
 };
