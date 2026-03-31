@@ -53,6 +53,13 @@ class Window;
 #ifndef _3D_DISABLED
 class Node3D;
 #endif
+class Material;
+class Mesh;
+class MultiplayerAPI;
+class SceneDebugger;
+class Tween;
+class Tweak;
+class Viewport;
 
 class SceneTreeTimer : public RefCounted {
 	GDCLASS(SceneTreeTimer, RefCounted);

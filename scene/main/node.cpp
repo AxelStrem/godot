@@ -47,7 +47,9 @@ STATIC_ASSERT_INCOMPLETE_TYPE(class, Engine);
 #include "core/object/script_language.h"
 #include "core/string/print_string.h"
 #include "scene/animation/tween.h"
+#include "scene/animation/tweak.h"
 #include "scene/main/instance_placeholder.h"
+#include "scene/debugger/scene_debugger.h"
 #include "scene/main/multiplayer_api.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/viewport.h"
@@ -2659,6 +2661,20 @@ RequiredResult<Tween> Node::create_tween() {
 	return tween;
 }
 
+RequiredResult<Tweak> Node::create_tweak(Object* p_owner, const StringName& p_property,  const Variant &p_value, Tweak::ActionType action, int priority) {
+	ERR_THREAD_GUARD_V(Ref<Tweak>());
+	Ref<Tweak> tweak;
+	tweak.instantiate(p_owner, p_property, p_value, action, priority);
+	return tweak;	
+}
+
+RequiredResult<Tweak> Node::create_tweak_dynamic(Object *p_owner, const StringName &p_property, Object *p_source, const StringName &p_source_property, Tweak::ActionType action, int priority) {
+	ERR_THREAD_GUARD_V(Ref<Tweak>());
+	Ref<Tweak> tweak;
+	tweak.instantiate(p_owner, p_property, p_source, p_source_property, action, priority);
+	return tweak;	
+}
+
 void Node::set_scene_file_path(const String &p_scene_file_path) {
 	ERR_THREAD_GUARD
 	data.scene_file_path = p_scene_file_path;
@@ -3888,6 +3904,9 @@ void Node::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_last_exclusive_window"), &Node::get_last_exclusive_window);
 	ClassDB::bind_method(D_METHOD("get_tree"), &Node::get_tree);
 	ClassDB::bind_method(D_METHOD("create_tween"), &Node::create_tween);
+
+	ClassDB::bind_method(D_METHOD("create_tweak", "object", "property_path", "value", "action", "priority"), &Node::create_tweak, DEFVAL(Tweak::ACTION_SET), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("create_tweak_dynamic", "object", "property_path", "source_object", "source_property", "action", "priority"), &Node::create_tweak_dynamic, DEFVAL(Tweak::ACTION_SET), DEFVAL(0));
 
 	ClassDB::bind_method(D_METHOD("duplicate", "flags"), &Node::duplicate, DEFVAL(DUPLICATE_DEFAULT));
 	ClassDB::bind_method(D_METHOD("replace_by", "node", "keep_groups"), &Node::replace_by, DEFVAL(false));

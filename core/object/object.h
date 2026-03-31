@@ -345,6 +345,7 @@ private:
 
 class ClassDB;
 class ScriptInstance;
+class ObjectTweaker;
 
 /**
  * Base class for all OBJECT Variant types.
@@ -453,6 +454,7 @@ private:
 	HashSet<String> editor_section_folding;
 #endif
 	ScriptInstance *script_instance = nullptr;
+	ObjectTweaker *object_tweaker = nullptr;
 	HashMap<StringName, Variant> metadata;
 	mutable const GDType *_gdtype_ptr = nullptr;
 	void _reset_gdtype() const;
@@ -692,9 +694,11 @@ public:
 	/* IAPI */
 
 	void set(const StringName &p_name, const Variant &p_value, bool *r_valid = nullptr);
+	void set_direct(const StringName &p_name, const Variant &p_value, bool *r_valid = nullptr);
 	Variant get(const StringName &p_name, bool *r_valid = nullptr) const;
 	void set_indexed(const Vector<StringName> &p_names, const Variant &p_value, bool *r_valid = nullptr);
 	Variant get_indexed(const Vector<StringName> &p_names, bool *r_valid = nullptr) const;
+	Variant get_tweaked(const StringName &p_name, const Variant& add_to_base) const;
 
 	void get_property_list(List<PropertyInfo> *p_list, bool p_reversed = false) const;
 	void validate_property(PropertyInfo &p_property) const;
@@ -765,6 +769,9 @@ public:
 
 	void set_script_instance(ScriptInstance *p_instance);
 	_FORCE_INLINE_ ScriptInstance *get_script_instance() const { return script_instance; }
+
+	_FORCE_INLINE_ ObjectTweaker *get_object_tweaker() const { return object_tweaker; }
+	void set_object_tweaker(ObjectTweaker *p_obj_tweaker);
 
 	void add_user_signal(const MethodInfo &p_signal);
 

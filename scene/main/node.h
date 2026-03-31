@@ -36,7 +36,9 @@
 #include "core/object/ref_counted.h"
 #include "core/os/thread_safe.h"
 #include "core/templates/iterable.h"
+#include "core/variant/typed_array.h"
 #include "scene/scene_string_names.h" // IWYU pragma: export. Make available to all Nodes.
+#include "scene/animation/tweak.h"
 
 class MultiplayerAPI;
 class NodePath;
@@ -619,6 +621,8 @@ public:
 	}
 
 	RequiredResult<Tween> create_tween();
+	RequiredResult<Tweak> create_tweak(Object* p_owner, const StringName& p_property, const Variant &p_value, Tweak::ActionType action, int priority);
+	RequiredResult<Tweak> create_tweak_dynamic(Object* p_owner, const StringName& p_property, Object* p_source, const StringName& p_source_property, Tweak::ActionType action, int priority);
 
 	void print_tree();
 	void print_tree_pretty();
