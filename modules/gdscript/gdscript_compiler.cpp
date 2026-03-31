@@ -1349,7 +1349,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 					// Perform operation.
 					GDScriptCodeGenerator::Address op_result = codegen.add_temporary(_gdtype_from_datatype(assignment->get_datatype(), codegen.script));
 					GDScriptCodeGenerator::Address og_value;
-					if (is_tweakable && is_member && !is_static) {
+					if (is_tweakable && is_member && !is_static && !is_in_setter) {
 						// For @tweakable vars, read the base value (pre-tweak) for compound assignment.
 						og_value = codegen.add_temporary(_gdtype_from_datatype(assignment->assignee->get_datatype(), codegen.script));
 						gen->write_get_tweakable_member_base(og_value, var_name);
@@ -1366,8 +1366,12 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 					to_assign = assigned_value;
 				}
 
-				if (has_setter && !is_in_setter) {
-					// Call setter.
+				if (is_tweakable && !is_in_setter) {
+					// @tweakable: route through Object::set() for tweak pipeline.
+					// This calls Object::set() -> tweaker -> set_direct() -> GDScriptInstance::set() -> calls setter if present.
+					gen->write_set_tweakable_member(to_assign, var_name);
+				} else if (has_setter && !is_in_setter) {
+					// Call setter (for non-tweakable vars with setters).
 					Vector<GDScriptCodeGenerator::Address> args;
 					args.push_back(to_assign);
 					GDScriptCodeGenerator::Address call_base = is_static ? GDScriptCodeGenerator::Address(GDScriptCodeGenerator::Address::CLASS) : GDScriptCodeGenerator::Address(GDScriptCodeGenerator::Address::SELF);
@@ -1381,9 +1385,6 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 					}
 					gen->write_set_static_variable(temp, static_var_class, static_var_index);
 					gen->pop_temporary();
-				} else if (is_tweakable) {
-					// @tweakable: route through Object::set() for tweak pipeline.
-					gen->write_set_tweakable_member(to_assign, var_name);
 				} else {
 					// Just assign.
 					if (assignment->use_conversion_assign) {
