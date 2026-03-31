@@ -304,6 +304,7 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 	LocalVector<DeferredNodePathProperties> deferred_node_paths;
 
 	bool deep_search_warned = false;
+
 	Vector<bool> skip_node_init;
 	Vector<bool> &skip_node = skip_node_init;
 	skip_node.resize(nc);

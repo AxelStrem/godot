@@ -4084,6 +4084,7 @@ void Node::_bind_methods() {
 	GDVIRTUAL_BIND(_unhandled_input, "event");
 	GDVIRTUAL_BIND(_unhandled_key_input, "event");
 	GDVIRTUAL_BIND(_get_focused_accessibility_element);
+	GDVIRTUAL_BIND(_filter_scene_children, "children");
 }
 
 String Node::_get_name_num_separator() {
