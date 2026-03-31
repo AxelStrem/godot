@@ -697,6 +697,14 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 		}
 	}
 
+	// Apply exposed_to_owner flags from the scene state.
+	for (int i = 0; i < exposed_children.size(); i++) {
+		Node *ec = ret_nodes[0]->get_node_or_null(exposed_children[i]);
+		if (ec) {
+			ec->set_exposed_to_owner(true);
+		}
+	}
+
 	return ret_nodes[0];
 }
 
@@ -811,6 +819,11 @@ Error SceneState::_parse_node(Node *p_owner, Node *p_node, int p_parent_idx, Has
 	} else if (p_node->get_owner() && p_owner->is_ancestor_of(p_node->get_owner()) && p_owner->is_editable_instance(p_node->get_owner())) {
 		// Node is part of an editable instance.
 		is_editable_instance = true;
+	}
+
+	// Save exposed children paths.
+	if (p_node != p_owner && p_node->is_exposed_to_owner() && p_node->get_owner() == p_owner) {
+		exposed_children.push_back(p_owner->get_path_to(p_node));
 	}
 
 	NodeData nd;
@@ -1442,6 +1455,7 @@ void SceneState::clear() {
 	node_path_cache.clear();
 	node_paths.clear();
 	editable_instances.clear();
+	exposed_children.clear();
 	ids.clear();
 	id_paths.clear();
 	base_scene_idx = -1;
@@ -1475,6 +1489,9 @@ Error SceneState::copy_from(const Ref<SceneState> &p_scene_state) {
 	}
 	for (const NodePath &E : p_scene_state->editable_instances) {
 		editable_instances.append(E);
+	}
+	for (const NodePath &E : p_scene_state->exposed_children) {
+		exposed_children.append(E);
 	}
 	base_scene_idx = p_scene_state->base_scene_idx;
 
@@ -1786,6 +1803,16 @@ void SceneState::set_bundled_scene(const Dictionary &p_dictionary) {
 		editable_instances.write[i] = ei[i];
 	}
 
+	Array ec;
+	if (p_dictionary.has("exposed_children")) {
+		ec = p_dictionary["exposed_children"];
+	}
+
+	exposed_children.resize(ec.size());
+	for (int i = 0; i < exposed_children.size(); i++) {
+		exposed_children.write[i] = ec[i];
+	}
+
 	//path=p_dictionary["path"];
 }
 
@@ -1872,6 +1899,14 @@ Dictionary SceneState::get_bundled_scene() const {
 		reditable_instances[i] = editable_instances[i];
 	}
 	d["editable_instances"] = reditable_instances;
+
+	Array rexposed_children;
+	rexposed_children.resize(exposed_children.size());
+	for (int i = 0; i < exposed_children.size(); i++) {
+		rexposed_children[i] = exposed_children[i];
+	}
+	d["exposed_children"] = rexposed_children;
+
 	if (base_scene_idx >= 0) {
 		d["base_scene"] = base_scene_idx;
 	}
@@ -2272,6 +2307,10 @@ Vector<NodePath> SceneState::get_editable_instances() const {
 	return editable_instances;
 }
 
+Vector<NodePath> SceneState::get_exposed_children() const {
+	return exposed_children;
+}
+
 Ref<Resource> SceneState::get_sub_resource(const String &p_path) {
 	for (const Variant &v : variants) {
 		const Ref<Resource> &res = v;
@@ -2373,6 +2412,10 @@ void SceneState::add_connection(int p_from, int p_to, int p_signal, int p_method
 
 void SceneState::add_editable_instance(const NodePath &p_path) {
 	editable_instances.push_back(p_path);
+}
+
+void SceneState::add_exposed_child(const NodePath &p_path) {
+	exposed_children.push_back(p_path);
 }
 
 bool SceneState::remove_group_references(const StringName &p_name) {

@@ -1566,6 +1566,31 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 				undo_redo->commit_action();
 			}
 		} break;
+		case TOOL_TOGGLE_EXPOSED_TO_OWNER: {
+			const List<Node *>::Element *first_selected = editor_selection->get_top_selected_node_list().front();
+			if (first_selected == nullptr) {
+				return;
+			}
+
+			List<Node *> full_selection = editor_selection->get_full_selected_node_list();
+			bool enabling = !first_selected->get()->is_exposed_to_owner();
+
+			EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+			undo_redo->create_action(enabling ? TTR("Enable Exposed to Owner") : TTR("Disable Exposed to Owner"));
+			for (Node *node : full_selection) {
+				if (node == EditorNode::get_singleton()->get_edited_scene()) {
+					continue;
+				}
+				if (node->get_owner() != get_tree()->get_edited_scene_root()) {
+					continue;
+				}
+				undo_redo->add_do_method(node, "set_exposed_to_owner", enabling);
+				undo_redo->add_undo_method(node, "set_exposed_to_owner", !enabling);
+			}
+			undo_redo->add_do_method(scene_tree, "update_tree");
+			undo_redo->add_undo_method(scene_tree, "update_tree");
+			undo_redo->commit_action();
+		} break;
 		case TOOL_CREATE_2D_SCENE:
 		case TOOL_CREATE_3D_SCENE:
 		case TOOL_CREATE_USER_INTERFACE:
@@ -4044,6 +4069,14 @@ void SceneTreeDock::_tree_rmb(const Vector2 &p_menu_pos) {
 			menu->add_icon_check_item(get_editor_theme_icon(SNAME("SceneUniqueName")), TTRC("Access as Unique Name"), TOOL_TOGGLE_SCENE_UNIQUE_NAME);
 			menu->set_item_shortcut(menu->get_item_index(TOOL_TOGGLE_SCENE_UNIQUE_NAME), ED_GET_SHORTCUT("scene_tree/toggle_unique_name"));
 			menu->set_item_checked(menu->get_item_index(TOOL_TOGGLE_SCENE_UNIQUE_NAME), node->is_unique_name_in_owner());
+		}
+		if (all_owned) {
+			Node *node = full_selection.front()->get();
+			// Don't show for root node — only non-root owned nodes can be exposed.
+			if (node != EditorNode::get_singleton()->get_edited_scene()) {
+				menu->add_check_item(TTR("Exposed to Owner"), TOOL_TOGGLE_EXPOSED_TO_OWNER);
+				menu->set_item_checked(menu->get_item_index(TOOL_TOGGLE_EXPOSED_TO_OWNER), node->is_exposed_to_owner());
+			}
 		}
 		END_SECTION()
 	}
