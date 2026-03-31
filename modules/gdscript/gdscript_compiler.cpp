@@ -2901,7 +2901,15 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 				prop_info.usage |= PROPERTY_USAGE_SCRIPT_VARIABLE;
 				minfo.property_info = prop_info;
 
-				if (variable->is_static) {
+				// Check if this is a linked (forwarded) property.
+				if (!variable->linked_node_path.is_empty()) {
+					GDScript::LinkedPropertyInfo linked_info;
+					linked_info.node_path = variable->linked_node_path;
+					linked_info.target_property = variable->linked_property;
+					linked_info.property_info = prop_info;
+					p_script->linked_properties[name] = linked_info;
+					p_script->members.insert(name);
+				} else if (variable->is_static) {
 					minfo.index = p_script->static_variables_indices.size();
 					p_script->static_variables_indices[name] = minfo;
 				} else {

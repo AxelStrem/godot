@@ -70,6 +70,12 @@ class GDScript : public Script {
 		PropertyInfo property_info;
 	};
 
+	struct LinkedPropertyInfo {
+		NodePath node_path;
+		StringName target_property;
+		PropertyInfo property_info; // Placeholder info; resolved at runtime from target.
+	};
+
 	struct ClearData {
 		RBSet<GDScriptFunction *> functions;
 		RBSet<Ref<Script>> scripts;
@@ -96,6 +102,8 @@ class GDScript : public Script {
 	// Members are just indices to the instantiated script.
 	HashMap<StringName, MemberInfo> member_indices; // Includes member info of all base GDScript classes.
 	HashSet<StringName> members; // Only members of the current class.
+
+	HashMap<StringName, LinkedPropertyInfo> linked_properties; // @export_linked forwarding.
 
 	// Only static variables of the current class.
 	HashMap<StringName, MemberInfo> static_variables_indices;
