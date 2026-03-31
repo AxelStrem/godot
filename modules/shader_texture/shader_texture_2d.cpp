@@ -31,6 +31,7 @@
 #include "shader_texture_2d.h"
 
 #include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
 #include "core/templates/list.h"
 #include "core/templates/local_vector.h"
 #include "core/templates/pair.h"
@@ -458,7 +459,7 @@ Ref<Image> ShaderTexture2D::_generate_image() {
 
 	RID viewport = rs->viewport_create();
 	rs->viewport_set_size(viewport, size.x, size.y);
-	rs->viewport_set_update_mode(viewport, RS::VIEWPORT_UPDATE_ONCE);
+	rs->viewport_set_update_mode(viewport, RSE::VIEWPORT_UPDATE_ONCE);
 	rs->viewport_set_use_hdr_2d(viewport, _needs_hdr_buffer());
 	rs->viewport_set_use_hdr_2d_full_precision(viewport, precision == PRECISION_FLOAT);
 	rs->viewport_set_transparent_background(viewport, true);

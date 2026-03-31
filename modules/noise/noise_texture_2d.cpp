@@ -113,7 +113,6 @@ void NoiseTexture2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_blur_strength"), &NoiseTexture2D::get_blur_strength);
 	ClassDB::bind_method(D_METHOD("set_image_format", "format"), &NoiseTexture2D::set_image_format);
 	ClassDB::bind_method(D_METHOD("get_image_format"), &NoiseTexture2D::get_image_format);
-	ClassDB::bind_method(D_METHOD("get_format"), &NoiseTexture2D::get_format);
 
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "width", PROPERTY_HINT_RANGE, "1,2048,1,or_greater,suffix:px"), "set_width", "get_width");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "height", PROPERTY_HINT_RANGE, "1,2048,1,or_greater,suffix:px"), "set_height", "get_height");

@@ -32,6 +32,7 @@
 
 #include "core/object/ref_counted.h"
 #include "core/templates/hash_map.h"
+#include "core/variant/type_info.h"
 
 class Tweak;
 class PropertyTweaker;

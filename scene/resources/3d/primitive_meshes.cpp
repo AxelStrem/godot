@@ -4068,14 +4068,14 @@ void Curve3DMesh::_create_mesh_array(Array &p_arr) const {
 		indices.push_back(0);
 	}
 
-	p_arr[RS::ARRAY_VERTEX] = points;
-	p_arr[RS::ARRAY_NORMAL] = normals;
-	p_arr[RS::ARRAY_TANGENT] = tangents;
-	p_arr[RS::ARRAY_TEX_UV] = uvs;
+	p_arr[RSE::ARRAY_VERTEX] = points;
+	p_arr[RSE::ARRAY_NORMAL] = normals;
+	p_arr[RSE::ARRAY_TANGENT] = tangents;
+	p_arr[RSE::ARRAY_TEX_UV] = uvs;
 	if (_add_uv2) {
-		p_arr[RS::ARRAY_TEX_UV2] = uv2s;
+		p_arr[RSE::ARRAY_TEX_UV2] = uv2s;
 	}
-	p_arr[RS::ARRAY_INDEX] = indices;
+	p_arr[RSE::ARRAY_INDEX] = indices;
 }
 
 
