@@ -153,6 +153,8 @@ GDScriptParser::GDScriptParser() {
 		register_annotation(MethodInfo("@abstract"), AnnotationInfo::SCRIPT | AnnotationInfo::CLASS | AnnotationInfo::FUNCTION, &GDScriptParser::abstract_annotation);
 		// Onready annotation.
 		register_annotation(MethodInfo("@onready"), AnnotationInfo::VARIABLE, &GDScriptParser::onready_annotation);
+		// Tweakable annotation.
+		register_annotation(MethodInfo("@tweakable"), AnnotationInfo::VARIABLE, &GDScriptParser::tweakable_annotation);
 		// Export annotations.
 		register_annotation(MethodInfo("@export"), AnnotationInfo::VARIABLE, &GDScriptParser::export_annotations<PROPERTY_HINT_NONE, Variant::NIL>);
 		register_annotation(MethodInfo("@export_enum", PropertyInfo(Variant::STRING, "names")), AnnotationInfo::VARIABLE, &GDScriptParser::export_annotations<PROPERTY_HINT_ENUM, Variant::NIL>, varray(), true);
@@ -4543,6 +4545,27 @@ bool GDScriptParser::onready_annotation(AnnotationNode *p_annotation, Node *p_ta
 	}
 	variable->onready = true;
 	current_class->onready_used = true;
+	return true;
+}
+
+bool GDScriptParser::tweakable_annotation(AnnotationNode *p_annotation, Node *p_target, ClassNode *p_class) {
+	ERR_FAIL_COND_V_MSG(p_target->type != Node::VARIABLE, false, R"("@tweakable" annotation can only be applied to class variables.)");
+
+	if (current_class && !ClassDB::is_parent_class(current_class->get_datatype().native_type, SNAME("Node"))) {
+		push_error(R"("@tweakable" can only be used in classes that inherit "Node".)", p_annotation);
+		return false;
+	}
+
+	VariableNode *variable = static_cast<VariableNode *>(p_target);
+	if (variable->is_static) {
+		push_error(R"("@tweakable" annotation cannot be applied to a static variable.)", p_annotation);
+		return false;
+	}
+	if (variable->tweakable) {
+		push_error(R"("@tweakable" annotation can only be used once per variable.)", p_annotation);
+		return false;
+	}
+	variable->tweakable = true;
 	return true;
 }
 

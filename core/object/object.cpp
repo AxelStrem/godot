@@ -384,6 +384,13 @@ Variant Object::get(const StringName &p_name, bool *r_valid) const {
 	}
 }
 
+Variant Object::get_base_value(const StringName &p_name) const {
+	if (object_tweaker) {
+		return object_tweaker->get_base_value(p_name);
+	}
+	return get(p_name);
+}
+
 void Object::set_indexed(const Vector<StringName> &p_names, const Variant &p_value, bool *r_valid) {
 	if (p_names.is_empty()) {
 		if (r_valid) {
@@ -1850,6 +1857,7 @@ void Object::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_indexed", "property_path", "value"), &Object::_set_indexed_bind);
 	ClassDB::bind_method(D_METHOD("get_indexed", "property_path"), &Object::_get_indexed_bind);
 	ClassDB::bind_method(D_METHOD("get_tweaked", "property", "add_to_base"), &Object::get_tweaked);
+	ClassDB::bind_method(D_METHOD("get_base_value", "property"), &Object::get_base_value);
 	ClassDB::bind_method(D_METHOD("get_property_list"), &Object::_get_property_list_bind);
 	ClassDB::bind_method(D_METHOD("get_method_list"), &Object::_get_method_list_bind);
 	ClassDB::bind_method(D_METHOD("property_can_revert", "property"), &Object::property_can_revert);

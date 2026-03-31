@@ -502,6 +502,8 @@ public:
 	virtual void write_get_named(const Address &p_target, const StringName &p_name, const Address &p_source) override;
 	virtual void write_set_member(const Address &p_value, const StringName &p_name) override;
 	virtual void write_get_member(const Address &p_target, const StringName &p_name) override;
+	virtual void write_set_tweakable_member(const Address &p_value, const StringName &p_name) override;
+	virtual void write_get_tweakable_member_base(const Address &p_target, const StringName &p_name) override;
 	virtual void write_set_static_variable(const Address &p_value, const Address &p_class, int p_index) override;
 	virtual void write_get_static_variable(const Address &p_target, const Address &p_class, int p_index) override;
 	virtual void write_assign(const Address &p_target, const Address &p_source) override;
