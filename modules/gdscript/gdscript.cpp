@@ -1541,6 +1541,22 @@ GDScript::~GDScript() {
 
 bool GDScriptInstance::set(const StringName &p_name, const Variant &p_value) {
 	{
+		HashMap<StringName, GDScript::LinkedPropertyInfo>::ConstIterator L = script->linked_properties.find(p_name);
+		if (L) {
+			Node *node = Object::cast_to<Node>(owner);
+			if (node) {
+				Node *target = node->get_node_or_null(L->value.node_path);
+				if (target) {
+					bool valid = false;
+					target->set(L->value.target_property, p_value, &valid);
+					return valid;
+				}
+			}
+			return false;
+		}
+	}
+
+	{
 		HashMap<StringName, GDScript::MemberInfo>::Iterator E = script->member_indices.find(p_name);
 		if (E) {
 			const GDScript::MemberInfo *member = &E->value;
@@ -1613,6 +1629,22 @@ bool GDScriptInstance::set(const StringName &p_name, const Variant &p_value) {
 }
 
 bool GDScriptInstance::get(const StringName &p_name, Variant &r_ret) const {
+	{
+		HashMap<StringName, GDScript::LinkedPropertyInfo>::ConstIterator L = script->linked_properties.find(p_name);
+		if (L) {
+			Node *node = Object::cast_to<Node>(owner);
+			if (node) {
+				Node *target = node->get_node_or_null(L->value.node_path);
+				if (target) {
+					bool valid = false;
+					r_ret = target->get(L->value.target_property, &valid);
+					return valid;
+				}
+			}
+			return false;
+		}
+	}
+
 	{
 		HashMap<StringName, GDScript::MemberInfo>::ConstIterator E = script->member_indices.find(p_name);
 		if (E) {
@@ -1797,6 +1829,37 @@ void GDScriptInstance::get_property_list(List<PropertyInfo> *p_properties) const
 		msort.reverse();
 		for (int i = 0; i < msort.size(); i++) {
 			props.push_front(sptr->member_indices[msort[i].name].property_info);
+		}
+
+		// Add linked (forwarded) properties with runtime-resolved PropertyInfo.
+		for (const KeyValue<StringName, GDScript::LinkedPropertyInfo> &F : sptr->linked_properties) {
+			if (!sptr->members.has(F.key)) {
+				continue; // Skip base class linked properties.
+			}
+			PropertyInfo pinfo;
+			pinfo.name = F.key;
+			pinfo.usage = PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_SCRIPT_VARIABLE;
+
+			// Try to resolve the actual PropertyInfo from the target node at runtime.
+			Node *node = Object::cast_to<Node>(owner);
+			if (node) {
+				Node *target = node->get_node_or_null(F.value.node_path);
+				if (target) {
+					List<PropertyInfo> target_props;
+					target->get_property_list(&target_props);
+					for (const PropertyInfo &tp : target_props) {
+						if (tp.name == F.value.target_property) {
+							pinfo.type = tp.type;
+							pinfo.hint = tp.hint;
+							pinfo.hint_string = tp.hint_string;
+							pinfo.class_name = tp.class_name;
+							pinfo.usage = tp.usage | PROPERTY_USAGE_SCRIPT_VARIABLE;
+							break;
+						}
+					}
+				}
+			}
+			props.push_back(pinfo);
 		}
 
 #ifdef TOOLS_ENABLED
