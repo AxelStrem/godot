@@ -1399,6 +1399,7 @@ RID TextureStorage::texture_create_from_native_handle(RSE::TextureType p_type, I
 
 		case Image::FORMAT_RGB8:
 			format = RD::DATA_FORMAT_R8G8B8_UNORM;
+			break;
 		case Image::FORMAT_L16:
 			format = RD::DATA_FORMAT_R16_UNORM;
 			break;
@@ -1413,7 +1414,6 @@ RID TextureStorage::texture_create_from_native_handle(RSE::TextureType p_type, I
 			break;
 		case Image::FORMAT_LF:
 			format = RD::DATA_FORMAT_R32_SFLOAT;
-			break;
 			break;
 
 		case Image::FORMAT_RGBA8:
