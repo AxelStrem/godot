@@ -43,6 +43,10 @@
 #include "servers/rendering/rendering_shader_container.h"
 #include "servers/rendering/shader_include_db.h"
 
+// DEBUG: track last submit caller for crash diagnosis
+static thread_local const char *_last_submit_caller = "unknown";
+const char *rd_get_last_submit_caller() { return _last_submit_caller; }
+
 #include "modules/modules_enabled.gen.h"
 
 #ifdef MODULE_GLSLANG_ENABLED
@@ -4767,6 +4771,7 @@ Error RenderingDevice::screen_prepare_for_drawing(DisplayServerEnums::WindowID p
 	while (to_present_index < frames[frame].swap_chains_to_present.size()) {
 		if (frames[frame].swap_chains_to_present[to_present_index] == it->value) {
 			driver->command_queue_execute_and_present(present_queue, {}, {}, {}, {}, it->value);
+		_last_submit_caller = "screen_prepare_present";
 			frames[frame].swap_chains_to_present.remove_at(to_present_index);
 		} else {
 			to_present_index++;
@@ -6590,6 +6595,7 @@ void RenderingDevice::_end_transfer_worker(TransferWorker *p_transfer_worker) {
 
 void RenderingDevice::_submit_transfer_worker(TransferWorker *p_transfer_worker, VectorView<RDD::SemaphoreID> p_signal_semaphores) {
 	driver->command_queue_execute_and_present(transfer_queue, {}, p_transfer_worker->command_buffer, p_signal_semaphores, p_transfer_worker->command_fence, {});
+	_last_submit_caller = "transfer_worker";
 
 	for (uint32_t i = 0; i < p_signal_semaphores.size(); i++) {
 		// Indicate the frame should wait on these semaphores before executing the main command buffer.
@@ -7447,6 +7453,11 @@ void RenderingDevice::execute_chained_cmds(bool p_present_swap_chain, RenderingD
 			// Semaphores always need to be signaled if it's not the last command buffer.
 		}
 
+		if (i == (command_buffer_count - 1)) {
+			_last_submit_caller = p_present_swap_chain ? "execute_chained_last+present" : "execute_chained_last";
+		} else {
+			_last_submit_caller = "execute_chained_mid";
+		}
 		driver->command_queue_execute_and_present(main_queue, wait_semaphores, command_buffer,
 				signal_semaphore ? signal_semaphore : VectorView<RDD::SemaphoreID>(), signal_fence,
 				swap_chains);
@@ -7480,6 +7491,7 @@ void RenderingDevice::_execute_frame(bool p_present) {
 		if (separate_present_queue) {
 			// Issue the presentation separately if the presentation queue is different from the main queue.
 			driver->command_queue_execute_and_present(present_queue, frames[frame].semaphore, {}, {}, {}, frames[frame].swap_chains_to_present);
+			_last_submit_caller = "separate_present_queue";
 		}
 
 		frames[frame].swap_chains_to_present.clear();
