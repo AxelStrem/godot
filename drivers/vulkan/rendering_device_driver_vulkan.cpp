@@ -33,12 +33,8 @@
 #include "core/config/engine.h"
 #include "core/config/project_settings.h"
 #include "core/os/os.h"
-#include "core/os/thread.h"
 #include "core/templates/fixed_vector.h"
 #include "drivers/vulkan/vulkan_hooks.h"
-
-// DEBUG: defined in rendering_device.cpp
-extern const char *rd_get_last_submit_caller();
 
 #include <thirdparty/misc/smolv.h>
 
@@ -3102,8 +3098,6 @@ RDD::CommandQueueID RenderingDeviceDriverVulkan::command_queue_create(CommandQue
 }
 
 Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueueID p_cmd_queue, VectorView<SemaphoreID> p_wait_semaphores, VectorView<CommandBufferID> p_cmd_buffers, VectorView<SemaphoreID> p_cmd_semaphores, FenceID p_cmd_fence, VectorView<SwapChainID> p_swap_chains) {
-	static thread_local uint64_t tl_submit_counter = 0;
-	uint64_t this_submit = tl_submit_counter++;
 	DEV_ASSERT(p_cmd_queue.id != 0);
 
 	VkResult err;
@@ -3180,41 +3174,10 @@ Error RenderingDeviceDriverVulkan::command_queue_execute_and_present(CommandQueu
 		submit_info.pSignalSemaphores = signal_semaphores.ptr();
 
 		device_queue.submit_mutex.lock();
-
-		// DEBUG: ring buffer of last submits for crash diagnosis
-		struct SubmitRecord {
-			uint64_t id;
-			int cmd_bufs;
-			int swap_chains;
-			int has_fence;
-			const char *caller;
-		};
-		static thread_local SubmitRecord submit_history[16] = {};
-		static thread_local int submit_history_idx = 0;
-		{
-			SubmitRecord &rec = submit_history[submit_history_idx % 16];
-			rec.id = this_submit;
-			rec.cmd_bufs = (int)p_cmd_buffers.size();
-			rec.swap_chains = (int)p_swap_chains.size();
-			rec.has_fence = vk_fence != VK_NULL_HANDLE ? 1 : 0;
-			rec.caller = rd_get_last_submit_caller();
-			submit_history_idx++;
-		}
-
 		err = vkQueueSubmit(device_queue.queue, 1, &submit_info, vk_fence);
 		device_queue.submit_mutex.unlock();
 
 		if (err == VK_ERROR_DEVICE_LOST) {
-			print_line("=== VK_ERROR_DEVICE_LOST - Last 16 submits ===");
-			for (int hi = 0; hi < 16; hi++) {
-				int idx = (submit_history_idx - 16 + hi + 16) % 16;
-				const SubmitRecord &rec = submit_history[idx];
-				if (rec.id == 0 && hi < 15) {
-					continue;
-				}
-				print_line(vformat("  Submit #%d: cmd_bufs=%d swap=%d fence=%d caller=%s", rec.id, rec.cmd_bufs, rec.swap_chains, rec.has_fence, rec.caller ? rec.caller : "null"));
-			}
-			print_line(vformat("VK_ERROR_DEVICE_LOST at submit #%d (cmd_buffers=%d, swap_chains=%d, thread=%d, caller=%s)", this_submit, (int)p_cmd_buffers.size(), (int)p_swap_chains.size(), (int)Thread::get_caller_id(), rd_get_last_submit_caller()));
 			print_lost_device_info();
 			CRASH_NOW_MSG("Vulkan device was lost.");
 		}
@@ -6908,22 +6871,9 @@ void RenderingDeviceDriverVulkan::on_device_lost() const {
 		return;
 	}
 
-	// Guard against driver crashes when querying fault info on a lost device.
-	// Some NVIDIA drivers crash inside GetDeviceFaultInfoEXT after device loss.
 	VkDeviceFaultCountsEXT fault_counts = {};
 	fault_counts.sType = VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT;
-	VkResult vkres = VK_ERROR_DEVICE_LOST;
-
-#ifdef _MSC_VER
-	__try {
-		vkres = device_functions.GetDeviceFaultInfoEXT(vk_device, &fault_counts, nullptr);
-	} __except (1 /* EXCEPTION_EXECUTE_HANDLER */) {
-		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "GetDeviceFaultInfoEXT crashed (SEH exception). Driver is unable to provide fault info after device loss.");
-		return;
-	}
-#else
-	vkres = device_functions.GetDeviceFaultInfoEXT(vk_device, &fault_counts, nullptr);
-#endif
+	VkResult vkres = device_functions.GetDeviceFaultInfoEXT(vk_device, &fault_counts, nullptr);
 
 	if (vkres != VK_SUCCESS) {
 		_err_print_error(FUNCTION_STR, __FILE__, __LINE__, "vkGetDeviceFaultInfoEXT returned " + itos(vkres) + " when getting fault count, skipping VK_EXT_device_fault report...");
