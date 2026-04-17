@@ -846,7 +846,7 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 					for (int ep = 0; ep < excluded_paths.size(); ++ep) {
 						String node_path_str = String(node_path);
 						String excluded_path_str = String(excluded_paths[ep]);
-						if (node_path_str.begins_with(excluded_path_str)) {
+						if (node_path_str == excluded_path_str || node_path_str.begins_with(excluded_path_str + "/")) {
 							skip_node.write[idx] = true;
 							break;
 						}
