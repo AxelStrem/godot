@@ -222,7 +222,7 @@ String SceneState::build_node_path(int node_idx, const Vector<NodeData> &nodes_,
 	
 	// For NodePath-based parents, we can directly construct the path
 	int parent_raw = nodes_[node_idx].parent;
-	if (parent_raw & FLAG_ID_IS_PATH) {
+	if (parent_raw != -1 && (parent_raw & FLAG_ID_IS_PATH)) {
 		NodePath parent_path = node_paths_[parent_raw & FLAG_MASK];
 		String parent_path_str = String(parent_path);
 		if (parent_path_str == ".") {
@@ -240,6 +240,9 @@ String SceneState::build_node_path(int node_idx, const Vector<NodeData> &nodes_,
 		path_parts.push_back(String(snames[nodes_[current_idx].name]));
 		
 		int parent_raw_local = nodes_[current_idx].parent;
+		if (parent_raw_local == -1) {
+			break;
+		}
 		if (parent_raw_local & FLAG_ID_IS_PATH) {
 			// We've hit a NodePath parent, stop here
 			break;
@@ -833,8 +836,9 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 							node_path = NodePath(String(node_path) + "/" + String(snames[nodes[idx].name]));
 						} else {
 							NodePath parent_path;
-							if (nodes[nodes[idx].parent].parent & FLAG_ID_IS_PATH) {
-								parent_path = node_paths[nodes[nodes[idx].parent].parent & FLAG_MASK];
+							int grandparent = nodes[nodes[idx].parent].parent;
+							if (grandparent != -1 && (grandparent & FLAG_ID_IS_PATH)) {
+								parent_path = node_paths[grandparent & FLAG_MASK];
 							} else {
 								parent_path = NodePath(String(snames[nodes[nodes[idx].parent].name]));
 							}
