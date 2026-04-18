@@ -441,7 +441,7 @@ protected:
 
 	GDVIRTUAL0RC(RID, _get_focused_accessibility_element)
 
-	GDVIRTUAL1RC(Array, _filter_scene_children, Array)
+	//GDVIRTUAL1RC(Array, _filter_scene_children, Array)
 
 #ifndef DISABLE_DEPRECATED
 	void _set_name_bind_compat_76560(const String &p_name);

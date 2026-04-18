@@ -729,7 +729,7 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 			// BEGIN procedural child filtering logic
 			// Only run if node is valid, and not in editor
 
-			if (!Engine::get_singleton()->is_editor_hint() && node && node->get_script_instance() && node->get_script_instance()->has_method("_filter_scene_children")) {
+			if (!Engine::get_singleton()->is_editor_hint() && node && node->has_method("_filter_scene_children")) {
 				Array child_infos;
 				Vector<int> child_node_indices; // Track which node indices are children
 				for (int child_idx = 0; child_idx < nc; ++child_idx) {
