@@ -726,6 +726,9 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 				node->remove_meta("_edit_pinned_properties_");
 			}
 
+			// Set ret_nodes[i] before filter logic so child-finding can resolve parents via NODE_FROM_ID
+			ret_nodes[i] = node;
+
 			// BEGIN procedural child filtering logic
 			// Only run if node is valid, and not in editor
 
@@ -763,7 +766,9 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 						child_node_indices.push_back(child_idx);
 					}
 				}
+
 				Variant filter_result = node->call("_filter_scene_children", child_infos);
+
 				Array filtered_infos;
 				if (filter_result.get_type() == Variant::ARRAY) {
 					filtered_infos = filter_result;
@@ -965,8 +970,6 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 		if (missing_node) {
 			missing_node->set_recording_properties(false);
 		}
-
-		ret_nodes[i] = node;
 
 		// Handle descendant duplication - create additional instances for children of duplicated nodes
 		if (!Engine::get_singleton()->is_editor_hint() && node && descendant_of_duplicate.has(i)) {
