@@ -338,7 +338,9 @@ struct LightData { // This structure needs to be as packed as possible.
 	mediump float specular_amount;
 	mediump float shadow_opacity;
 
-	lowp vec3 pad;
+	mediump float spread_cos_angle;
+	mediump float spread_attenuation;
+	mediump float spread_bleed;
 	lowp uint bake_mode;
 
 	mediump vec4 area_width;
@@ -1296,7 +1298,9 @@ struct LightData { // This structure needs to be as packed as possible.
 	mediump float specular_amount;
 	mediump float shadow_opacity;
 
-	lowp vec3 pad;
+	mediump float spread_cos_angle;
+	mediump float spread_attenuation;
+	mediump float spread_bleed;
 	lowp uint bake_mode;
 
 	mediump vec4 area_width;
@@ -1807,7 +1811,36 @@ void light_process_area(uint idx, vec3 vertex, vec3 eye_vec, vec3 normal, vec3 f
 	float b_half_len = b_len / 2.0;
 	vec3 light_center = area_lights[idx].position;
 	vec3 light_to_vert = vertex - light_center;
-	vec3 pos_local_to_light = vec3(dot(light_to_vert, normalize(area_width)), dot(light_to_vert, normalize(area_height)), dot(light_to_vert, -area_direction));
+	vec3 area_a_dir = normalize(area_width);
+	vec3 area_b_dir = normalize(area_height);
+	vec3 pos_local_to_light = vec3(dot(light_to_vert, area_a_dir), dot(light_to_vert, area_b_dir), dot(light_to_vert, -area_direction));
+
+	// Spread attenuation: frustum-shaped falloff beyond the rectangle's edge.
+	float spread_cos = area_lights[idx].spread_cos_angle;
+	float spread_bleed = area_lights[idx].spread_bleed;
+	float spread_atten = 1.0;
+	if (spread_cos > 1e-4) {
+		float depth = -pos_local_to_light.z; // positive depth in front of light
+		float tan_spread = sqrt(1.0 - spread_cos * spread_cos) / spread_cos;
+		float spread_extent = depth * tan_spread;
+
+		// Distance beyond rectangle edge in each axis (world space).
+		float dx = max(abs(pos_local_to_light.x) - a_half_len, 0.0);
+		float dy = max(abs(pos_local_to_light.y) - b_half_len, 0.0);
+
+		// Euclidean distance from edge, normalized by spread extent.
+		float edge_dist = sqrt(dx * dx + dy * dy) / max(spread_extent, 1e-6);
+		if (edge_dist >= 1.0) {
+			if (spread_bleed > 0.0) {
+				spread_atten = spread_bleed;
+			} else {
+				return; // outside the spread region, no bleed
+			}
+		} else if (edge_dist > 0.0) {
+			float falloff = 1.0 - pow(edge_dist, area_lights[idx].spread_attenuation);
+			spread_atten = mix(spread_bleed, 1.0, falloff);
+		}
+	}
 
 	vec3 closest_point_local_to_light = vec3(clamp(pos_local_to_light.x, -a_half_len, a_half_len), clamp(pos_local_to_light.y, -b_half_len, b_half_len), 0);
 	float dist = length(closest_point_local_to_light - pos_local_to_light);
@@ -1831,6 +1864,7 @@ void light_process_area(uint idx, vec3 vertex, vec3 eye_vec, vec3 normal, vec3 f
 
 	float light_length = max(0.0, dist);
 	float light_attenuation_raw = get_omni_spot_attenuation(light_length, area_lights[idx].inv_radius, area_lights[idx].attenuation);
+	light_attenuation_raw *= spread_atten;
 	float light_attenuation_ltc = light_attenuation_raw * light_length * light_length; // solid angle already decreases by inverse square, so attenuation power is 2.0 by default -> subtract 2.0
 
 	vec3 light_color = area_lights[idx].color;

@@ -83,6 +83,12 @@ public:
 	virtual bool light_area_get_normalize_energy(RID p_light) const = 0;
 	virtual void light_area_set_texture(RID p_light, RID p_texture) = 0;
 	virtual RID light_area_get_texture(RID p_light) const = 0;
+	virtual void light_area_set_spread_angle(RID p_light, float p_angle) = 0;
+	virtual float light_area_get_spread_angle(RID p_light) const = 0;
+	virtual void light_area_set_spread_attenuation(RID p_light, float p_attenuation) = 0;
+	virtual float light_area_get_spread_attenuation(RID p_light) const = 0;
+	virtual void light_area_set_spread_bleed(RID p_light, float p_bleed) = 0;
+	virtual float light_area_get_spread_bleed(RID p_light) const = 0;
 
 	virtual bool light_has_shadow(RID p_light) const = 0;
 

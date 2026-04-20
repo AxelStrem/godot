@@ -245,6 +245,9 @@ private:
 	Vector2 area_size;
 	Ref<Texture2D> area_texture;
 	bool area_normalize_energy = true;
+	float area_spread_angle = 180.0f;
+	float area_spread_attenuation = 1.0f;
+	float area_spread_bleed = 0.0f;
 
 protected:
 	static void _bind_methods();
@@ -258,6 +261,15 @@ public:
 
 	void set_area_normalize_energy(bool p_enable);
 	bool is_area_normalizing_energy() const;
+
+	void set_area_spread_angle(float p_angle);
+	float get_area_spread_angle() const;
+
+	void set_area_spread_attenuation(float p_attenuation);
+	float get_area_spread_attenuation() const;
+
+	void set_area_spread_bleed(float p_bleed);
+	float get_area_spread_bleed() const;
 
 	PackedStringArray get_configuration_warnings() const override;
 

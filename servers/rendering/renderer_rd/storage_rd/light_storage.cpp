@@ -477,6 +477,39 @@ RID LightStorage::light_area_get_texture(RID p_light) const {
 	return light->area_texture;
 }
 
+void LightStorage::light_area_set_spread_angle(RID p_light, float p_angle) {
+	Light *light = light_owner.get_or_null(p_light);
+	light->area_spread_angle = CLAMP(p_angle, 0.0f, 180.0f);
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+float LightStorage::light_area_get_spread_angle(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	return light->area_spread_angle;
+}
+
+void LightStorage::light_area_set_spread_attenuation(RID p_light, float p_attenuation) {
+	Light *light = light_owner.get_or_null(p_light);
+	light->area_spread_attenuation = p_attenuation;
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+float LightStorage::light_area_get_spread_attenuation(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	return light->area_spread_attenuation;
+}
+
+void LightStorage::light_area_set_spread_bleed(RID p_light, float p_bleed) {
+	Light *light = light_owner.get_or_null(p_light);
+	light->area_spread_bleed = CLAMP(p_bleed, 0.0f, 1.0f);
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+float LightStorage::light_area_get_spread_bleed(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	return light->area_spread_bleed;
+}
+
 uint32_t LightStorage::light_get_max_sdfgi_cascade(RID p_light) {
 	const Light *light = light_owner.get_or_null(p_light);
 	ERR_FAIL_NULL_V(light, 0);
@@ -1098,6 +1131,10 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 				light_data.color[1] /= surface_area;
 				light_data.color[2] /= surface_area;
 			}
+
+			light_data.spread_cos_angle = Math::cos(Math::deg_to_rad(light->area_spread_angle * 0.5f));
+			light_data.spread_attenuation = 1.0f / light->area_spread_attenuation;
+			light_data.spread_bleed = light->area_spread_bleed;
 		}
 		light_data.mask = light->cull_mask;
 
