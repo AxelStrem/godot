@@ -1122,7 +1122,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 			}
 
 			light_data.spread_cos_angle = Math::cos(Math::deg_to_rad(light->area_spread_angle * 0.5f));
-			light_data.spread_attenuation = light->area_spread_attenuation;
+			light_data.spread_attenuation = 1.0f / light->area_spread_attenuation;
 		}
 		light_data.mask = light->cull_mask;
 

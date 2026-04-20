@@ -1821,23 +1821,19 @@ void light_process_area(uint idx, vec3 vertex, vec3 eye_vec, vec3 normal, vec3 f
 	if (spread_cos > 1e-4) {
 		float depth = -pos_local_to_light.z; // positive depth in front of light
 		float tan_spread = sqrt(1.0 - spread_cos * spread_cos) / spread_cos;
-		float spread_extent = max(depth * tan_spread, 1e-6);
+		float spread_extent = depth * tan_spread;
 
-		// Distance beyond rectangle edge in each axis, normalized by spread extent.
-		float nx = max(abs(pos_local_to_light.x) - a_half_len, 0.0) / spread_extent;
-		float ny = max(abs(pos_local_to_light.y) - b_half_len, 0.0) / spread_extent;
+		// Distance beyond rectangle edge in each axis (world space).
+		float dx = max(abs(pos_local_to_light.x) - a_half_len, 0.0);
+		float dy = max(abs(pos_local_to_light.y) - b_half_len, 0.0);
 
-		// Outside the spread frustum on either axis.
-		if (nx >= 1.0 || ny >= 1.0) {
-			return;
+		// Euclidean distance from edge, normalized by spread extent.
+		float edge_dist = sqrt(dx * dx + dy * dy) / max(spread_extent, 1e-6);
+		if (edge_dist >= 1.0) {
+			return; // outside the spread region
 		}
-		// Per-axis attenuation, combined multiplicatively for rectangular shape.
-		if (nx > 0.0 || ny > 0.0) {
-			float exp_val = max(area_lights[idx].spread_attenuation, 1e-4);
-			if (exp_val < 1e-3) {
-				return; // attenuation ~0: no spread visible
-			}
-			spread_atten = (1.0 - pow(nx, exp_val)) * (1.0 - pow(ny, exp_val));
+		if (edge_dist > 0.0) {
+			spread_atten = 1.0 - pow(edge_dist, area_lights[idx].spread_attenuation);
 		}
 	}
 
