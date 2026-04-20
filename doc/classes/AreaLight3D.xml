@@ -27,6 +27,14 @@
 		<member name="area_size" type="Vector2" setter="set_area_size" getter="get_area_size" default="Vector2(1, 1)">
 			The extents (width and height) of the area in meters.
 		</member>
+		<member name="area_spread_angle" type="float" setter="set_area_spread_angle" getter="get_area_spread_angle" default="180.0">
+			Controls the angular spread of the area light's emission, in degrees. At [code]180[/code] (the default), the light emits over the full forward hemisphere. Lower values restrict emission to a pyramidal (for rectangular areas) or conical shape, as if the light source were recessed behind the emitting surface. A value of [code]90[/code] restricts emission to a 90-degree cone, and so on.
+			This can be used to simulate indented or recessed light fixtures where the housing blocks light at wide angles.
+		</member>
+		<member name="area_spread_attenuation" type="float" setter="set_area_spread_attenuation" getter="get_area_spread_attenuation" default="1.0">
+			Controls the falloff curve at the edges of the spread cone. A value of [code]1.0[/code] produces a linear falloff. Higher values make the transition softer, while lower values make it sharper.
+			This property has no effect when [member area_spread_angle] is [code]180[/code].
+		</member>
 		<member name="area_texture" type="Texture2D" setter="set_area_texture" getter="get_area_texture">
 			An optional texture to use as a light source. Changing the texture at runtime might impact performance, as it needs to be drawn to the area light atlas with filtered mipmaps.
 			If no texture is assigned, the area light emits uniform light across its surface.

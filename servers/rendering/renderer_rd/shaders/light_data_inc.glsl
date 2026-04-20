@@ -20,7 +20,8 @@ struct LightData { //this structure needs to be as packed as possible
 
 	float specular_amount;
 	float shadow_opacity;
-	float pad[2];
+	float spread_cos_angle; // area lights: cosine of half spread angle
+	float spread_attenuation; // area lights: falloff exponent for spread cone
 
 	vec4 atlas_rect; // rect in the shadow atlas
 	mat4 shadow_matrix;

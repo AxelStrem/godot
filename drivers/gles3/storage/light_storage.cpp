@@ -369,6 +369,28 @@ RID LightStorage::light_area_get_texture(RID p_light) const {
 	return RID(); // not implemented
 }
 
+void LightStorage::light_area_set_spread_angle(RID p_light, float p_angle) {
+	Light *light = light_owner.get_or_null(p_light);
+	light->area_spread_angle = CLAMP(p_angle, 0.0f, 180.0f);
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+float LightStorage::light_area_get_spread_angle(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	return light->area_spread_angle;
+}
+
+void LightStorage::light_area_set_spread_attenuation(RID p_light, float p_attenuation) {
+	Light *light = light_owner.get_or_null(p_light);
+	light->area_spread_attenuation = p_attenuation;
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+float LightStorage::light_area_get_spread_attenuation(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	return light->area_spread_attenuation;
+}
+
 RSE::LightBakeMode LightStorage::light_get_bake_mode(RID p_light) {
 	const Light *light = light_owner.get_or_null(p_light);
 	ERR_FAIL_NULL_V(light, RSE::LIGHT_BAKE_DISABLED);

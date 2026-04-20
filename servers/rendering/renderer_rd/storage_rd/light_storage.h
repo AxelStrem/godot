@@ -81,6 +81,8 @@ private:
 		Vector2 area_size = Vector2(1, 1);
 		bool area_normalize_energy = true;
 		RID area_texture;
+		float area_spread_angle = 180.0f;
+		float area_spread_attenuation = 1.0f;
 		uint64_t version = 0;
 
 		Dependency dependency;
@@ -154,7 +156,8 @@ private:
 		float specular_amount;
 		float shadow_opacity;
 
-		float pad[2];
+		float spread_cos_angle;
+		float spread_attenuation;
 		float atlas_rect[4]; // in omni, used for atlas uv, in spot, used for projector uv
 		float shadow_matrix[16];
 		float shadow_bias;
@@ -530,6 +533,10 @@ public:
 	virtual bool light_area_get_normalize_energy(RID p_light) const override;
 	virtual void light_area_set_texture(RID p_light, RID p_texture) override;
 	virtual RID light_area_get_texture(RID p_light) const override;
+	virtual void light_area_set_spread_angle(RID p_light, float p_angle) override;
+	virtual float light_area_get_spread_angle(RID p_light) const override;
+	virtual void light_area_set_spread_attenuation(RID p_light, float p_attenuation) override;
+	virtual float light_area_get_spread_attenuation(RID p_light) const override;
 
 	virtual RSE::LightType light_get_type(RID p_light) const override {
 		const Light *light = light_owner.get_or_null(p_light);

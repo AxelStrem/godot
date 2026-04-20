@@ -2047,6 +2047,9 @@ void RasterizerSceneGLES3::_setup_lights(const RenderDataGLES3 *p_render_data, b
 				light_data.color[1] /= surface_area;
 				light_data.color[2] /= surface_area;
 			}
+
+			light_data.spread_cos_angle = Math::cos(Math::deg_to_rad(light->area_spread_angle * 0.5f));
+			light_data.spread_attenuation = light->area_spread_attenuation;
 		}
 
 		// Setup shadows

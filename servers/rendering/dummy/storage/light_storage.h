@@ -102,6 +102,10 @@ public:
 	virtual bool light_area_get_normalize_energy(RID p_light) const override { return true; }
 	virtual void light_area_set_texture(RID p_light, RID p_texture) override {}
 	virtual RID light_area_get_texture(RID p_light) const override { return RID(); }
+	virtual void light_area_set_spread_angle(RID p_light, float p_angle) override {}
+	virtual float light_area_get_spread_angle(RID p_light) const override { return 180.0f; }
+	virtual void light_area_set_spread_attenuation(RID p_light, float p_attenuation) override {}
+	virtual float light_area_get_spread_attenuation(RID p_light) const override { return 1.0f; }
 
 	virtual bool light_has_shadow(RID p_light) const override { return false; }
 	virtual bool light_has_projector(RID p_light) const override { return false; }
