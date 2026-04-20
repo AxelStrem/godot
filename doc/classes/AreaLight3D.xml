@@ -35,6 +35,10 @@
 			Controls the falloff curve at the edges of the spread cone. A value of [code]1.0[/code] produces a linear falloff. Higher values make the transition softer, while lower values make it sharper.
 			This property has no effect when [member area_spread_angle] is [code]180[/code].
 		</member>
+		<member name="area_spread_bleed" type="float" setter="set_area_spread_bleed" getter="get_area_spread_bleed" default="0.0">
+			Controls the minimum light intensity outside the spread shape, simulating light that bleeds past the housing of a recessed fixture. At [code]0.0[/code] (the default), no light escapes beyond the spread region. At [code]1.0[/code], the full light intensity is present everywhere, effectively disabling the spread mask. Intermediate values produce a dimmer "ambient" light outside the direct cone while keeping full brightness inside.
+			This property has no effect when [member area_spread_angle] is [code]180[/code].
+		</member>
 		<member name="area_texture" type="Texture2D" setter="set_area_texture" getter="get_area_texture">
 			An optional texture to use as a light source. Changing the texture at runtime might impact performance, as it needs to be drawn to the area light atlas with filtered mipmaps.
 			If no texture is assigned, the area light emits uniform light across its surface.

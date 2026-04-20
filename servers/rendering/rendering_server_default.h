@@ -506,6 +506,7 @@ public:
 	FUNC2(light_area_set_texture, RID, RID)
 	FUNC2(light_area_set_spread_angle, RID, float)
 	FUNC2(light_area_set_spread_attenuation, RID, float)
+	FUNC2(light_area_set_spread_bleed, RID, float)
 
 	/* PROBE API */
 

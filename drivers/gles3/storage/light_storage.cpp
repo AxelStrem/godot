@@ -391,6 +391,17 @@ float LightStorage::light_area_get_spread_attenuation(RID p_light) const {
 	return light->area_spread_attenuation;
 }
 
+void LightStorage::light_area_set_spread_bleed(RID p_light, float p_bleed) {
+	Light *light = light_owner.get_or_null(p_light);
+	light->area_spread_bleed = CLAMP(p_bleed, 0.0f, 1.0f);
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+float LightStorage::light_area_get_spread_bleed(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	return light->area_spread_bleed;
+}
+
 RSE::LightBakeMode LightStorage::light_get_bake_mode(RID p_light) {
 	const Light *light = light_owner.get_or_null(p_light);
 	ERR_FAIL_NULL_V(light, RSE::LIGHT_BAKE_DISABLED);

@@ -106,6 +106,8 @@ public:
 	virtual float light_area_get_spread_angle(RID p_light) const override { return 180.0f; }
 	virtual void light_area_set_spread_attenuation(RID p_light, float p_attenuation) override {}
 	virtual float light_area_get_spread_attenuation(RID p_light) const override { return 1.0f; }
+	virtual void light_area_set_spread_bleed(RID p_light, float p_bleed) override {}
+	virtual float light_area_get_spread_bleed(RID p_light) const override { return 0.0f; }
 
 	virtual bool light_has_shadow(RID p_light) const override { return false; }
 	virtual bool light_has_projector(RID p_light) const override { return false; }

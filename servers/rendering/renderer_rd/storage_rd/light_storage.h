@@ -83,6 +83,7 @@ private:
 		RID area_texture;
 		float area_spread_angle = 180.0f;
 		float area_spread_attenuation = 1.0f;
+		float area_spread_bleed = 0.0f;
 		uint64_t version = 0;
 
 		Dependency dependency;
@@ -158,6 +159,12 @@ private:
 
 		float spread_cos_angle;
 		float spread_attenuation;
+
+		float spread_bleed;
+		float pad0;
+		float pad1;
+		float pad2;
+
 		float atlas_rect[4]; // in omni, used for atlas uv, in spot, used for projector uv
 		float shadow_matrix[16];
 		float shadow_bias;
@@ -537,6 +544,8 @@ public:
 	virtual float light_area_get_spread_angle(RID p_light) const override;
 	virtual void light_area_set_spread_attenuation(RID p_light, float p_attenuation) override;
 	virtual float light_area_get_spread_attenuation(RID p_light) const override;
+	virtual void light_area_set_spread_bleed(RID p_light, float p_bleed) override;
+	virtual float light_area_get_spread_bleed(RID p_light) const override;
 
 	virtual RSE::LightType light_get_type(RID p_light) const override {
 		const Light *light = light_owner.get_or_null(p_light);

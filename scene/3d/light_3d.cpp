@@ -758,6 +758,15 @@ float AreaLight3D::get_area_spread_attenuation() const {
 	return area_spread_attenuation;
 }
 
+void AreaLight3D::set_area_spread_bleed(float p_bleed) {
+	area_spread_bleed = CLAMP(p_bleed, 0.0f, 1.0f);
+	RS::get_singleton()->light_area_set_spread_bleed(light, area_spread_bleed);
+}
+
+float AreaLight3D::get_area_spread_bleed() const {
+	return area_spread_bleed;
+}
+
 AreaLight3D::AreaLight3D() :
 		Light3D(RSE::LIGHT_AREA) {
 	// Decrease the default shadow bias to better suit most scenes.
@@ -784,6 +793,9 @@ void AreaLight3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_area_spread_attenuation", "attenuation"), &AreaLight3D::set_area_spread_attenuation);
 	ClassDB::bind_method(D_METHOD("get_area_spread_attenuation"), &AreaLight3D::get_area_spread_attenuation);
 
+	ClassDB::bind_method(D_METHOD("set_area_spread_bleed", "bleed"), &AreaLight3D::set_area_spread_bleed);
+	ClassDB::bind_method(D_METHOD("get_area_spread_bleed"), &AreaLight3D::get_area_spread_bleed);
+
 	ADD_GROUP("Area", "area_");
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "area_range", PROPERTY_HINT_RANGE, "0,4096,0.001,or_greater,exp,suffix:m"), "set_param", "get_param", PARAM_RANGE);
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "area_attenuation", PROPERTY_HINT_RANGE, "-10,10,0.001,or_greater,or_less"), "set_param", "get_param", PARAM_ATTENUATION);
@@ -792,6 +804,7 @@ void AreaLight3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "area_texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D,-AnimatedTexture,-AtlasTexture,-CameraTexture,-CanvasTexture,-MeshTexture,-Texture2DRD,-ViewportTexture"), "set_area_texture", "get_area_texture");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "area_spread_angle", PROPERTY_HINT_RANGE, "0,180,0.01,degrees"), "set_area_spread_angle", "get_area_spread_angle");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "area_spread_attenuation", PROPERTY_HINT_EXP_EASING, "attenuation"), "set_area_spread_attenuation", "get_area_spread_attenuation");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "area_spread_bleed", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_area_spread_bleed", "get_area_spread_bleed");
 }
 
 PackedStringArray AreaLight3D::get_configuration_warnings() const {

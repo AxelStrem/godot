@@ -340,7 +340,7 @@ struct LightData { // This structure needs to be as packed as possible.
 
 	mediump float spread_cos_angle;
 	mediump float spread_attenuation;
-	lowp float pad;
+	mediump float spread_bleed;
 	lowp uint bake_mode;
 
 	mediump vec4 area_width;
@@ -1300,7 +1300,7 @@ struct LightData { // This structure needs to be as packed as possible.
 
 	mediump float spread_cos_angle;
 	mediump float spread_attenuation;
-	lowp float pad;
+	mediump float spread_bleed;
 	lowp uint bake_mode;
 
 	mediump vec4 area_width;
@@ -1817,6 +1817,7 @@ void light_process_area(uint idx, vec3 vertex, vec3 eye_vec, vec3 normal, vec3 f
 
 	// Spread attenuation: frustum-shaped falloff beyond the rectangle's edge.
 	float spread_cos = area_lights[idx].spread_cos_angle;
+	float spread_bleed = area_lights[idx].spread_bleed;
 	float spread_atten = 1.0;
 	if (spread_cos > 1e-4) {
 		float depth = -pos_local_to_light.z; // positive depth in front of light
@@ -1830,10 +1831,14 @@ void light_process_area(uint idx, vec3 vertex, vec3 eye_vec, vec3 normal, vec3 f
 		// Euclidean distance from edge, normalized by spread extent.
 		float edge_dist = sqrt(dx * dx + dy * dy) / max(spread_extent, 1e-6);
 		if (edge_dist >= 1.0) {
-			return; // outside the spread region
-		}
-		if (edge_dist > 0.0) {
-			spread_atten = 1.0 - pow(edge_dist, area_lights[idx].spread_attenuation);
+			if (spread_bleed > 0.0) {
+				spread_atten = spread_bleed;
+			} else {
+				return; // outside the spread region, no bleed
+			}
+		} else if (edge_dist > 0.0) {
+			float falloff = 1.0 - pow(edge_dist, area_lights[idx].spread_attenuation);
+			spread_atten = mix(spread_bleed, 1.0, falloff);
 		}
 	}
 

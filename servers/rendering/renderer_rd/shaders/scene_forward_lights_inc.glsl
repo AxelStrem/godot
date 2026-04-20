@@ -999,6 +999,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 
 	// Spread attenuation: frustum-shaped falloff beyond the rectangle's edge.
 	half spread_cos = half(area_lights.data[idx].spread_cos_angle);
+	half spread_bleed = half(area_lights.data[idx].spread_bleed);
 	half spread_atten = half(1.0);
 	if (spread_cos > half(1e-4)) {
 		half depth = -pos_local_to_light.z; // positive depth in front of light
@@ -1012,10 +1013,14 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		// Euclidean distance from edge, normalized by spread extent.
 		half edge_dist = sqrt(dx * dx + dy * dy) / max(spread_extent, half(1e-6));
 		if (edge_dist >= half(1.0)) {
-			return; // outside the spread region
-		}
-		if (edge_dist > half(0.0)) {
-			spread_atten = half(1.0) - half(pow(float(edge_dist), area_lights.data[idx].spread_attenuation));
+			if (spread_bleed > half(0.0)) {
+				spread_atten = spread_bleed;
+			} else {
+				return; // outside the spread region, no bleed
+			}
+		} else if (edge_dist > half(0.0)) {
+			half falloff = half(1.0) - half(pow(float(edge_dist), area_lights.data[idx].spread_attenuation));
+			spread_atten = mix(spread_bleed, half(1.0), falloff);
 		}
 	}
 
