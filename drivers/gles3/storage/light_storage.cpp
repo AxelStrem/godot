@@ -362,6 +362,23 @@ bool LightStorage::light_area_get_normalize_energy(RID p_light) const {
 	return light->area_normalize_energy;
 }
 
+void LightStorage::light_area_set_use_node_scale(RID p_light, bool p_enabled) {
+	Light *light = light_owner.get_or_null(p_light);
+	if (light->area_use_node_scale == p_enabled) {
+		return;
+	}
+
+	light->area_use_node_scale = p_enabled;
+	// The range in which objects are illuminated change, so the z-range of the shadow map needs to adjust accordingly.
+	light->version++;
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+bool LightStorage::light_area_get_use_node_scale(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	return light->area_use_node_scale;
+}
+
 void LightStorage::light_area_set_texture(RID p_light, RID p_texture) {
 	// not implemented
 }

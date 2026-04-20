@@ -330,6 +330,7 @@ public:
 
 	virtual void light_area_set_size(RID p_light, const Vector2 &p_size) = 0;
 	virtual void light_area_set_normalize_energy(RID p_light, bool p_enabled) = 0;
+	virtual void light_area_set_use_node_scale(RID p_light, bool p_enabled) = 0;
 	virtual void light_area_set_texture(RID p_light, RID texture) = 0;
 
 	// Shadow atlas

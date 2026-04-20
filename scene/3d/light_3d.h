@@ -245,6 +245,7 @@ private:
 	Vector2 area_size;
 	Ref<Texture2D> area_texture;
 	bool area_normalize_energy = true;
+	bool area_use_node_scale = false;
 
 protected:
 	static void _bind_methods();
@@ -258,6 +259,9 @@ public:
 
 	void set_area_normalize_energy(bool p_enable);
 	bool is_area_normalizing_energy() const;
+
+	void set_area_use_node_scale(bool p_enable);
+	bool is_area_using_node_scale() const;
 
 	PackedStringArray get_configuration_warnings() const override;
 
