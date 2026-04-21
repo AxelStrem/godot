@@ -765,6 +765,8 @@ void AreaLight3D::set_area_spread_bleed(float p_bleed) {
 
 float AreaLight3D::get_area_spread_bleed() const {
 	return area_spread_bleed;
+}
+
 void AreaLight3D::set_area_use_node_scale(bool p_enable) {
 	area_use_node_scale = p_enable;
 	set_disable_scale(!p_enable);
