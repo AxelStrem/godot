@@ -2028,8 +2028,19 @@ void RasterizerSceneGLES3::_setup_lights(const RenderDataGLES3 *p_render_data, b
 		light_data.specular_amount = light_storage->light_get_param(base, RSE::LIGHT_PARAM_SPECULAR) * 2.0;
 
 		if (type == RSE::LIGHT_AREA) {
-			Vector3 area_vec_a = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(1, 0, 0))).normalized() * area_size.x;
-			Vector3 area_vec_b = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(0, 1, 0))).normalized() * area_size.y;
+			Vector3 area_vec_a = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(1, 0, 0)));
+			Vector3 area_vec_b = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(0, 1, 0)));
+
+			if (!light->area_use_node_scale) {
+				area_vec_a = area_vec_a.normalized();
+				area_vec_b = area_vec_b.normalized();
+			}
+
+			area_vec_a *= area_size.x;
+			area_vec_b *= area_size.y;
+
+			float area_width = area_vec_a.length();
+			float area_height = area_vec_b.length();
 
 			light_data.area_width[0] = area_vec_a.x;
 			light_data.area_width[1] = area_vec_a.y;
@@ -2038,11 +2049,11 @@ void RasterizerSceneGLES3::_setup_lights(const RenderDataGLES3 *p_render_data, b
 			light_data.area_height[0] = area_vec_b.x;
 			light_data.area_height[1] = area_vec_b.y;
 			light_data.area_height[2] = area_vec_b.z;
-			light_data.inv_spot_attenuation = 1.0f / (radius + area_size.length() / 2.0f); // center range
+			light_data.inv_spot_attenuation = 1.0f / (radius + Vector2(area_width, area_height).length() / 2.0f); // center range
 
 			if (light->area_normalize_energy) {
 				// normalization to make larger lights output same amount of light as smaller lights with same energy
-				float surface_area = area_size.x * area_size.y;
+				float surface_area = MAX(area_width * area_height, 0.00001f);
 				light_data.color[0] /= surface_area;
 				light_data.color[1] /= surface_area;
 				light_data.color[2] /= surface_area;

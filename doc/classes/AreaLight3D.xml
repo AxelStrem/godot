@@ -21,6 +21,10 @@
 		<member name="area_normalize_energy" type="bool" setter="set_area_normalize_energy" getter="is_area_normalizing_energy" default="true">
 			Defines whether the energy is normalized (divided) by the surface area of the light. If set to [code]true[/code], changing the size does not affect the total energy output, and does not dramatically alter the brightness of the scene.
 		</member>
+		<member name="area_use_node_scale" type="bool" setter="set_area_use_node_scale" getter="is_area_using_node_scale" default="false">
+			If [code]true[/code], the node's [member Node3D.scale] is applied to the area shape dimensions. This allows scaling the light source directly with transform scale.
+			If [code]false[/code] (default), area lights behave like other [Light3D] nodes and ignore node scale.
+		</member>
 		<member name="area_range" type="float" setter="set_param" getter="get_param" default="5.0">
 			The range of the area in meters. This determines the maximum distance from any point on the area at which the area can still emit light.
 		</member>

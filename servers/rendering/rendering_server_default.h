@@ -503,6 +503,7 @@ public:
 
 	FUNC2(light_area_set_size, RID, const Vector2 &)
 	FUNC2(light_area_set_normalize_energy, RID, bool)
+	FUNC2(light_area_set_use_node_scale, RID, bool)
 	FUNC2(light_area_set_texture, RID, RID)
 	FUNC2(light_area_set_spread_angle, RID, float)
 	FUNC2(light_area_set_spread_attenuation, RID, float)
