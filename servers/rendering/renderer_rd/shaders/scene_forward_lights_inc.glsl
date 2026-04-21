@@ -1002,26 +1002,20 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	half spread_bleed = half(area_lights.data[idx].spread_bleed);
 	half spread_atten = half(1.0);
 	if (spread_cos > half(1e-4)) {
-		half depth = -pos_local_to_light.z; // positive depth in front of light
-		half tan_spread = sqrt(half(1.0) - spread_cos * spread_cos) / spread_cos;
-		half spread_extent = depth * tan_spread;
+		half tan_spread = sqrt(half(2.0)*spread_cos - spread_cos * spread_cos) / (half(1.0)-spread_cos);
+		
+		hvec2 r = hvec2(a_half_len, b_half_len);
 
-		// Distance beyond rectangle edge in each axis (world space).
-		half dx = max(abs(pos_local_to_light.x) - a_half_len, half(0.0));
-		half dy = max(abs(pos_local_to_light.y) - b_half_len, half(0.0));
+		hvec2 v1 = -pos_local_to_light.z/tan_spread + r;
+		hvec2 v2 = abs(pos_local_to_light.xy);
 
-		// Euclidean distance from edge, normalized by spread extent.
-		half edge_dist = sqrt(dx * dx + dy * dy) / max(spread_extent, half(1e-6));
-		if (edge_dist >= half(1.0)) {
-			if (spread_bleed > half(0.0)) {
-				spread_atten = spread_bleed;
-			} else {
-				return; // outside the spread region, no bleed
-			}
-		} else if (edge_dist > half(0.0)) {
-			half falloff = half(1.0) - half(pow(float(edge_dist), area_lights.data[idx].spread_attenuation));
-			spread_atten = mix(spread_bleed, half(1.0), falloff);
-		}
+		hvec2 proj = v2/v1;
+
+		half att = area_lights.data[idx].spread_attenuation;
+		hvec2 d = (clamp(proj, half(1.0), half(1.0)+att)-half(1.0))/att;
+		half falloff =  ((half(1.0) - d.x*d.x)*(half(1.0)-d.y*d.y));
+
+		spread_atten = mix(spread_bleed, half(1.0), pow(falloff, half(1.0)));
 	}
 
 	hvec3 closest_point_local_to_light = hvec3(clamp(pos_local_to_light.x, -a_half_len, a_half_len), clamp(pos_local_to_light.y, -b_half_len, b_half_len), 0);
