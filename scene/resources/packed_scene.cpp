@@ -298,7 +298,9 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 	const NodeData *nd = &nodes[0];
 
 	Node **ret_nodes = (Node **)alloca(sizeof(Node *) * nc);
-	ret_nodes[0] = nullptr; // Sidesteps "maybe uninitialized" false-positives on GCC.
+	for (int i = 0; i < nc; i++) {
+		ret_nodes[i] = nullptr;
+	}
 
 	bool gen_node_path_cache = p_edit_state != GEN_EDIT_STATE_DISABLED && node_path_cache.is_empty();
 
@@ -735,12 +737,21 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 			if (!Engine::get_singleton()->is_editor_hint() && node && node->has_method("_filter_scene_children")) {
 				Array child_infos;
 				Vector<int> child_node_indices; // Track which node indices are children
+				const String current_node_path = build_node_path(i, nodes, snames, node_paths);
 				for (int child_idx = 0; child_idx < nc; ++child_idx) {
 					const NodeData &child_n = nodes[child_idx];
-					if(child_n.parent == -1)
+					if (child_n.parent == -1) {
 						continue; // Skip nodes without a parent
-					NODE_FROM_ID(local_parent, child_n.parent);
-					if (local_parent == node) {
+					}
+
+					bool is_direct_child = false;
+					if (child_n.parent & FLAG_ID_IS_PATH) {
+						is_direct_child = String(node_paths[child_n.parent & FLAG_MASK]) == current_node_path;
+					} else {
+						is_direct_child = (child_n.parent & FLAG_MASK) == i;
+					}
+
+					if (is_direct_child) {
 						Dictionary info;
 						info["id"] = child_idx; // Use node index as unique id
 						info["name"] = snames[child_n.name];
@@ -792,10 +803,9 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 					}
 				}
 				// NodePath-based exclusion: collect excluded NodePaths for nodes not in allowed_node_ids
-				Vector<NodePath> excluded_paths;
+				Vector<String> excluded_paths;
 				for (int idx = 0; idx < child_node_indices.size(); ++idx) {
 					int child_idx = child_node_indices[idx];
-					const NodeData &child_n = nodes[child_idx];
 					
 					bool allowed = false;
 					for (int a = 0; a < allowed_node_ids.size(); ++a) {
@@ -806,56 +816,16 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 					}
 					
 					if (!allowed) {
-						// Build the NodePath for this child
-						NodePath child_path;
-						if (child_n.parent & FLAG_ID_IS_PATH) {
-							child_path = node_paths[child_n.parent & FLAG_MASK];
-							child_path = NodePath(String(child_path) + "/" + String(snames[child_n.name]));
-						} else {
-							// Compose path from parent node's path and this node's name
-							// For root's direct children, parent is root (empty path)
-							if (i == 0) {
-								child_path = NodePath(String(snames[child_n.name]));
-							} else {
-								// Find parent's path
-								NodePath parent_path;
-								if (nodes[i].parent & FLAG_ID_IS_PATH) {
-									parent_path = node_paths[nodes[i].parent & FLAG_MASK];
-								} else {
-									parent_path = NodePath(String(snames[nodes[i].name]));
-								}
-								child_path = NodePath(String(parent_path) + "/" + String(snames[child_n.name]));
-							}
-						}
-						excluded_paths.push_back(child_path);
+						excluded_paths.push_back(build_node_path(child_idx, nodes, snames, node_paths));
 					}
 				}
 				// Mark all nodes whose path starts with any excluded NodePath
 				for (int idx = 0; idx < nc; ++idx) {
 					if (skip_node[idx]) continue;
-					// Build the NodePath for this node
-					NodePath node_path;
-					 if (nodes[idx].parent != -1) {
-						if (nodes[idx].parent & FLAG_ID_IS_PATH) {
-							node_path = node_paths[nodes[idx].parent & FLAG_MASK];
-							node_path = NodePath(String(node_path) + "/" + String(snames[nodes[idx].name]));
-						} else {
-							NodePath parent_path;
-							int grandparent = nodes[nodes[idx].parent].parent;
-							if (grandparent != -1 && (grandparent & FLAG_ID_IS_PATH)) {
-								parent_path = node_paths[grandparent & FLAG_MASK];
-							} else {
-								parent_path = NodePath(String(snames[nodes[nodes[idx].parent].name]));
-							}
-							node_path = NodePath(String(parent_path) + "/" + String(snames[nodes[idx].name]));
-						}
-					 } else {
-						node_path = NodePath(String(snames[nodes[idx].name]));
-						}
+					const String node_path = build_node_path(idx, nodes, snames, node_paths);
 					for (int ep = 0; ep < excluded_paths.size(); ++ep) {
-						String node_path_str = String(node_path);
-						String excluded_path_str = String(excluded_paths[ep]);
-						if (node_path_str == excluded_path_str || node_path_str.begins_with(excluded_path_str + "/")) {
+						const String &excluded_path = excluded_paths[ep];
+						if (node_path == excluded_path || node_path.begins_with(excluded_path + "/")) {
 							skip_node.write[idx] = true;
 							break;
 						}

@@ -33,9 +33,56 @@
 TEST_FORCE_LINK(test_packed_scene)
 
 #include "core/object/callable_mp.h"
+#include "core/object/class_db.h"
 #include "scene/resources/packed_scene.h"
 
 namespace TestPackedScene {
+
+class FilteringNode : public Node {
+	GDCLASS(FilteringNode, Node);
+
+	StringName kept_child_name;
+
+	static void _bind_methods() {
+		ClassDB::bind_method(D_METHOD("set_kept_child_name", "name"), &FilteringNode::set_kept_child_name);
+		ClassDB::bind_method(D_METHOD("get_kept_child_name"), &FilteringNode::get_kept_child_name);
+		ClassDB::bind_method(D_METHOD("_filter_scene_children", "children"), &FilteringNode::_filter_scene_children);
+		ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "kept_child_name"), "set_kept_child_name", "get_kept_child_name");
+	}
+
+public:
+	static FilteringNode *create_registered() {
+		static bool registered = false;
+		if (!registered) {
+			GDREGISTER_CLASS(FilteringNode);
+			registered = true;
+		}
+		return memnew(FilteringNode);
+	}
+
+	void set_kept_child_name(const StringName &p_name) {
+		kept_child_name = p_name;
+	}
+
+	StringName get_kept_child_name() const {
+		return kept_child_name;
+	}
+
+	Array _filter_scene_children(const Array &p_children) const {
+		if (kept_child_name == StringName()) {
+			return p_children;
+		}
+
+		Array filtered_children;
+		for (int i = 0; i < p_children.size(); i++) {
+			Dictionary child_info = p_children[i];
+			if (StringName(child_info["name"]) == kept_child_name) {
+				filtered_children.push_back(child_info);
+			}
+		}
+		return filtered_children;
+	}
+};
 
 TEST_CASE("[PackedScene] Pack Scene and Retrieve State") {
 	// Create a scene to pack.
@@ -211,6 +258,72 @@ TEST_CASE("[PackedScene] Instantiate Packed Scene With Children") {
 	CHECK(instance->get_child(1)->get_name() == "Child2");
 	CHECK(instance->get_child(0)->get_owner() == instance);
 	CHECK(instance->get_child(1)->get_owner() == instance);
+
+	memdelete(scene);
+	memdelete(instance);
+}
+
+TEST_CASE("[PackedScene] Nested child filtering uses canonical paths") {
+	Node *scene = memnew(Node);
+	scene->set_name("Root");
+
+	Node *branch_a = memnew(Node);
+	branch_a->set_name("BranchA");
+	scene->add_child(branch_a);
+	branch_a->set_owner(scene);
+
+	FilteringNode *filter_a = FilteringNode::create_registered();
+	filter_a->set_name("Inner");
+	filter_a->set_kept_child_name("Keep");
+	branch_a->add_child(filter_a);
+	filter_a->set_owner(scene);
+
+	Node *keep_a = memnew(Node);
+	keep_a->set_name("Keep");
+	filter_a->add_child(keep_a);
+	keep_a->set_owner(scene);
+
+	Node *drop_a = memnew(Node);
+	drop_a->set_name("Drop");
+	filter_a->add_child(drop_a);
+	drop_a->set_owner(scene);
+
+	Node *branch_b = memnew(Node);
+	branch_b->set_name("BranchB");
+	scene->add_child(branch_b);
+	branch_b->set_owner(scene);
+
+	FilteringNode *filter_b = FilteringNode::create_registered();
+	filter_b->set_name("Inner");
+	filter_b->set_kept_child_name("Drop");
+	branch_b->add_child(filter_b);
+	filter_b->set_owner(scene);
+
+	Node *keep_b = memnew(Node);
+	keep_b->set_name("Keep");
+	filter_b->add_child(keep_b);
+	keep_b->set_owner(scene);
+
+	Node *drop_b = memnew(Node);
+	drop_b->set_name("Drop");
+	filter_b->add_child(drop_b);
+	drop_b->set_owner(scene);
+
+	PackedScene packed_scene;
+	CHECK_EQ(packed_scene.pack(scene), OK);
+
+	Node *instance = packed_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	Node *inner_a = instance->get_node_or_null(NodePath("BranchA/Inner"));
+	Node *inner_b = instance->get_node_or_null(NodePath("BranchB/Inner"));
+	REQUIRE(inner_a != nullptr);
+	REQUIRE(inner_b != nullptr);
+
+	CHECK_EQ(inner_a->get_child_count(), 1);
+	CHECK_EQ(inner_b->get_child_count(), 1);
+	CHECK_EQ(inner_a->get_child(0)->get_name(), StringName("Keep"));
+	CHECK_EQ(inner_b->get_child(0)->get_name(), StringName("Drop"));
 
 	memdelete(scene);
 	memdelete(instance);
