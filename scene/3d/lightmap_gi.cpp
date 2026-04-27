@@ -908,6 +908,54 @@ LightmapGI::BakeError LightmapGI::_save_and_reimport_atlas_textures(const Ref<Li
 	return LightmapGI::BAKE_ERROR_OK;
 }
 
+LightmapGI::BakeError LightmapGI::_create_atlas_textures_runtime(const Ref<Lightmapper> &p_lightmapper, TypedArray<TextureLayered> &r_textures, bool p_is_shadowmask) const {
+	Vector<Ref<Image>> images;
+	images.resize(p_is_shadowmask ? p_lightmapper->get_shadowmask_texture_count() : p_lightmapper->get_bake_texture_count());
+
+	for (int i = 0; i < images.size(); i++) {
+		images.set(i, p_is_shadowmask ? p_lightmapper->get_shadowmask_texture(i) : p_lightmapper->get_bake_texture(i));
+	}
+
+	ERR_FAIL_COND_V(images.is_empty(), BAKE_ERROR_CANT_CREATE_IMAGE);
+
+	const int slice_count = images.size();
+	const int slice_width = images[0]->get_width();
+	const int slice_height = images[0]->get_height();
+
+	const int slices_per_texture = Image::MAX_HEIGHT / slice_height;
+	const int texture_count = Math::ceil(slice_count / (float)slices_per_texture);
+	const int last_count = slice_count % slices_per_texture;
+
+	r_textures.resize(texture_count);
+
+	for (int i = 0; i < texture_count; i++) {
+		const int texture_slice_count = (i == texture_count - 1 && last_count != 0) ? last_count : slices_per_texture;
+
+		Vector<Ref<Image>> atlas_images;
+		atlas_images.resize(texture_slice_count);
+
+		for (int j = 0; j < texture_slice_count; j++) {
+			Ref<Image> img = images[i * slices_per_texture + j]->duplicate();
+			if (supersampling_enabled) {
+				img->resize(
+						(int)(img->get_width() / supersampling_factor),
+						(int)(img->get_height() / supersampling_factor),
+						Image::INTERPOLATE_TRILINEAR);
+			}
+			atlas_images.set(j, img);
+		}
+
+		Ref<Texture2DArray> tex;
+		tex.instantiate();
+		Error err = tex->create_from_images(atlas_images);
+		ERR_FAIL_COND_V(err != OK, BAKE_ERROR_CANT_CREATE_IMAGE);
+
+		r_textures[i] = tex;
+	}
+
+	return BAKE_ERROR_OK;
+}
+
 void LightmapGI::_build_area_light_texture_atlas(const Vector<LightmapGI::LightsFound> &lights_found, HashMap<Ref<Texture2D>, AreaLightAtlasTexture> &r_textures, Size2i &r_atlas_size, int &r_mipmaps) const {
 	if (RenderingServer::get_singleton()->get_current_rendering_method() != "gl_compatibility") { // area light textures unsupported in compat
 		r_mipmaps = 8;
@@ -1057,15 +1105,17 @@ void LightmapGI::_build_area_light_texture_atlas(const Vector<LightmapGI::Lights
 	}
 }
 
-LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_path, Lightmapper::BakeStepFunc p_bake_step, void *p_bake_userdata) {
-	if (p_image_data_path.is_empty()) {
-		if (get_light_data().is_null()) {
-			return BAKE_ERROR_NO_SAVE_PATH;
-		}
+LightmapGI::BakeError LightmapGI::_bake_impl(Node *p_from_node, String p_image_data_path, Lightmapper::BakeStepFunc p_bake_step, void *p_bake_userdata, bool p_runtime) {
+	if (!p_runtime) {
+		if (p_image_data_path.is_empty()) {
+			if (get_light_data().is_null()) {
+				return BAKE_ERROR_NO_SAVE_PATH;
+			}
 
-		p_image_data_path = get_light_data()->get_path();
-		if (!p_image_data_path.is_resource_file()) {
-			return BAKE_ERROR_NO_SAVE_PATH;
+			p_image_data_path = get_light_data()->get_path();
+			if (!p_image_data_path.is_resource_file()) {
+				return BAKE_ERROR_NO_SAVE_PATH;
+			}
 		}
 	}
 
@@ -1491,18 +1541,30 @@ LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_pa
 	TypedArray<TextureLayered> lightmap_textures;
 	TypedArray<TextureLayered> shadowmask_textures;
 
-	const String texture_filename = p_image_data_path.get_basename();
 	const int shadowmask_texture_count = lightmapper->get_shadowmask_texture_count();
 	const bool save_shadowmask = shadowmask_mode != LightmapGIData::SHADOWMASK_MODE_NONE && shadowmask_texture_count > 0;
 
-	// Save the lightmap atlases.
-	BakeError save_err = _save_and_reimport_atlas_textures(lightmapper, texture_filename, lightmap_textures, false);
-	ERR_FAIL_COND_V(save_err != BAKE_ERROR_OK, save_err);
+	if (p_runtime) {
+		// Runtime path: build in-memory Texture2DArray atlases without touching disk.
+		BakeError rt_err = _create_atlas_textures_runtime(lightmapper, lightmap_textures, false);
+		ERR_FAIL_COND_V(rt_err != BAKE_ERROR_OK, rt_err);
 
-	if (save_shadowmask) {
-		// Save the shadowmask atlases.
-		save_err = _save_and_reimport_atlas_textures(lightmapper, texture_filename + "_shadow", shadowmask_textures, true);
+		if (save_shadowmask) {
+			rt_err = _create_atlas_textures_runtime(lightmapper, shadowmask_textures, true);
+			ERR_FAIL_COND_V(rt_err != BAKE_ERROR_OK, rt_err);
+		}
+	} else {
+		const String texture_filename = p_image_data_path.get_basename();
+
+		// Editor path: save to disk and reimport.
+		BakeError save_err = _save_and_reimport_atlas_textures(lightmapper, texture_filename, lightmap_textures, false);
 		ERR_FAIL_COND_V(save_err != BAKE_ERROR_OK, save_err);
+
+		if (save_shadowmask) {
+			// Save the shadowmask atlases.
+			save_err = _save_and_reimport_atlas_textures(lightmapper, texture_filename + "_shadow", shadowmask_textures, true);
+			ERR_FAIL_COND_V(save_err != BAKE_ERROR_OK, save_err);
+		}
 	}
 
 	// POSTBAKE: Save Light Data.
@@ -1687,17 +1749,26 @@ LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_pa
 		gi_data->set_capture_data(bounds, interior, Vector<Vector3>(probe_points), Vector<Color>(probe_sh), gi_data->get_capture_tetrahedra(), gi_data->get_capture_bsp_tree(), exposure_normalization, bake_probe_hash);
 	}
 
-	gi_data->set_path(p_image_data_path, true);
-	Error err = ResourceSaver::save(gi_data);
-
-	if (err != OK) {
-		return BAKE_ERROR_CANT_CREATE_IMAGE;
+	if (!p_runtime) {
+		gi_data->set_path(p_image_data_path, true);
+		Error err = ResourceSaver::save(gi_data);
+		if (err != OK) {
+			return BAKE_ERROR_CANT_CREATE_IMAGE;
+		}
 	}
 
 	set_light_data(gi_data);
 	update_configuration_warnings();
 
 	return BAKE_ERROR_OK;
+}
+
+LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_path, Lightmapper::BakeStepFunc p_bake_step, void *p_bake_userdata) {
+	return _bake_impl(p_from_node, p_image_data_path, p_bake_step, p_bake_userdata, false);
+}
+
+LightmapGI::BakeError LightmapGI::bake_runtime(Node *p_from_node) {
+	return _bake_impl(p_from_node, String(), nullptr, nullptr, true);
 }
 
 void LightmapGI::_notification(int p_what) {
@@ -2118,7 +2189,8 @@ void LightmapGI::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_camera_attributes", "camera_attributes"), &LightmapGI::set_camera_attributes);
 	ClassDB::bind_method(D_METHOD("get_camera_attributes"), &LightmapGI::get_camera_attributes);
 
-	//	ClassDB::bind_method(D_METHOD("bake", "from_node"), &LightmapGI::bake, DEFVAL(Variant()));
+	ClassDB::bind_method(D_METHOD("bake", "from_node"), &LightmapGI::bake, DEFVAL(Variant()));
+	ClassDB::bind_method(D_METHOD("bake_runtime", "from_node"), &LightmapGI::bake_runtime);
 
 	ADD_GROUP("Tweaks", "");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "quality", PROPERTY_HINT_ENUM, "Low,Medium,High,Ultra"), "set_bake_quality", "get_bake_quality");
