@@ -1767,6 +1767,12 @@ LightmapGI::BakeError LightmapGI::bake(Node *p_from_node, String p_image_data_pa
 	return _bake_impl(p_from_node, p_image_data_path, p_bake_step, p_bake_userdata, false);
 }
 
+LightmapGI::BakeError LightmapGI::_bake_editor_script(Node *p_from_node) {
+	// GDScript-callable editor bake: no BakeStepFunc/void* (not Variant-compatible).
+	// Uses the existing light_data path for save destination.
+	return _bake_impl(p_from_node, String(), nullptr, nullptr, false);
+}
+
 LightmapGI::BakeError LightmapGI::bake_runtime(Node *p_from_node) {
 	return _bake_impl(p_from_node, String(), nullptr, nullptr, true);
 }
@@ -2189,7 +2195,7 @@ void LightmapGI::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_camera_attributes", "camera_attributes"), &LightmapGI::set_camera_attributes);
 	ClassDB::bind_method(D_METHOD("get_camera_attributes"), &LightmapGI::get_camera_attributes);
 
-	ClassDB::bind_method(D_METHOD("bake", "from_node"), &LightmapGI::bake, DEFVAL(Variant()));
+	ClassDB::bind_method(D_METHOD("bake", "from_node"), &LightmapGI::_bake_editor_script, DEFVAL(Variant()));
 	ClassDB::bind_method(D_METHOD("bake_runtime", "from_node"), &LightmapGI::bake_runtime);
 
 	ADD_GROUP("Tweaks", "");

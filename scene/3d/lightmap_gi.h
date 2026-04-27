@@ -279,6 +279,7 @@ private:
 	BakeError _save_and_reimport_atlas_textures(const Ref<Lightmapper> p_lightmapper, const String &p_base_name, TypedArray<TextureLayered> &r_textures, bool p_is_shadowmask = false) const;
 	BakeError _create_atlas_textures_runtime(const Ref<Lightmapper> &p_lightmapper, TypedArray<TextureLayered> &r_textures, bool p_is_shadowmask = false) const;
 	BakeError _bake_impl(Node *p_from_node, String p_image_data_path, Lightmapper::BakeStepFunc p_bake_step, void *p_bake_userdata, bool p_runtime);
+	BakeError _bake_editor_script(Node *p_from_node); // GDScript-callable wrapper (no BakeStepFunc/void* args)
 	void _build_area_light_texture_atlas(const Vector<LightmapGI::LightsFound> &lights_found, HashMap<Ref<Texture2D>, AreaLightAtlasTexture> &r_texture_rects, Size2i &r_atlas_size, int &r_mipmaps) const;
 
 protected:
