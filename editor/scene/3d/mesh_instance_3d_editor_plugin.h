@@ -47,6 +47,7 @@ class MeshInstance3DEditor : public Control {
 		MENU_OPTION_CREATE_COLLISION_SHAPE,
 		MENU_OPTION_CREATE_NAVMESH,
 		MENU_OPTION_CREATE_OUTLINE_MESH,
+		MENU_OPTION_INVERT_NORMALS,
 		MENU_OPTION_CREATE_DEBUG_TANGENTS,
 		MENU_OPTION_CREATE_UV2,
 		MENU_OPTION_DEBUG_UV1,
@@ -107,6 +108,7 @@ class MeshInstance3DEditor : public Control {
 	void _menu_option(int p_option);
 	void _create_outline_mesh();
 	void _create_navigation_mesh();
+	void _invert_normals();
 
 	void _create_uv_lines(int p_layer);
 	friend class MeshInstance3DEditorPlugin;

@@ -55,6 +55,218 @@
 #include "scene/resources/3d/primitive_meshes.h"
 #include "scene/resources/3d/sphere_shape_3d.h"
 
+namespace {
+
+bool _reverse_triangle_winding(Vector<int> &r_indices) {
+	if (r_indices.size() % 3 != 0) {
+		return false;
+	}
+
+	int *indices_ptrw = r_indices.ptrw();
+	for (int i = 0; i < r_indices.size(); i += 3) {
+		SWAP(indices_ptrw[i], indices_ptrw[i + 2]);
+	}
+
+	return true;
+}
+
+void _invert_normals_array(Vector<Vector3> &r_normals) {
+	Vector3 *normals_ptrw = r_normals.ptrw();
+	for (int i = 0; i < r_normals.size(); i++) {
+		normals_ptrw[i] = -normals_ptrw[i];
+	}
+}
+
+bool _invert_tangent_handedness(Vector<float> &r_tangents) {
+	if (r_tangents.size() % 4 != 0) {
+		return false;
+	}
+
+	float *tangents_ptrw = r_tangents.ptrw();
+	for (int i = 3; i < r_tangents.size(); i += 4) {
+		tangents_ptrw[i] = -tangents_ptrw[i];
+	}
+
+	return true;
+}
+
+bool _invert_triangle_surface_arrays(Array &r_arrays, String &r_error) {
+	ERR_FAIL_COND_V(r_arrays.size() != Mesh::ARRAY_MAX, false);
+
+	Vector<Vector3> vertices = r_arrays[Mesh::ARRAY_VERTEX];
+	if (vertices.is_empty()) {
+		r_error = TTR("Mesh surface is missing vertices.");
+		return false;
+	}
+
+	Vector<int> indices = r_arrays[Mesh::ARRAY_INDEX];
+	if (indices.is_empty()) {
+		if (vertices.size() % 3 != 0) {
+			r_error = TTR("Mesh surface has an invalid triangle layout.");
+			return false;
+		}
+
+		indices.resize(vertices.size());
+		int *indices_ptrw = indices.ptrw();
+		for (int i = 0; i < vertices.size(); i += 3) {
+			indices_ptrw[i] = i + 2;
+			indices_ptrw[i + 1] = i + 1;
+			indices_ptrw[i + 2] = i;
+		}
+	} else if (!_reverse_triangle_winding(indices)) {
+		r_error = TTR("Mesh surface has an invalid index buffer.");
+		return false;
+	}
+	r_arrays[Mesh::ARRAY_INDEX] = indices;
+
+	if (r_arrays[Mesh::ARRAY_NORMAL].get_type() != Variant::NIL) {
+		Vector<Vector3> normals = r_arrays[Mesh::ARRAY_NORMAL];
+		if (normals.size() != vertices.size()) {
+			r_error = TTR("Mesh surface has invalid normals.");
+			return false;
+		}
+		_invert_normals_array(normals);
+		r_arrays[Mesh::ARRAY_NORMAL] = normals;
+	}
+
+	if (r_arrays[Mesh::ARRAY_TANGENT].get_type() != Variant::NIL) {
+		Vector<float> tangents = r_arrays[Mesh::ARRAY_TANGENT];
+		if (!_invert_tangent_handedness(tangents) || tangents.size() / 4 != vertices.size()) {
+			r_error = TTR("Mesh surface has invalid tangents.");
+			return false;
+		}
+		r_arrays[Mesh::ARRAY_TANGENT] = tangents;
+	}
+
+	return true;
+}
+
+bool _invert_blend_shape_arrays(TypedArray<Array> &r_blend_shapes, int p_vertex_count, String &r_error) {
+	for (int i = 0; i < r_blend_shapes.size(); i++) {
+		Array blend_shape = r_blend_shapes[i];
+		ERR_FAIL_COND_V(blend_shape.size() != Mesh::ARRAY_MAX, false);
+
+		if (blend_shape[Mesh::ARRAY_NORMAL].get_type() != Variant::NIL) {
+			Vector<Vector3> normals = blend_shape[Mesh::ARRAY_NORMAL];
+			if (normals.size() != p_vertex_count) {
+				r_error = TTR("Mesh blend shape has invalid normals.");
+				return false;
+			}
+			_invert_normals_array(normals);
+			blend_shape[Mesh::ARRAY_NORMAL] = normals;
+		}
+
+		if (blend_shape[Mesh::ARRAY_TANGENT].get_type() != Variant::NIL) {
+			Vector<float> tangents = blend_shape[Mesh::ARRAY_TANGENT];
+			if (!_invert_tangent_handedness(tangents) || tangents.size() / 4 != p_vertex_count) {
+				r_error = TTR("Mesh blend shape has invalid tangents.");
+				return false;
+			}
+			blend_shape[Mesh::ARRAY_TANGENT] = tangents;
+		}
+
+		r_blend_shapes[i] = blend_shape;
+	}
+
+	return true;
+}
+
+Dictionary _invert_lod_indices(const Dictionary &p_lods, bool &r_success) {
+	Dictionary inverted_lods;
+
+	for (const KeyValue<Variant, Variant> &E : p_lods) {
+		Vector<int> lod_indices = E.value;
+		if (!_reverse_triangle_winding(lod_indices)) {
+			r_success = false;
+			return Dictionary();
+		}
+		inverted_lods[E.key] = lod_indices;
+	}
+
+	r_success = true;
+	return inverted_lods;
+}
+
+Ref<ArrayMesh> _create_inverted_mesh_copy(const Ref<Mesh> &p_source_mesh, String &r_error) {
+	Ref<ArrayMesh> inverted_mesh;
+	inverted_mesh.instantiate();
+
+	Ref<ArrayMesh> source_array_mesh = p_source_mesh;
+	if (source_array_mesh.is_valid()) {
+		inverted_mesh->set_blend_shape_mode(source_array_mesh->get_blend_shape_mode());
+	} else if (p_source_mesh->get_blend_shape_count() > 0) {
+		r_error = TTR("Mesh blend shapes can only be preserved for ArrayMesh resources.");
+		return Ref<ArrayMesh>();
+	}
+
+	for (int i = 0; i < p_source_mesh->get_blend_shape_count(); i++) {
+		inverted_mesh->add_blend_shape(p_source_mesh->get_blend_shape_name(i));
+	}
+
+	for (int surface_index = 0; surface_index < p_source_mesh->get_surface_count(); surface_index++) {
+		Mesh::PrimitiveType primitive = p_source_mesh->surface_get_primitive_type(surface_index);
+		Array arrays = p_source_mesh->surface_get_arrays(surface_index);
+		TypedArray<Array> blend_shapes = p_source_mesh->surface_get_blend_shape_arrays(surface_index);
+		Dictionary lods = p_source_mesh->surface_get_lods(surface_index);
+
+		if (primitive == Mesh::PRIMITIVE_TRIANGLES) {
+			if (!_invert_triangle_surface_arrays(arrays, r_error)) {
+				return Ref<ArrayMesh>();
+			}
+
+			const Vector<Vector3> vertices = arrays[Mesh::ARRAY_VERTEX];
+			if (!_invert_blend_shape_arrays(blend_shapes, vertices.size(), r_error)) {
+				return Ref<ArrayMesh>();
+			}
+
+			bool lods_valid = false;
+			lods = _invert_lod_indices(lods, lods_valid);
+			if (!lods_valid) {
+				r_error = TTR("Mesh surface has invalid LOD indices.");
+				return Ref<ArrayMesh>();
+			}
+		} else if (primitive == Mesh::PRIMITIVE_TRIANGLE_STRIP) {
+			r_error = TTR("Mesh surfaces using triangle strips can't be inverted.");
+			return Ref<ArrayMesh>();
+		}
+
+		inverted_mesh->add_surface_from_arrays(primitive, arrays, blend_shapes, lods, p_source_mesh->surface_get_format(surface_index));
+		inverted_mesh->surface_set_material(surface_index, p_source_mesh->surface_get_material(surface_index));
+
+		if (source_array_mesh.is_valid()) {
+			inverted_mesh->surface_set_name(surface_index, source_array_mesh->surface_get_name(surface_index));
+		}
+	}
+
+	inverted_mesh->set_lightmap_size_hint(p_source_mesh->get_lightmap_size_hint());
+	inverted_mesh->set_local_to_scene(p_source_mesh->is_local_to_scene());
+	inverted_mesh->merge_meta_from(*p_source_mesh);
+	inverted_mesh->set_name(p_source_mesh->get_name());
+
+	if (source_array_mesh.is_valid()) {
+		inverted_mesh->set_custom_aabb(source_array_mesh->get_custom_aabb());
+
+		Ref<ArrayMesh> source_shadow_mesh = source_array_mesh->get_shadow_mesh();
+		if (source_shadow_mesh.is_valid()) {
+			if (source_shadow_mesh == source_array_mesh) {
+				inverted_mesh->set_shadow_mesh(inverted_mesh);
+			} else {
+				String shadow_error;
+				Ref<ArrayMesh> inverted_shadow_mesh = _create_inverted_mesh_copy(source_shadow_mesh, shadow_error);
+				if (inverted_shadow_mesh.is_null()) {
+					r_error = shadow_error;
+					return Ref<ArrayMesh>();
+				}
+				inverted_mesh->set_shadow_mesh(inverted_shadow_mesh);
+			}
+		}
+	}
+
+	return inverted_mesh;
+}
+
+} // namespace
+
 void MeshInstance3DEditor::_node_removed(Node *p_node) {
 	if (p_node == node) {
 		node = nullptr;
@@ -445,6 +657,9 @@ void MeshInstance3DEditor::_menu_option(int p_option) {
 		case MENU_OPTION_CREATE_OUTLINE_MESH: {
 			outline_dialog->popup_centered(Vector2(200, 90));
 		} break;
+		case MENU_OPTION_INVERT_NORMALS: {
+			_invert_normals();
+		} break;
 		case MENU_OPTION_CREATE_DEBUG_TANGENTS: {
 			EditorUndoRedoManager *ur = EditorUndoRedoManager::get_singleton();
 			ur->create_action(TTR("Create Debug Tangents"));
@@ -576,6 +791,46 @@ void MeshInstance3DEditor::_menu_option(int p_option) {
 			_create_uv_lines(1);
 		} break;
 	}
+}
+
+void MeshInstance3DEditor::_invert_normals() {
+	Ref<Mesh> mesh = node->get_mesh();
+	if (mesh.is_null()) {
+		err_dialog->set_text(TTR("Mesh is empty!"));
+		err_dialog->popup_centered();
+		return;
+	}
+
+	if (mesh->get_surface_count() == 0) {
+		err_dialog->set_text(TTR("Mesh has no surfaces to invert."));
+		err_dialog->popup_centered();
+		return;
+	}
+
+	Ref<PrimitiveMesh> primitive_mesh = mesh;
+	if (primitive_mesh.is_valid()) {
+		EditorUndoRedoManager *ur = EditorUndoRedoManager::get_singleton();
+		ur->create_action(TTR("Invert Normals"));
+		ur->add_do_method(*primitive_mesh, "set_flip_faces", !primitive_mesh->get_flip_faces());
+		ur->add_undo_method(*primitive_mesh, "set_flip_faces", primitive_mesh->get_flip_faces());
+		ur->commit_action();
+		return;
+	}
+
+	String error;
+	Ref<ArrayMesh> inverted_mesh = _create_inverted_mesh_copy(mesh, error);
+	if (inverted_mesh.is_null()) {
+		err_dialog->set_text(error.is_empty() ? TTR("Could not invert mesh normals.") : error);
+		err_dialog->popup_centered();
+		return;
+	}
+
+	EditorUndoRedoManager *ur = EditorUndoRedoManager::get_singleton();
+	ur->create_action(TTR("Invert Normals"));
+	ur->add_do_method(node, "set_mesh", inverted_mesh);
+	ur->add_do_reference(inverted_mesh.ptr());
+	ur->add_undo_method(node, "set_mesh", mesh);
+	ur->commit_action();
 }
 
 struct MeshInstance3DEditorEdgeSort {
@@ -807,6 +1062,7 @@ MeshInstance3DEditor::MeshInstance3DEditor() {
 	options->get_popup()->add_separator();
 	options->get_popup()->add_item(TTR("Create Outline Mesh..."), MENU_OPTION_CREATE_OUTLINE_MESH);
 	options->get_popup()->set_item_tooltip(options->get_popup()->get_item_count() - 1, TTR("Creates a static outline mesh. The outline mesh will have its normals flipped automatically.\nThis can be used instead of the StandardMaterial Grow property when using that property isn't possible."));
+	options->get_popup()->add_item(TTR("Invert Normals"), MENU_OPTION_INVERT_NORMALS);
 	options->get_popup()->add_item(TTR("Create Debug Tangents"), MENU_OPTION_CREATE_DEBUG_TANGENTS);
 	options->get_popup()->add_separator();
 	options->get_popup()->add_item(TTR("View UV1"), MENU_OPTION_DEBUG_UV1);
