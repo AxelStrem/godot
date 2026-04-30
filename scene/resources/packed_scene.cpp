@@ -152,6 +152,364 @@ static Node *_find_node_by_id(Node *p_owner, Node *p_node, int32_t p_id) {
 	return nullptr;
 }
 
+SceneInstantiationPlan::SceneInstantiationPlan() {
+}
+
+const SceneInstantiationPlan::PlanNodeData *SceneInstantiationPlan::_get_node_data(int p_plan_id) const {
+	ERR_FAIL_INDEX_V(p_plan_id, plan_nodes.size(), nullptr);
+	return &plan_nodes[p_plan_id];
+}
+
+SceneInstantiationPlan::PlanNodeData *SceneInstantiationPlan::_get_node_data_w(int p_plan_id) {
+	ERR_FAIL_INDEX_V(p_plan_id, plan_nodes.size(), nullptr);
+	return &plan_nodes.write[p_plan_id];
+}
+
+Ref<SceneInstantiationPlanNode> SceneInstantiationPlan::_make_node_ref(int p_plan_id) const {
+	if (!has_node(p_plan_id)) {
+		return Ref<SceneInstantiationPlanNode>();
+	}
+
+	Ref<SceneInstantiationPlanNode> node_ref;
+	node_ref.instantiate();
+	node_ref->_setup(const_cast<SceneInstantiationPlan *>(this), p_plan_id);
+	return node_ref;
+}
+
+void SceneInstantiationPlan::_detach_from_parent(int p_plan_id) {
+	PlanNodeData *node = _get_node_data_w(p_plan_id);
+	ERR_FAIL_NULL(node);
+	if (node->parent_plan_id < 0) {
+		return;
+	}
+
+	PlanNodeData *parent = _get_node_data_w(node->parent_plan_id);
+	ERR_FAIL_NULL(parent);
+	for (int i = 0; i < parent->child_plan_ids.size(); i++) {
+		if (parent->child_plan_ids[i] == p_plan_id) {
+			parent->child_plan_ids.remove_at(i);
+			break;
+		}
+	}
+	node->parent_plan_id = -1;
+}
+
+int SceneInstantiationPlan::_duplicate_node_subtree(int p_plan_id, int p_parent_plan_id) {
+	const PlanNodeData *source = _get_node_data(p_plan_id);
+	ERR_FAIL_NULL_V(source, -1);
+	const Vector<int> source_child_plan_ids = source->child_plan_ids;
+
+	PlanNodeData copy = *source;
+	copy.plan_id = plan_nodes.size();
+	copy.parent_plan_id = p_parent_plan_id;
+	copy.child_plan_ids.clear();
+	copy.origin = SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_DUPLICATED;
+	copy.pruned = false;
+	copy.flattened = false;
+
+	const int new_plan_id = copy.plan_id;
+	plan_nodes.push_back(copy);
+
+	for (int child_plan_id : source_child_plan_ids) {
+		const int duplicated_child_plan_id = _duplicate_node_subtree(child_plan_id, new_plan_id);
+		if (duplicated_child_plan_id >= 0) {
+			plan_nodes.write[new_plan_id].child_plan_ids.push_back(duplicated_child_plan_id);
+		}
+	}
+
+	return new_plan_id;
+}
+
+void SceneInstantiationPlan::_set_node_property(int p_plan_id, const StringName &p_name, const Variant &p_value, bool p_deferred_node_path) {
+	PlanNodeData *node = _get_node_data_w(p_plan_id);
+	ERR_FAIL_NULL(node);
+	node->properties.insert(p_name, p_value);
+	if (p_deferred_node_path) {
+		node->deferred_node_properties.insert(p_name);
+	}
+}
+
+void SceneInstantiationPlan::_clear_node_property_override(int p_plan_id, const StringName &p_name) {
+	PlanNodeData *node = _get_node_data_w(p_plan_id);
+	ERR_FAIL_NULL(node);
+	if (node->base_properties.has(p_name)) {
+		node->properties.insert(p_name, node->base_properties[p_name]);
+	} else {
+		node->properties.erase(p_name);
+	}
+}
+
+void SceneInstantiationPlan::_rename_node(int p_plan_id, const StringName &p_name) {
+	PlanNodeData *node = _get_node_data_w(p_plan_id);
+	ERR_FAIL_NULL(node);
+	node->name = p_name;
+}
+
+void SceneInstantiationPlan::_prune_node(int p_plan_id) {
+	PlanNodeData *node = _get_node_data_w(p_plan_id);
+	ERR_FAIL_NULL(node);
+	if (node->parent_plan_id < 0) {
+		ERR_FAIL_MSG("Cannot prune the root node of an instantiation plan.");
+	}
+	_detach_from_parent(p_plan_id);
+	node->pruned = true;
+}
+
+Array SceneInstantiationPlan::_duplicate_node(int p_plan_id, int p_additional_count) {
+	Array duplicated_nodes;
+	if (p_additional_count <= 0) {
+		return duplicated_nodes;
+	}
+
+	PlanNodeData *node = _get_node_data_w(p_plan_id);
+	ERR_FAIL_NULL_V(node, duplicated_nodes);
+	ERR_FAIL_COND_V_MSG(node->parent_plan_id < 0, duplicated_nodes, "Cannot duplicate the root node of an instantiation plan.");
+	const int parent_plan_id = node->parent_plan_id;
+
+	PlanNodeData *parent = _get_node_data_w(parent_plan_id);
+	ERR_FAIL_NULL_V(parent, duplicated_nodes);
+
+	int insert_position = parent->child_plan_ids.size();
+	for (int i = 0; i < parent->child_plan_ids.size(); i++) {
+		if (parent->child_plan_ids[i] == p_plan_id) {
+			insert_position = i + 1;
+			break;
+		}
+	}
+
+	for (int i = 0; i < p_additional_count; i++) {
+		const int duplicated_plan_id = _duplicate_node_subtree(p_plan_id, parent_plan_id);
+		if (duplicated_plan_id < 0) {
+			continue;
+		}
+		parent = _get_node_data_w(parent_plan_id);
+		ERR_FAIL_NULL_V(parent, duplicated_nodes);
+		parent->child_plan_ids.insert(insert_position + i, duplicated_plan_id);
+		duplicated_nodes.push_back(_make_node_ref(duplicated_plan_id));
+	}
+
+	return duplicated_nodes;
+}
+
+void SceneInstantiationPlan::_flatten_node(int p_plan_id) {
+	PlanNodeData *node = _get_node_data_w(p_plan_id);
+	ERR_FAIL_NULL(node);
+	ERR_FAIL_COND_MSG(node->parent_plan_id < 0, "Cannot flatten the root node of an instantiation plan.");
+
+	PlanNodeData *parent = _get_node_data_w(node->parent_plan_id);
+	ERR_FAIL_NULL(parent);
+
+	int insert_position = parent->child_plan_ids.size();
+	for (int i = 0; i < parent->child_plan_ids.size(); i++) {
+		if (parent->child_plan_ids[i] == p_plan_id) {
+			insert_position = i;
+			parent->child_plan_ids.remove_at(i);
+			break;
+		}
+	}
+
+	for (int i = 0; i < node->child_plan_ids.size(); i++) {
+		const int child_plan_id = node->child_plan_ids[i];
+		PlanNodeData *child = _get_node_data_w(child_plan_id);
+		ERR_CONTINUE(child == nullptr);
+		child->parent_plan_id = parent->plan_id;
+		parent->child_plan_ids.insert(insert_position + i, child_plan_id);
+	}
+
+	node->child_plan_ids.clear();
+	node->parent_plan_id = -1;
+	node->flattened = true;
+	node->pruned = true;
+}
+
+int SceneInstantiationPlan::add_node(const Ref<SceneState> &p_source_state, int p_source_node_idx, int p_parent_plan_id, const NodePath &p_source_path, const String &p_source_scene_path, const StringName &p_name, const StringName &p_type, SceneInstantiationPlanNodeOrigin p_origin, bool p_instance_root) {
+	PlanNodeData node;
+	node.plan_id = plan_nodes.size();
+	node.parent_plan_id = p_parent_plan_id;
+	node.source_state = p_source_state;
+	node.source_node_idx = p_source_node_idx;
+	node.source_path = p_source_path;
+	node.source_scene_path = p_source_scene_path;
+	node.name = p_name;
+	node.type = p_type;
+	node.origin = p_origin;
+	node.instance_root = p_instance_root;
+
+	const int plan_id = node.plan_id;
+	plan_nodes.push_back(node);
+
+	if (p_parent_plan_id >= 0) {
+		PlanNodeData *parent = _get_node_data_w(p_parent_plan_id);
+		ERR_FAIL_NULL_V(parent, plan_id);
+		parent->child_plan_ids.push_back(plan_id);
+	} else if (root_plan_id == -1) {
+		root_plan_id = plan_id;
+	}
+
+	return plan_id;
+}
+
+void SceneInstantiationPlan::set_root_plan_id(int p_plan_id) {
+	ERR_FAIL_INDEX(p_plan_id, plan_nodes.size());
+	root_plan_id = p_plan_id;
+}
+
+void SceneInstantiationPlan::set_node_base_property(int p_plan_id, const StringName &p_name, const Variant &p_value, bool p_deferred_node_path) {
+	PlanNodeData *node = _get_node_data_w(p_plan_id);
+	ERR_FAIL_NULL(node);
+	node->base_properties.insert(p_name, p_value);
+	node->properties.insert(p_name, p_value);
+	if (p_deferred_node_path) {
+		node->deferred_node_properties.insert(p_name);
+	}
+}
+
+bool SceneInstantiationPlan::has_node(int p_plan_id) const {
+	return p_plan_id >= 0 && p_plan_id < plan_nodes.size();
+}
+
+int SceneInstantiationPlan::get_root_plan_id() const {
+	return root_plan_id;
+}
+
+Ref<SceneInstantiationPlanNode> SceneInstantiationPlan::get_root_node() const {
+	return _make_node_ref(root_plan_id);
+}
+
+SceneInstantiationPlanNode::SceneInstantiationPlanNode() {
+}
+
+void SceneInstantiationPlanNode::_setup(const Ref<SceneInstantiationPlan> &p_plan, int p_plan_id) {
+	plan = p_plan;
+	plan_id = p_plan_id;
+}
+
+int SceneInstantiationPlanNode::get_plan_id() const {
+	return plan_id;
+}
+
+StringName SceneInstantiationPlanNode::get_name() const {
+	ERR_FAIL_COND_V(plan.is_null(), StringName());
+	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
+	ERR_FAIL_NULL_V(node, StringName());
+	return node->name;
+}
+
+void SceneInstantiationPlanNode::set_name(const StringName &p_name) {
+	ERR_FAIL_COND(plan.is_null());
+	plan->_rename_node(plan_id, p_name);
+}
+
+StringName SceneInstantiationPlanNode::get_type() const {
+	ERR_FAIL_COND_V(plan.is_null(), StringName());
+	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
+	ERR_FAIL_NULL_V(node, StringName());
+	return node->type;
+}
+
+NodePath SceneInstantiationPlanNode::get_source_path() const {
+	ERR_FAIL_COND_V(plan.is_null(), NodePath());
+	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
+	ERR_FAIL_NULL_V(node, NodePath());
+	return node->source_path;
+}
+
+String SceneInstantiationPlanNode::get_source_scene_path() const {
+	ERR_FAIL_COND_V(plan.is_null(), String());
+	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
+	ERR_FAIL_NULL_V(node, String());
+	return node->source_scene_path;
+}
+
+int SceneInstantiationPlanNode::get_origin() const {
+	ERR_FAIL_COND_V(plan.is_null(), ORIGIN_LOCAL);
+	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
+	ERR_FAIL_NULL_V(node, ORIGIN_LOCAL);
+	return node->origin;
+}
+
+bool SceneInstantiationPlanNode::is_instance_root() const {
+	ERR_FAIL_COND_V(plan.is_null(), false);
+	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
+	ERR_FAIL_NULL_V(node, false);
+	return node->instance_root;
+}
+
+Ref<SceneInstantiationPlanNode> SceneInstantiationPlanNode::get_parent() const {
+	ERR_FAIL_COND_V(plan.is_null(), Ref<SceneInstantiationPlanNode>());
+	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
+	ERR_FAIL_NULL_V(node, Ref<SceneInstantiationPlanNode>());
+	return plan->_make_node_ref(node->parent_plan_id);
+}
+
+int SceneInstantiationPlanNode::get_child_count() const {
+	ERR_FAIL_COND_V(plan.is_null(), 0);
+	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
+	ERR_FAIL_NULL_V(node, 0);
+	return node->child_plan_ids.size();
+}
+
+Ref<SceneInstantiationPlanNode> SceneInstantiationPlanNode::get_child(int p_index) const {
+	ERR_FAIL_COND_V(plan.is_null(), Ref<SceneInstantiationPlanNode>());
+	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
+	ERR_FAIL_NULL_V(node, Ref<SceneInstantiationPlanNode>());
+	ERR_FAIL_INDEX_V(p_index, node->child_plan_ids.size(), Ref<SceneInstantiationPlanNode>());
+	return plan->_make_node_ref(node->child_plan_ids[p_index]);
+}
+
+Array SceneInstantiationPlanNode::get_children() const {
+	Array children;
+	ERR_FAIL_COND_V(plan.is_null(), children);
+	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
+	ERR_FAIL_NULL_V(node, children);
+	for (int child_plan_id : node->child_plan_ids) {
+		children.push_back(plan->_make_node_ref(child_plan_id));
+	}
+	return children;
+}
+
+bool SceneInstantiationPlanNode::has_property(const StringName &p_name) const {
+	ERR_FAIL_COND_V(plan.is_null(), false);
+	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
+	ERR_FAIL_NULL_V(node, false);
+	return node->properties.has(p_name);
+}
+
+Variant SceneInstantiationPlanNode::get_property(const StringName &p_name, const Variant &p_default) const {
+	ERR_FAIL_COND_V(plan.is_null(), p_default);
+	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
+	ERR_FAIL_NULL_V(node, p_default);
+	if (!node->properties.has(p_name)) {
+		return p_default;
+	}
+	return node->properties[p_name];
+}
+
+void SceneInstantiationPlanNode::set_property(const StringName &p_name, const Variant &p_value) {
+	ERR_FAIL_COND(plan.is_null());
+	plan->_set_node_property(plan_id, p_name, p_value);
+}
+
+void SceneInstantiationPlanNode::clear_property_override(const StringName &p_name) {
+	ERR_FAIL_COND(plan.is_null());
+	plan->_clear_node_property_override(plan_id, p_name);
+}
+
+void SceneInstantiationPlanNode::prune() {
+	ERR_FAIL_COND(plan.is_null());
+	plan->_prune_node(plan_id);
+}
+
+Array SceneInstantiationPlanNode::duplicate(int p_additional_count) {
+	ERR_FAIL_COND_V(plan.is_null(), Array());
+	return plan->_duplicate_node(plan_id, p_additional_count);
+}
+
+void SceneInstantiationPlanNode::flatten_into_parent() {
+	ERR_FAIL_COND(plan.is_null());
+	plan->_flatten_node(plan_id);
+}
+
 Node *SceneState::create_duplicate_node(Node *original_node, const NodeData &n, const StringName *snames, const Variant *props, GenEditState p_edit_state) const {
 	Node *duplicate_node = nullptr;
 	
@@ -261,7 +619,7 @@ String SceneState::build_node_path(int node_idx, const Vector<NodeData> &nodes_,
 	return result;
 }
 
-Node *SceneState::instantiate(GenEditState p_edit_state) const {
+Node *SceneState::_instantiate_legacy(GenEditState p_edit_state) const {
 	// Nodes where instantiation failed (because something is missing.)
 	List<Node *> stray_instances;
 
@@ -1168,6 +1526,781 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 	}
 
 	return ret_nodes[0];
+}
+
+Node *SceneState::_instantiate_runtime_plan(GenEditState p_edit_state) const {
+	Ref<SceneInstantiationPlan> runtime_plan = _build_runtime_plan();
+	if (runtime_plan.is_null() || runtime_plan->get_root_plan_id() < 0) {
+		return _instantiate_legacy(p_edit_state);
+	}
+	if (_runtime_plan_requires_legacy_fallback(runtime_plan) || !_runtime_plan_uses_customization(runtime_plan)) {
+		return _instantiate_legacy(p_edit_state);
+	}
+
+	Vector<DeferredNodePathProperties> deferred_node_paths;
+	HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> resources_local_to_scenes;
+	HashMap<int, ObjectID> materialized_plan_nodes;
+	Node *root = _materialize_runtime_plan_node(runtime_plan, runtime_plan->get_root_plan_id(), nullptr, nullptr, nullptr, &deferred_node_paths, &resources_local_to_scenes, &materialized_plan_nodes, p_edit_state);
+	if (!root) {
+		return _instantiate_legacy(p_edit_state);
+	}
+
+	_resolve_runtime_plan_deferred_node_paths(deferred_node_paths);
+	for (KeyValue<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &E : resources_local_to_scenes) {
+		for (KeyValue<Ref<Resource>, Ref<Resource>> &R : E.value) {
+			R.value->setup_local_to_scene();
+		}
+	}
+	_apply_runtime_plan_connections(runtime_plan, materialized_plan_nodes, p_edit_state);
+
+	return root;
+}
+
+Ref<SceneInstantiationPlan> SceneState::_build_runtime_plan() const {
+	ERR_FAIL_COND_V(nodes.is_empty(), Ref<SceneInstantiationPlan>());
+
+	Ref<SceneInstantiationPlan> runtime_plan;
+	runtime_plan.instantiate();
+
+	const int root_plan_id = _append_runtime_plan_node(runtime_plan, const_cast<SceneState *>(this), 0, -1, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_LOCAL);
+	if (root_plan_id >= 0) {
+		runtime_plan->set_root_plan_id(root_plan_id);
+	}
+
+	return runtime_plan;
+}
+
+Vector<int> SceneState::_get_runtime_plan_direct_children(const Ref<SceneState> &p_source_state, int p_source_node_idx) const {
+	Vector<int> child_indices;
+	ERR_FAIL_COND_V(p_source_state.is_null(), child_indices);
+	ERR_FAIL_INDEX_V(p_source_node_idx, p_source_state->nodes.size(), child_indices);
+
+	const NodePath current_path = p_source_state->get_node_path(p_source_node_idx);
+	for (int node_idx = 0; node_idx < p_source_state->nodes.size(); node_idx++) {
+		if (node_idx == p_source_node_idx) {
+			continue;
+		}
+
+		const NodeData &node = p_source_state->nodes[node_idx];
+		if (node.parent < 0) {
+			continue;
+		}
+
+		bool is_direct_child = false;
+		if (node.parent & FLAG_ID_IS_PATH) {
+			is_direct_child = p_source_state->node_paths[node.parent & FLAG_MASK] == current_path;
+		} else {
+			is_direct_child = (node.parent & FLAG_MASK) == p_source_node_idx;
+		}
+
+		if (is_direct_child) {
+			child_indices.push_back(node_idx);
+		}
+	}
+
+	return child_indices;
+}
+
+NodePath SceneState::_compose_runtime_plan_path(const NodePath &p_base_path, const NodePath &p_relative_path) const {
+	if (p_base_path.is_empty() || p_base_path == NodePath(".")) {
+		return p_relative_path;
+	}
+	if (p_relative_path.is_empty() || p_relative_path == NodePath(".")) {
+		return p_base_path;
+	}
+
+	Vector<StringName> path_names;
+	for (int i = 0; i < p_base_path.get_name_count(); i++) {
+		path_names.push_back(p_base_path.get_name(i));
+	}
+	for (int i = 0; i < p_relative_path.get_name_count(); i++) {
+		const StringName name = p_relative_path.get_name(i);
+		if (i == 0 && name == StringName(".")) {
+			continue;
+		}
+		path_names.push_back(name);
+	}
+
+	if (path_names.is_empty()) {
+		return NodePath(".");
+	}
+
+	return NodePath(path_names, false);
+}
+
+void SceneState::_copy_runtime_plan_base_properties(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_source_state, int p_source_node_idx) const {
+	ERR_FAIL_COND(p_runtime_plan.is_null());
+	ERR_FAIL_COND(p_source_state.is_null());
+	ERR_FAIL_INDEX(p_source_node_idx, p_source_state->nodes.size());
+
+	const NodeData &node = p_source_state->nodes[p_source_node_idx];
+	for (int prop_idx = 0; prop_idx < node.properties.size(); prop_idx++) {
+		const NodeData::Property &property = node.properties[prop_idx];
+		const int property_name_idx = property.name & FLAG_PROP_NAME_MASK;
+		if (property_name_idx < 0 || property_name_idx >= p_source_state->names.size() || property.value < 0 || property.value >= p_source_state->variants.size()) {
+			continue;
+		}
+		p_runtime_plan->set_node_base_property(p_plan_id, p_source_state->names[property_name_idx], p_source_state->variants[property.value], property.name & FLAG_PATH_PROPERTY_IS_NODE);
+	}
+}
+
+void SceneState::_apply_runtime_plan_property_overrides(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_override_state, int p_override_node_idx) const {
+	ERR_FAIL_COND(p_runtime_plan.is_null());
+	ERR_FAIL_COND(p_override_state.is_null());
+	ERR_FAIL_INDEX(p_override_node_idx, p_override_state->nodes.size());
+
+	const NodeData &node = p_override_state->nodes[p_override_node_idx];
+	for (int prop_idx = 0; prop_idx < node.properties.size(); prop_idx++) {
+		const NodeData::Property &property = node.properties[prop_idx];
+		const int property_name_idx = property.name & FLAG_PROP_NAME_MASK;
+		if (property_name_idx < 0 || property_name_idx >= p_override_state->names.size() || property.value < 0 || property.value >= p_override_state->variants.size()) {
+			continue;
+		}
+		p_runtime_plan->_set_node_property(p_plan_id, p_override_state->names[property_name_idx], p_override_state->variants[property.value], property.name & FLAG_PATH_PROPERTY_IS_NODE);
+	}
+}
+
+void SceneState::_resolve_runtime_plan_deferred_node_paths(const Vector<DeferredNodePathProperties> &p_deferred_node_paths) const {
+	for (const DeferredNodePathProperties &dnp : p_deferred_node_paths) {
+		Node *base = ObjectDB::get_instance<Node>(dnp.base);
+		ERR_CONTINUE_EDMSG(!base, vformat("Failed to set deferred property '%s' as the base node disappeared.", dnp.property));
+		if (dnp.value.get_type() == Variant::ARRAY) {
+			Array paths = dnp.value;
+
+			bool valid;
+			Array array = base->get(dnp.property, &valid);
+			ERR_CONTINUE_EDMSG(!valid, vformat("Failed to get property '%s' from node '%s'.", dnp.property, base->get_name()));
+			array = array.duplicate();
+
+			array.resize(paths.size());
+			for (int i = 0; i < array.size(); i++) {
+				array.set(i, base->get_node_or_null(paths[i]));
+			}
+			base->set(dnp.property, array);
+		} else if (dnp.value.get_type() == Variant::DICTIONARY) {
+			Dictionary paths = dnp.value;
+
+			bool valid;
+			Dictionary dict = base->get(dnp.property, &valid);
+			ERR_CONTINUE_EDMSG(!valid, vformat("Failed to get property '%s' from node '%s'.", dnp.property, base->get_name()));
+			dict = dict.duplicate();
+			bool convert_key = dict.get_typed_key_builtin() == Variant::OBJECT &&
+					ClassDB::is_parent_class(dict.get_typed_key_class_name(), "Node");
+			bool convert_value = dict.get_typed_value_builtin() == Variant::OBJECT &&
+					ClassDB::is_parent_class(dict.get_typed_value_class_name(), "Node");
+
+			for (const KeyValue<Variant, Variant> &kv : paths) {
+				Variant key = kv.key;
+				if (convert_key) {
+					key = base->get_node_or_null(key);
+				}
+				Variant value = kv.value;
+				if (convert_value) {
+					value = base->get_node_or_null(value);
+				}
+				dict[key] = value;
+			}
+			base->set(dnp.property, dict);
+		} else {
+			base->set(dnp.property, base->get_node_or_null(dnp.value));
+		}
+	}
+}
+
+Node *SceneState::_get_runtime_plan_local_resource_base(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, Node *p_node, Node *p_root, Node *p_source_root) const {
+	ERR_FAIL_COND_V(p_runtime_plan.is_null(), nullptr);
+	ERR_FAIL_NULL_V(p_node, nullptr);
+	const SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data(p_plan_id);
+	ERR_FAIL_NULL_V(plan_node, nullptr);
+
+	if (plan_node->instance_root || plan_node->source_node_idx == 0) {
+		return p_node;
+	}
+
+	if (plan_node->source_state.is_valid()) {
+		const NodePath owner_path = plan_node->source_state->get_node_owner_path(plan_node->source_node_idx);
+		if (owner_path == NodePath(".")) {
+			return p_source_root ? p_source_root : p_node;
+		}
+		if (!owner_path.is_empty() && p_source_root) {
+			Node *owner = p_source_root->get_node_or_null(owner_path);
+			if (owner) {
+				return owner;
+			}
+		}
+	}
+
+	return p_root ? p_root : p_node;
+}
+
+Variant SceneState::_make_runtime_plan_local_resource(Variant &p_value, const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &p_resources_local_to_scenes, Node *p_node, const StringName p_property_name, Node *p_root, Node *p_source_root, GenEditState p_edit_state) const {
+	ERR_FAIL_COND_V(p_runtime_plan.is_null(), p_value);
+	const SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data(p_plan_id);
+	ERR_FAIL_NULL_V(plan_node, p_value);
+
+	Ref<Resource> resource = p_value;
+	if (resource.is_null() || !resource->is_local_to_scene()) {
+		return p_value;
+	}
+
+	Node *base = _get_runtime_plan_local_resource_base(p_runtime_plan, p_plan_id, p_node, p_root, p_source_root);
+	ERR_FAIL_NULL_V(base, p_value);
+
+	if (plan_node->instance_root) {
+		return get_remap_resource(resource, p_resources_local_to_scenes, p_node->get(p_property_name), base);
+	}
+
+	HashMap<Ref<Resource>, Ref<Resource>>::Iterator remapped_resource = p_resources_local_to_scenes[base].find(resource);
+	if (remapped_resource) {
+		return remapped_resource->value;
+	}
+
+	if (p_edit_state == GEN_EDIT_STATE_MAIN) {
+		resource->configure_for_local_scene(base, p_resources_local_to_scenes[base]);
+		p_resources_local_to_scenes[base][resource] = resource;
+		return resource;
+	}
+
+	Ref<Resource> local_duplicate = resource->duplicate_for_local_scene(base, p_resources_local_to_scenes[base]);
+	p_resources_local_to_scenes[base][resource] = local_duplicate;
+	return local_duplicate;
+}
+
+Array SceneState::_setup_runtime_plan_resources_in_array(Array &p_array_to_scan, const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &p_resources_local_to_scenes, Node *p_node, const StringName p_property_name, Node *p_root, Node *p_source_root, GenEditState p_edit_state) const {
+	for (int i = 0; i < p_array_to_scan.size(); i++) {
+		if (p_array_to_scan[i].get_type() == Variant::OBJECT) {
+			p_array_to_scan[i] = _make_runtime_plan_local_resource(p_array_to_scan[i], p_runtime_plan, p_plan_id, p_resources_local_to_scenes, p_node, p_property_name, p_root, p_source_root, p_edit_state);
+		}
+	}
+	return p_array_to_scan;
+}
+
+Dictionary SceneState::_setup_runtime_plan_resources_in_dictionary(Dictionary &p_dictionary_to_scan, const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &p_resources_local_to_scenes, Node *p_node, const StringName p_property_name, Node *p_root, Node *p_source_root, GenEditState p_edit_state) const {
+	const Array keys = p_dictionary_to_scan.keys();
+	const Array values = p_dictionary_to_scan.values();
+
+	if (has_local_resource(values) || has_local_resource(keys)) {
+		Array duplicated_keys = keys.duplicate(true);
+		Array duplicated_values = values.duplicate(true);
+
+		duplicated_keys = _setup_runtime_plan_resources_in_array(duplicated_keys, p_runtime_plan, p_plan_id, p_resources_local_to_scenes, p_node, p_property_name, p_root, p_source_root, p_edit_state);
+		duplicated_values = _setup_runtime_plan_resources_in_array(duplicated_values, p_runtime_plan, p_plan_id, p_resources_local_to_scenes, p_node, p_property_name, p_root, p_source_root, p_edit_state);
+		p_dictionary_to_scan.clear();
+
+		for (int i = 0; i < keys.size(); i++) {
+			p_dictionary_to_scan[duplicated_keys[i]] = duplicated_values[i];
+		}
+	}
+
+	return p_dictionary_to_scan;
+}
+
+int SceneState::_find_runtime_plan_node_by_source_path(const Ref<SceneInstantiationPlan> &p_runtime_plan, const NodePath &p_source_path) const {
+	ERR_FAIL_COND_V(p_runtime_plan.is_null(), -1);
+
+	int match_id = -1;
+	for (const SceneInstantiationPlan::PlanNodeData &plan_node : p_runtime_plan->plan_nodes) {
+		if (plan_node.pruned || plan_node.flattened) {
+			continue;
+		}
+		if (plan_node.source_path == p_source_path) {
+			if (match_id >= 0) {
+				return -1;
+			}
+			match_id = plan_node.plan_id;
+		}
+	}
+
+	return match_id;
+}
+
+void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_override_state, int p_override_node_idx) const {
+	ERR_FAIL_COND(p_runtime_plan.is_null());
+	ERR_FAIL_COND(p_override_state.is_null());
+	ERR_FAIL_INDEX(p_override_node_idx, p_override_state->nodes.size());
+
+	const Vector<int> override_children = _get_runtime_plan_direct_children(p_override_state, p_override_node_idx);
+	for (int child_node_idx : override_children) {
+		const NodeData &override_child = p_override_state->nodes[child_node_idx];
+		const NodePath child_path = p_override_state->get_node_path(child_node_idx);
+
+		if (override_child.type == TYPE_INSTANTIATED) {
+			const int target_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, child_path);
+			if (target_plan_id < 0) {
+				continue;
+			}
+			_apply_runtime_plan_property_overrides(p_runtime_plan, target_plan_id, p_override_state, child_node_idx);
+			_merge_runtime_plan_instance_overrides(p_runtime_plan, target_plan_id, p_override_state, child_node_idx);
+			continue;
+		}
+
+		_append_runtime_plan_node(p_runtime_plan, p_override_state, child_node_idx, p_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_OWNER_ADDED, child_path);
+	}
+}
+
+int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_runtime_plan, const Ref<SceneState> &p_source_state, int p_source_node_idx, int p_parent_plan_id, SceneInstantiationPlanNodeOrigin p_origin, const NodePath &p_source_path_override, const StringName &p_name_override) const {
+	ERR_FAIL_COND_V(p_runtime_plan.is_null(), -1);
+	ERR_FAIL_COND_V(p_source_state.is_null(), -1);
+	ERR_FAIL_INDEX_V(p_source_node_idx, p_source_state->nodes.size(), -1);
+
+	const NodeData &source_node = p_source_state->nodes[p_source_node_idx];
+	const NodePath source_path = p_source_path_override.is_empty() ? p_source_state->get_node_path(p_source_node_idx) : p_source_path_override;
+
+	if (source_node.instance >= 0) {
+		Ref<PackedScene> instance_scene = p_source_state->get_node_instance(p_source_node_idx);
+		if (instance_scene.is_valid()) {
+			Ref<SceneState> instance_state = instance_scene->get_state();
+			if (instance_state.is_valid() && instance_state->get_node_count() > 0) {
+				const StringName merged_name = p_name_override == StringName() ? p_source_state->get_node_name(p_source_node_idx) : p_name_override;
+				const int plan_id = p_runtime_plan->add_node(instance_state, 0, p_parent_plan_id, source_path, instance_state->get_path(), merged_name, instance_state->get_node_type(0), SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_NESTED_SCENE, true);
+				_copy_runtime_plan_base_properties(p_runtime_plan, plan_id, instance_state, 0);
+				_apply_runtime_plan_property_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
+
+				const Vector<int> nested_children = _get_runtime_plan_direct_children(instance_state, 0);
+				for (int child_node_idx : nested_children) {
+					const NodePath child_path = _compose_runtime_plan_path(source_path, instance_state->get_node_path(child_node_idx));
+					_append_runtime_plan_node(p_runtime_plan, instance_state, child_node_idx, plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_NESTED_SCENE, child_path);
+				}
+
+				_merge_runtime_plan_instance_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
+
+				return plan_id;
+			}
+		}
+	}
+
+	const StringName node_name = p_name_override == StringName() ? p_source_state->get_node_name(p_source_node_idx) : p_name_override;
+	StringName node_type;
+	if (source_node.type == TYPE_INSTANTIATED) {
+		node_type = StringName("TYPE_INSTANTIATED");
+	} else if (source_node.type >= 0 && source_node.type < p_source_state->names.size()) {
+		node_type = p_source_state->names[source_node.type];
+	}
+
+	const int plan_id = p_runtime_plan->add_node(p_source_state, p_source_node_idx, p_parent_plan_id, source_path, p_source_state->get_path(), node_name, node_type, p_origin, false);
+	_copy_runtime_plan_base_properties(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
+
+	const Vector<int> child_nodes = _get_runtime_plan_direct_children(p_source_state, p_source_node_idx);
+	for (int child_node_idx : child_nodes) {
+		_append_runtime_plan_node(p_runtime_plan, p_source_state, child_node_idx, plan_id, p_origin);
+	}
+
+	return plan_id;
+}
+
+bool SceneState::_runtime_plan_requires_legacy_fallback(const Ref<SceneInstantiationPlan> &p_runtime_plan) const {
+	ERR_FAIL_COND_V(p_runtime_plan.is_null(), true);
+
+	if (_runtime_plan_requires_legacy_connection_fallback(p_runtime_plan)) {
+		return true;
+	}
+
+	for (const SceneInstantiationPlan::PlanNodeData &plan_node : p_runtime_plan->plan_nodes) {
+		if (plan_node.pruned) {
+			continue;
+		}
+		if (plan_node.source_state.is_null()) {
+			return true;
+		}
+		const SceneState *source_state = plan_node.source_state.ptr();
+		if (plan_node.source_node_idx < 0 || plan_node.source_node_idx >= source_state->nodes.size()) {
+			return true;
+		}
+
+		const NodeData &source_node = source_state->nodes[plan_node.source_node_idx];
+		if (source_node.instance >= 0 || source_node.type == TYPE_INSTANTIATED) {
+			return true;
+		}
+
+		for (const NodeData::Property &property : source_node.properties) {
+			const int property_name_idx = property.name & FLAG_PROP_NAME_MASK;
+			if (property_name_idx < 0 || property_name_idx >= source_state->names.size()) {
+				continue;
+			}
+
+			const StringName property_name = source_state->names[property_name_idx];
+			if (!plan_node.properties.has(property_name)) {
+				continue;
+			}
+
+			const Variant &value = plan_node.properties[property_name];
+			if (value.get_type() != Variant::OBJECT) {
+				continue;
+			}
+		}
+	}
+
+	return false;
+}
+
+bool SceneState::_runtime_plan_requires_legacy_connection_fallback(const Ref<SceneInstantiationPlan> &p_runtime_plan) const {
+	ERR_FAIL_COND_V(p_runtime_plan.is_null(), true);
+
+	bool has_connections = false;
+	for (const SceneInstantiationPlan::PlanNodeData &plan_node : p_runtime_plan->plan_nodes) {
+		if (plan_node.pruned || plan_node.flattened || plan_node.source_state.is_null() || plan_node.source_node_idx != 0) {
+			continue;
+		}
+		if (!plan_node.source_state->connections.is_empty()) {
+			has_connections = true;
+			break;
+		}
+	}
+
+	if (!has_connections) {
+		return false;
+	}
+
+	for (const SceneInstantiationPlan::PlanNodeData &plan_node : p_runtime_plan->plan_nodes) {
+		if (plan_node.flattened || plan_node.origin == SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_DUPLICATED) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void SceneState::_apply_runtime_plan_connections(const Ref<SceneInstantiationPlan> &p_runtime_plan, const HashMap<int, ObjectID> &p_materialized_plan_nodes, GenEditState p_edit_state) const {
+	ERR_FAIL_COND(p_runtime_plan.is_null());
+
+	for (const SceneInstantiationPlan::PlanNodeData &scene_root_plan : p_runtime_plan->plan_nodes) {
+		if (scene_root_plan.pruned || scene_root_plan.flattened || scene_root_plan.source_state.is_null() || scene_root_plan.source_node_idx != 0) {
+			continue;
+		}
+
+		const SceneState *source_state = scene_root_plan.source_state.ptr();
+		if (source_state->connections.is_empty()) {
+			continue;
+		}
+
+		for (const ConnectionData &connection : source_state->connections) {
+			NodePath from_path;
+			if (connection.from & FLAG_ID_IS_PATH) {
+				from_path = source_state->node_paths[connection.from & FLAG_MASK];
+			} else {
+				from_path = source_state->get_node_path(connection.from);
+			}
+
+			NodePath to_path;
+			if (connection.to & FLAG_ID_IS_PATH) {
+				to_path = source_state->node_paths[connection.to & FLAG_MASK];
+			} else {
+				to_path = source_state->get_node_path(connection.to);
+			}
+
+			const NodePath full_from_path = _compose_runtime_plan_path(scene_root_plan.source_path, from_path);
+			const NodePath full_to_path = _compose_runtime_plan_path(scene_root_plan.source_path, to_path);
+
+			const int from_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, full_from_path);
+			const int to_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, full_to_path);
+			if (from_plan_id < 0 || to_plan_id < 0 || !p_materialized_plan_nodes.has(from_plan_id) || !p_materialized_plan_nodes.has(to_plan_id)) {
+				continue;
+			}
+
+			Node *from_node = ObjectDB::get_instance<Node>(p_materialized_plan_nodes[from_plan_id]);
+			Node *to_node = ObjectDB::get_instance<Node>(p_materialized_plan_nodes[to_plan_id]);
+			if (!from_node || !to_node) {
+				continue;
+			}
+
+			Callable callable(to_node, source_state->names[connection.method]);
+			Array binds;
+			for (int bind : connection.binds) {
+				binds.push_back(source_state->variants[bind]);
+			}
+
+			if (!binds.is_empty()) {
+				callable = callable.bindv(binds);
+			}
+
+			if (connection.unbinds > 0) {
+				callable = callable.unbind(connection.unbinds);
+			}
+
+			from_node->connect(source_state->names[connection.signal], callable, CONNECT_PERSIST | connection.flags | (p_edit_state == GEN_EDIT_STATE_MAIN ? 0 : CONNECT_INHERITED));
+		}
+	}
+}
+
+bool SceneState::_runtime_plan_uses_customization(const Ref<SceneInstantiationPlan> &p_runtime_plan) const {
+	ERR_FAIL_COND_V(p_runtime_plan.is_null(), false);
+
+	for (const SceneInstantiationPlan::PlanNodeData &plan_node : p_runtime_plan->plan_nodes) {
+		if (plan_node.pruned) {
+			continue;
+		}
+
+		if (plan_node.type != StringName()) {
+			if (::ClassDB::has_method(plan_node.type, SNAME("_customize_scene_instantiation")) ||
+					::ClassDB::has_method(plan_node.type, SNAME("_filter_scene_children"))) {
+				return true;
+			}
+		}
+
+		if (plan_node.properties.has(CoreStringName(script))) {
+			Ref<Script> script = plan_node.properties[CoreStringName(script)];
+			if (script.is_valid() && (script->has_method(SNAME("_customize_scene_instantiation")) || script->has_method(SNAME("_filter_scene_children")))) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+void SceneState::_apply_legacy_filter_to_runtime_plan(Node *p_node, const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id) const {
+	ERR_FAIL_NULL(p_node);
+	ERR_FAIL_COND(p_runtime_plan.is_null());
+
+	const SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data(p_plan_id);
+	ERR_FAIL_NULL(plan_node);
+
+	const Vector<int> child_plan_ids = plan_node->child_plan_ids;
+	Array child_infos;
+	for (int child_plan_id : child_plan_ids) {
+		const SceneInstantiationPlan::PlanNodeData *child_node = p_runtime_plan->_get_node_data(child_plan_id);
+		if (!child_node || child_node->pruned) {
+			continue;
+		}
+
+		Dictionary child_info;
+		child_info["id"] = child_plan_id;
+		child_info["name"] = child_node->name;
+		child_info["type"] = child_node->type;
+
+		Dictionary property_dict;
+		for (const KeyValue<StringName, Variant> &kv : child_node->properties) {
+			property_dict[kv.key] = kv.value;
+		}
+		child_info["properties"] = property_dict;
+		child_infos.push_back(child_info);
+	}
+
+	Variant filter_result = p_node->call("_filter_scene_children", child_infos);
+	if (filter_result.get_type() != Variant::ARRAY) {
+		return;
+	}
+
+	HashMap<int, Vector<Dictionary>> filtered_entries_by_id;
+	const Array filtered_infos = filter_result;
+	for (int i = 0; i < filtered_infos.size(); i++) {
+		Dictionary filtered_info = filtered_infos[i];
+		if (!filtered_info.has("id")) {
+			continue;
+		}
+		const int child_plan_id = filtered_info["id"];
+		if (!p_runtime_plan->has_node(child_plan_id)) {
+			continue;
+		}
+		if (!filtered_entries_by_id.has(child_plan_id)) {
+			filtered_entries_by_id.insert(child_plan_id, Vector<Dictionary>());
+		}
+		filtered_entries_by_id[child_plan_id].push_back(filtered_info);
+	}
+
+	for (int child_plan_id : child_plan_ids) {
+		if (!filtered_entries_by_id.has(child_plan_id)) {
+			p_runtime_plan->_prune_node(child_plan_id);
+			continue;
+		}
+
+		auto apply_filtered_entry = [&](const Ref<SceneInstantiationPlanNode> &p_plan_node_ref, const Dictionary &p_filtered_entry) {
+			if (p_plan_node_ref.is_null() || !p_filtered_entry.has("properties")) {
+				return;
+			}
+
+			Dictionary override_properties = p_filtered_entry["properties"];
+			for (const KeyValue<Variant, Variant> &kv : override_properties) {
+				const StringName property_name = kv.key;
+				if (property_name == StringName("name")) {
+					p_plan_node_ref->set_name(kv.value);
+				} else {
+					p_plan_node_ref->set_property(property_name, kv.value);
+				}
+			}
+		};
+
+		const Vector<Dictionary> &filtered_entries = filtered_entries_by_id[child_plan_id];
+		apply_filtered_entry(p_runtime_plan->_make_node_ref(child_plan_id), filtered_entries[0]);
+
+		if (filtered_entries.size() > 1) {
+			const Array duplicates = p_runtime_plan->_duplicate_node(child_plan_id, filtered_entries.size() - 1);
+			for (int duplicate_idx = 0; duplicate_idx < duplicates.size() && duplicate_idx + 1 < filtered_entries.size(); duplicate_idx++) {
+				Ref<SceneInstantiationPlanNode> duplicate_node = duplicates[duplicate_idx];
+				apply_filtered_entry(duplicate_node, filtered_entries[duplicate_idx + 1]);
+			}
+		}
+	}
+}
+
+Node *SceneState::_materialize_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, Node *p_parent, Node *p_root, Node *p_source_root, Vector<DeferredNodePathProperties> *p_deferred_node_paths, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> *p_resources_local_to_scenes, HashMap<int, ObjectID> *p_materialized_plan_nodes, GenEditState p_edit_state) const {
+	ERR_FAIL_COND_V(p_runtime_plan.is_null(), nullptr);
+
+	const SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data(p_plan_id);
+	ERR_FAIL_NULL_V(plan_node, nullptr);
+	if (plan_node->pruned) {
+		return nullptr;
+	}
+
+	ERR_FAIL_COND_V(plan_node->source_state.is_null(), nullptr);
+	const SceneState *source_state = plan_node->source_state.ptr();
+	ERR_FAIL_COND_V(plan_node->source_node_idx < 0 || plan_node->source_node_idx >= source_state->nodes.size(), nullptr);
+	const NodeData &source_node = source_state->nodes[plan_node->source_node_idx];
+
+	Object *obj = ::ClassDB::instantiate(plan_node->type);
+	ERR_FAIL_NULL_V(obj, nullptr);
+
+	Node *node = Object::cast_to<Node>(obj);
+	if (!node) {
+		memdelete(obj);
+		ERR_FAIL_V(nullptr);
+	}
+
+	Node *root = p_root ? p_root : node;
+	Node *source_root = p_source_root ? p_source_root : node;
+	if (plan_node->source_node_idx == 0) {
+		source_root = node;
+	}
+
+	if (plan_node->properties.has(CoreStringName(script))) {
+		bool valid = true;
+		node->set(CoreStringName(script), plan_node->properties[CoreStringName(script)], &valid);
+	}
+
+	for (const KeyValue<StringName, Variant> &kv : plan_node->properties) {
+		if (kv.key == CoreStringName(script)) {
+			continue;
+		}
+		if (plan_node->deferred_node_properties.has(kv.key)) {
+			if (!Engine::get_singleton()->is_editor_hint() && node->get_scene_instance_load_placeholder()) {
+				bool valid = true;
+				node->set(kv.key, kv.value, &valid);
+			} else if (p_deferred_node_paths) {
+				DeferredNodePathProperties dnp;
+				dnp.value = kv.value;
+				dnp.base = node->get_instance_id();
+				dnp.property = kv.key;
+				p_deferred_node_paths->push_back(dnp);
+			}
+			continue;
+		}
+		Variant value = kv.value;
+		if (p_resources_local_to_scenes) {
+			if (value.get_type() == Variant::OBJECT) {
+				Ref<Resource> resource = value;
+				if (resource.is_valid()) {
+					value = _make_runtime_plan_local_resource(value, p_runtime_plan, p_plan_id, *p_resources_local_to_scenes, node, kv.key, root, source_root, p_edit_state);
+				}
+			}
+
+			if (value.get_type() == Variant::ARRAY) {
+				Array set_array = value;
+				bool is_get_valid = false;
+				Variant get_value = node->get(kv.key, &is_get_valid);
+
+				if (is_get_valid && get_value.get_type() == Variant::ARRAY) {
+					Array get_array = get_value;
+					if (set_array.is_same_typed(get_array)) {
+						set_array = set_array.duplicate();
+					} else {
+						set_array = Array(set_array, get_array.get_typed_builtin(), get_array.get_typed_class_name(), get_array.get_typed_script());
+					}
+				}
+
+				value = _setup_runtime_plan_resources_in_array(set_array, p_runtime_plan, p_plan_id, *p_resources_local_to_scenes, node, kv.key, root, source_root, p_edit_state);
+			}
+
+			if (value.get_type() == Variant::DICTIONARY) {
+				Dictionary set_dict = value;
+				bool is_get_valid = false;
+				Variant get_value = node->get(kv.key, &is_get_valid);
+
+				if (is_get_valid && get_value.get_type() == Variant::DICTIONARY) {
+					Dictionary get_dict = get_value;
+					if (set_dict.is_same_typed(get_dict)) {
+						set_dict = set_dict.duplicate();
+					} else {
+						set_dict = Dictionary(set_dict, get_dict.get_typed_key_builtin(), get_dict.get_typed_key_class_name(), get_dict.get_typed_key_script(), get_dict.get_typed_value_builtin(), get_dict.get_typed_value_class_name(), get_dict.get_typed_value_script());
+					}
+				}
+
+				value = _setup_runtime_plan_resources_in_dictionary(set_dict, p_runtime_plan, p_plan_id, *p_resources_local_to_scenes, node, kv.key, root, source_root, p_edit_state);
+			}
+		}
+		bool valid = true;
+		node->set(kv.key, value, &valid);
+	}
+
+	for (int group_idx = 0; group_idx < source_node.groups.size(); group_idx++) {
+		const int group_name_idx = source_node.groups[group_idx];
+		ERR_FAIL_INDEX_V(group_name_idx, source_state->names.size(), nullptr);
+		node->add_to_group(source_state->names[group_name_idx], true);
+	}
+
+	node->_set_name_nocheck(plan_node->name);
+
+	if (node->has_method("_customize_scene_instantiation")) {
+		node->call("_customize_scene_instantiation", p_runtime_plan->_make_node_ref(p_plan_id));
+	} else if (node->has_method("_filter_scene_children")) {
+		_apply_legacy_filter_to_runtime_plan(node, p_runtime_plan, p_plan_id);
+	}
+
+	plan_node = p_runtime_plan->_get_node_data(p_plan_id);
+	ERR_FAIL_NULL_V(plan_node, nullptr);
+	if (plan_node->pruned || plan_node->flattened) {
+		if (p_resources_local_to_scenes && p_resources_local_to_scenes->has(node)) {
+			p_resources_local_to_scenes->erase(node);
+		}
+		memdelete(node);
+		return nullptr;
+	}
+
+	if (p_materialized_plan_nodes) {
+		p_materialized_plan_nodes->insert(p_plan_id, node->get_instance_id());
+	}
+	if (p_parent) {
+		p_parent->_add_child_nocheck(node, plan_node->name);
+	}
+
+	NodePath owner_path = source_state->get_node_owner_path(plan_node->source_node_idx);
+	if (!owner_path.is_empty()) {
+		Node *owner = nullptr;
+		if (owner_path == NodePath(".")) {
+			owner = source_root;
+		} else if (source_root) {
+			owner = source_root->get_node_or_null(owner_path);
+		}
+		if (owner) {
+			node->_set_owner_nocheck(owner);
+		}
+	}
+
+	int child_idx = 0;
+	while (true) {
+		plan_node = p_runtime_plan->_get_node_data(p_plan_id);
+		ERR_FAIL_NULL_V(plan_node, node);
+		if (child_idx >= plan_node->child_plan_ids.size()) {
+			break;
+		}
+
+		const int child_plan_id = plan_node->child_plan_ids[child_idx];
+		Node *materialized_child = _materialize_runtime_plan_node(p_runtime_plan, child_plan_id, node, root, source_root, p_deferred_node_paths, p_resources_local_to_scenes, p_materialized_plan_nodes, p_edit_state);
+		const SceneInstantiationPlan::PlanNodeData *child_plan = p_runtime_plan->has_node(child_plan_id) ? p_runtime_plan->_get_node_data(child_plan_id) : nullptr;
+		if (!materialized_child && child_plan && (child_plan->pruned || child_plan->flattened)) {
+			continue;
+		}
+		child_idx++;
+	}
+
+	return node;
+}
+
+Node *SceneState::instantiate(GenEditState p_edit_state) const {
+	if (Engine::get_singleton()->is_editor_hint()) {
+		return _instantiate_legacy(p_edit_state);
+	}
+
+	return _instantiate_runtime_plan(p_edit_state);
 }
 
 Variant SceneState::make_local_resource(Variant &p_value, const SceneState::NodeData &p_node_data, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &p_resources_local_to_scenes, Node *p_node, const StringName p_sname, int p_i, Node **p_ret_nodes, SceneState::GenEditState p_edit_state) const {
@@ -2960,6 +4093,38 @@ void SceneState::_bind_methods() {
 	BIND_ENUM_CONSTANT(GEN_EDIT_STATE_INSTANCE);
 	BIND_ENUM_CONSTANT(GEN_EDIT_STATE_MAIN);
 	BIND_ENUM_CONSTANT(GEN_EDIT_STATE_MAIN_INHERITED);
+}
+
+void SceneInstantiationPlan::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("get_root_plan_id"), &SceneInstantiationPlan::get_root_plan_id);
+	ClassDB::bind_method(D_METHOD("get_root_node"), &SceneInstantiationPlan::get_root_node);
+}
+
+void SceneInstantiationPlanNode::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("get_plan_id"), &SceneInstantiationPlanNode::get_plan_id);
+	ClassDB::bind_method(D_METHOD("get_name"), &SceneInstantiationPlanNode::get_name);
+	ClassDB::bind_method(D_METHOD("set_name", "name"), &SceneInstantiationPlanNode::set_name);
+	ClassDB::bind_method(D_METHOD("get_type"), &SceneInstantiationPlanNode::get_type);
+	ClassDB::bind_method(D_METHOD("get_source_path"), &SceneInstantiationPlanNode::get_source_path);
+	ClassDB::bind_method(D_METHOD("get_source_scene_path"), &SceneInstantiationPlanNode::get_source_scene_path);
+	ClassDB::bind_method(D_METHOD("get_origin"), &SceneInstantiationPlanNode::get_origin);
+	ClassDB::bind_method(D_METHOD("is_instance_root"), &SceneInstantiationPlanNode::is_instance_root);
+	ClassDB::bind_method(D_METHOD("get_parent"), &SceneInstantiationPlanNode::get_parent);
+	ClassDB::bind_method(D_METHOD("get_child_count"), &SceneInstantiationPlanNode::get_child_count);
+	ClassDB::bind_method(D_METHOD("get_child", "index"), &SceneInstantiationPlanNode::get_child);
+	ClassDB::bind_method(D_METHOD("get_children"), &SceneInstantiationPlanNode::get_children);
+	ClassDB::bind_method(D_METHOD("has_property", "name"), &SceneInstantiationPlanNode::has_property);
+	ClassDB::bind_method(D_METHOD("get_property", "name", "default_value"), &SceneInstantiationPlanNode::get_property, DEFVAL(Variant()));
+	ClassDB::bind_method(D_METHOD("set_property", "name", "value"), &SceneInstantiationPlanNode::set_property);
+	ClassDB::bind_method(D_METHOD("clear_property_override", "name"), &SceneInstantiationPlanNode::clear_property_override);
+	ClassDB::bind_method(D_METHOD("prune"), &SceneInstantiationPlanNode::prune);
+	ClassDB::bind_method(D_METHOD("duplicate", "additional_count"), &SceneInstantiationPlanNode::duplicate);
+	ClassDB::bind_method(D_METHOD("flatten_into_parent"), &SceneInstantiationPlanNode::flatten_into_parent);
+
+	BIND_ENUM_CONSTANT(ORIGIN_LOCAL);
+	BIND_ENUM_CONSTANT(ORIGIN_NESTED_SCENE);
+	BIND_ENUM_CONSTANT(ORIGIN_OWNER_ADDED);
+	BIND_ENUM_CONSTANT(ORIGIN_DUPLICATED);
 }
 
 SceneState::SceneState() {
