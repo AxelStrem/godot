@@ -34,6 +34,15 @@
 #include "scene/main/node.h"
 
 class PackedScene;
+class SceneInstantiationPlan;
+class SceneInstantiationPlanNode;
+
+enum SceneInstantiationPlanNodeOrigin {
+	SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_LOCAL,
+	SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_NESTED_SCENE,
+	SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_OWNER_ADDED,
+	SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_DUPLICATED,
+};
 
 class SceneState : public RefCounted {
 	GDCLASS(SceneState, RefCounted);
@@ -139,6 +148,31 @@ public:
 		Ref<SceneState> state;
 		int node = -1;
 	};
+
+private:
+	Node *_instantiate_legacy(GenEditState p_edit_state) const;
+	Node *_instantiate_runtime_plan(GenEditState p_edit_state) const;
+	Ref<SceneInstantiationPlan> _build_runtime_plan() const;
+	Vector<int> _get_runtime_plan_direct_children(const Ref<SceneState> &p_source_state, int p_source_node_idx) const;
+	NodePath _compose_runtime_plan_path(const NodePath &p_base_path, const NodePath &p_relative_path) const;
+	void _copy_runtime_plan_base_properties(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_source_state, int p_source_node_idx) const;
+	void _apply_runtime_plan_property_overrides(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_override_state, int p_override_node_idx) const;
+	void _resolve_runtime_plan_deferred_node_paths(const Vector<DeferredNodePathProperties> &p_deferred_node_paths) const;
+	Node *_get_runtime_plan_local_resource_base(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, Node *p_node, Node *p_root, Node *p_source_root) const;
+	Variant _make_runtime_plan_local_resource(Variant &p_value, const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &p_resources_local_to_scenes, Node *p_node, const StringName p_property_name, Node *p_root, Node *p_source_root, GenEditState p_edit_state) const;
+	Array _setup_runtime_plan_resources_in_array(Array &p_array_to_scan, const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &p_resources_local_to_scenes, Node *p_node, const StringName p_property_name, Node *p_root, Node *p_source_root, GenEditState p_edit_state) const;
+	Dictionary _setup_runtime_plan_resources_in_dictionary(Dictionary &p_dictionary_to_scan, const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &p_resources_local_to_scenes, Node *p_node, const StringName p_property_name, Node *p_root, Node *p_source_root, GenEditState p_edit_state) const;
+	int _find_runtime_plan_node_by_source_path(const Ref<SceneInstantiationPlan> &p_runtime_plan, const NodePath &p_source_path) const;
+	void _merge_runtime_plan_instance_overrides(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_override_state, int p_override_node_idx) const;
+	int _append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_runtime_plan, const Ref<SceneState> &p_source_state, int p_source_node_idx, int p_parent_plan_id, SceneInstantiationPlanNodeOrigin p_origin, const NodePath &p_source_path_override = NodePath(), const StringName &p_name_override = StringName()) const;
+	bool _runtime_plan_requires_legacy_connection_fallback(const Ref<SceneInstantiationPlan> &p_runtime_plan) const;
+	void _apply_runtime_plan_connections(const Ref<SceneInstantiationPlan> &p_runtime_plan, const HashMap<int, ObjectID> &p_materialized_plan_nodes, GenEditState p_edit_state) const;
+	bool _runtime_plan_requires_legacy_fallback(const Ref<SceneInstantiationPlan> &p_runtime_plan) const;
+	bool _runtime_plan_uses_customization(const Ref<SceneInstantiationPlan> &p_runtime_plan) const;
+	void _apply_legacy_filter_to_runtime_plan(Node *p_node, const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id) const;
+	Node *_materialize_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, Node *p_parent, Node *p_root, Node *p_source_root, Vector<DeferredNodePathProperties> *p_deferred_node_paths, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> *p_resources_local_to_scenes, HashMap<int, ObjectID> *p_materialized_plan_nodes, GenEditState p_edit_state) const;
+
+public:
 
 	static void set_disable_placeholders(bool p_disable);
 	static Ref<Resource> get_remap_resource(const Ref<Resource> &p_resource, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &remap_cache, const Ref<Resource> &p_fallback, Node *p_for_scene);
@@ -246,6 +280,106 @@ public:
 };
 
 VARIANT_ENUM_CAST(SceneState::GenEditState)
+
+class SceneInstantiationPlan : public RefCounted {
+	GDCLASS(SceneInstantiationPlan, RefCounted);
+
+	friend class SceneInstantiationPlanNode;
+	friend class SceneState;
+
+	struct PlanNodeData {
+		int plan_id = -1;
+		int parent_plan_id = -1;
+		Vector<int> child_plan_ids;
+		Ref<SceneState> source_state;
+		int source_node_idx = -1;
+		NodePath source_path;
+		String source_scene_path;
+		StringName name;
+		StringName type;
+		HashMap<StringName, Variant> base_properties;
+		HashMap<StringName, Variant> properties;
+		HashSet<StringName> deferred_node_properties;
+		SceneInstantiationPlanNodeOrigin origin = SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_LOCAL;
+		bool instance_root = false;
+		bool pruned = false;
+		bool flattened = false;
+	};
+
+	Vector<PlanNodeData> plan_nodes;
+	int root_plan_id = -1;
+
+	const PlanNodeData *_get_node_data(int p_plan_id) const;
+	PlanNodeData *_get_node_data_w(int p_plan_id);
+	Ref<SceneInstantiationPlanNode> _make_node_ref(int p_plan_id) const;
+	void _detach_from_parent(int p_plan_id);
+	int _duplicate_node_subtree(int p_plan_id, int p_parent_plan_id);
+	void _set_node_property(int p_plan_id, const StringName &p_name, const Variant &p_value, bool p_deferred_node_path = false);
+	void _clear_node_property_override(int p_plan_id, const StringName &p_name);
+	void _rename_node(int p_plan_id, const StringName &p_name);
+	void _prune_node(int p_plan_id);
+	Array _duplicate_node(int p_plan_id, int p_additional_count);
+	void _flatten_node(int p_plan_id);
+
+protected:
+	static void _bind_methods();
+
+public:
+	int add_node(const Ref<SceneState> &p_source_state, int p_source_node_idx, int p_parent_plan_id, const NodePath &p_source_path, const String &p_source_scene_path, const StringName &p_name, const StringName &p_type, SceneInstantiationPlanNodeOrigin p_origin, bool p_instance_root);
+	void set_root_plan_id(int p_plan_id);
+	void set_node_base_property(int p_plan_id, const StringName &p_name, const Variant &p_value, bool p_deferred_node_path = false);
+	bool has_node(int p_plan_id) const;
+	int get_root_plan_id() const;
+	Ref<SceneInstantiationPlanNode> get_root_node() const;
+
+	SceneInstantiationPlan();
+};
+
+class SceneInstantiationPlanNode : public RefCounted {
+	GDCLASS(SceneInstantiationPlanNode, RefCounted);
+
+	friend class SceneInstantiationPlan;
+
+	Ref<SceneInstantiationPlan> plan;
+	int plan_id = -1;
+
+	void _setup(const Ref<SceneInstantiationPlan> &p_plan, int p_plan_id);
+
+protected:
+	static void _bind_methods();
+
+public:
+	enum Origin {
+		ORIGIN_LOCAL = SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_LOCAL,
+		ORIGIN_NESTED_SCENE = SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_NESTED_SCENE,
+		ORIGIN_OWNER_ADDED = SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_OWNER_ADDED,
+		ORIGIN_DUPLICATED = SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_DUPLICATED,
+	};
+
+	int get_plan_id() const;
+	StringName get_name() const;
+	void set_name(const StringName &p_name);
+	StringName get_type() const;
+	NodePath get_source_path() const;
+	String get_source_scene_path() const;
+	int get_origin() const;
+	bool is_instance_root() const;
+	Ref<SceneInstantiationPlanNode> get_parent() const;
+	int get_child_count() const;
+	Ref<SceneInstantiationPlanNode> get_child(int p_index) const;
+	Array get_children() const;
+	bool has_property(const StringName &p_name) const;
+	Variant get_property(const StringName &p_name, const Variant &p_default = Variant()) const;
+	void set_property(const StringName &p_name, const Variant &p_value);
+	void clear_property_override(const StringName &p_name);
+	void prune();
+	Array duplicate(int p_additional_count);
+	void flatten_into_parent();
+
+	SceneInstantiationPlanNode();
+};
+
+VARIANT_ENUM_CAST(SceneInstantiationPlanNode::Origin)
 
 class PackedScene : public Resource {
 	GDCLASS(PackedScene, Resource);

@@ -32,9 +32,14 @@
 
 TEST_FORCE_LINK(test_packed_scene)
 
+#include "core/io/dir_access.h"
+#include "core/config/engine.h"
+#include "core/io/resource_loader.h"
+#include "core/io/resource_saver.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "scene/resources/packed_scene.h"
+#include "tests/test_utils.h"
 
 namespace TestPackedScene {
 
@@ -81,6 +86,313 @@ public:
 			}
 		}
 		return filtered_children;
+	}
+};
+
+class PlanningLeaf : public Node {
+	GDCLASS(PlanningLeaf, Node);
+
+	int number = -1;
+
+	static void _bind_methods() {
+		ClassDB::bind_method(D_METHOD("set_number", "number"), &PlanningLeaf::set_number);
+		ClassDB::bind_method(D_METHOD("get_number"), &PlanningLeaf::get_number);
+		ADD_PROPERTY(PropertyInfo(Variant::INT, "number"), "set_number", "get_number");
+	}
+
+public:
+	static PlanningLeaf *create_registered() {
+		static bool registered = false;
+		if (!registered) {
+			GDREGISTER_CLASS(PlanningLeaf);
+			registered = true;
+		}
+		return memnew(PlanningLeaf);
+	}
+
+	void set_number(int p_number) {
+		number = p_number;
+	}
+
+	int get_number() const {
+		return number;
+	}
+};
+
+class NodeReferenceLeaf : public Node {
+	GDCLASS(NodeReferenceLeaf, Node);
+
+	Node *exported_node = nullptr;
+
+	static void _bind_methods() {
+		ClassDB::bind_method(D_METHOD("set_exported_node", "node"), &NodeReferenceLeaf::set_exported_node);
+		ClassDB::bind_method(D_METHOD("get_exported_node"), &NodeReferenceLeaf::get_exported_node);
+		ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "exported_node", PROPERTY_HINT_NODE_TYPE, "Node"), "set_exported_node", "get_exported_node");
+	}
+
+public:
+	static NodeReferenceLeaf *create_registered() {
+		static bool registered = false;
+		if (!registered) {
+			GDREGISTER_CLASS(NodeReferenceLeaf);
+			registered = true;
+		}
+		return memnew(NodeReferenceLeaf);
+	}
+
+	void set_exported_node(Node *p_node) {
+		exported_node = p_node;
+	}
+
+	Node *get_exported_node() const {
+		return exported_node;
+	}
+};
+
+class ConnectionEmitterNode : public Node {
+	GDCLASS(ConnectionEmitterNode, Node);
+
+	static void _bind_methods() {
+		ClassDB::bind_method(D_METHOD("emit_ping"), &ConnectionEmitterNode::emit_ping);
+		ADD_SIGNAL(MethodInfo("ping"));
+	}
+
+public:
+	static ConnectionEmitterNode *create_registered() {
+		static bool registered = false;
+		if (!registered) {
+			GDREGISTER_CLASS(ConnectionEmitterNode);
+			registered = true;
+		}
+		return memnew(ConnectionEmitterNode);
+	}
+
+	void emit_ping() {
+		emit_signal("ping");
+	}
+};
+
+class ConnectionReceiverNode : public Node {
+	GDCLASS(ConnectionReceiverNode, Node);
+
+	bool received = false;
+
+	static void _bind_methods() {
+		ClassDB::bind_method(D_METHOD("mark_received"), &ConnectionReceiverNode::mark_received);
+	}
+
+public:
+	static ConnectionReceiverNode *create_registered() {
+		static bool registered = false;
+		if (!registered) {
+			GDREGISTER_CLASS(ConnectionReceiverNode);
+			registered = true;
+		}
+		return memnew(ConnectionReceiverNode);
+	}
+
+	void mark_received() {
+		received = true;
+	}
+
+	bool was_received() const {
+		return received;
+	}
+};
+
+class ResourceHolderNode : public Node {
+	GDCLASS(ResourceHolderNode, Node);
+
+	Ref<Resource> payload;
+
+	static void _bind_methods() {
+		ClassDB::bind_method(D_METHOD("set_payload", "payload"), &ResourceHolderNode::set_payload);
+		ClassDB::bind_method(D_METHOD("get_payload"), &ResourceHolderNode::get_payload);
+		ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "payload", PROPERTY_HINT_RESOURCE_TYPE, "Resource"), "set_payload", "get_payload");
+	}
+
+public:
+	static ResourceHolderNode *create_registered() {
+		static bool registered = false;
+		if (!registered) {
+			GDREGISTER_CLASS(ResourceHolderNode);
+			registered = true;
+		}
+		return memnew(ResourceHolderNode);
+	}
+
+	void set_payload(const Ref<Resource> &p_payload) {
+		payload = p_payload;
+	}
+
+	Ref<Resource> get_payload() const {
+		return payload;
+	}
+};
+
+class PlanningNode : public Node {
+	GDCLASS(PlanningNode, Node);
+
+	int duplicate_count = 1;
+
+	static void _bind_methods() {
+		ClassDB::bind_method(D_METHOD("set_duplicate_count", "count"), &PlanningNode::set_duplicate_count);
+		ClassDB::bind_method(D_METHOD("get_duplicate_count"), &PlanningNode::get_duplicate_count);
+		ClassDB::bind_method(D_METHOD("_customize_scene_instantiation", "plan"), &PlanningNode::_customize_scene_instantiation);
+		ADD_PROPERTY(PropertyInfo(Variant::INT, "duplicate_count"), "set_duplicate_count", "get_duplicate_count");
+	}
+
+public:
+	static PlanningNode *create_registered() {
+		static bool registered = false;
+		if (!registered) {
+			GDREGISTER_CLASS(PlanningNode);
+			registered = true;
+		}
+		return memnew(PlanningNode);
+	}
+
+	void set_duplicate_count(int p_duplicate_count) {
+		duplicate_count = p_duplicate_count;
+	}
+
+	int get_duplicate_count() const {
+		return duplicate_count;
+	}
+
+	void _customize_scene_instantiation(const Ref<SceneInstantiationPlanNode> &p_plan) {
+		for (int child_idx = 0; child_idx < p_plan->get_child_count(); child_idx++) {
+			Ref<SceneInstantiationPlanNode> child_plan = p_plan->get_child(child_idx);
+			if (child_plan.is_null()) {
+				continue;
+			}
+
+			if (child_plan->get_name() == StringName("Drop")) {
+				child_plan->prune();
+				continue;
+			}
+
+			if (child_plan->get_name() == StringName("Template")) {
+				child_plan->set_name("Template0");
+				child_plan->set_property("number", 0);
+
+				Array duplicates = child_plan->duplicate(MAX(0, duplicate_count - 1));
+				for (int duplicate_idx = 0; duplicate_idx < duplicates.size(); duplicate_idx++) {
+					Ref<SceneInstantiationPlanNode> duplicate_plan = duplicates[duplicate_idx];
+					if (duplicate_plan.is_null()) {
+						continue;
+					}
+					duplicate_plan->set_name(vformat("Template%d", duplicate_idx + 1));
+					duplicate_plan->set_property("number", duplicate_idx + 1);
+				}
+			}
+		}
+	}
+};
+
+class NestedChoosingNode : public Node {
+	GDCLASS(NestedChoosingNode, Node);
+
+	StringName kept_child_name;
+
+	static void _bind_methods() {
+		ClassDB::bind_method(D_METHOD("set_kept_child_name", "name"), &NestedChoosingNode::set_kept_child_name);
+		ClassDB::bind_method(D_METHOD("get_kept_child_name"), &NestedChoosingNode::get_kept_child_name);
+		ClassDB::bind_method(D_METHOD("_customize_scene_instantiation", "plan"), &NestedChoosingNode::_customize_scene_instantiation);
+		ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "kept_child_name"), "set_kept_child_name", "get_kept_child_name");
+	}
+
+public:
+	static NestedChoosingNode *create_registered() {
+		static bool registered = false;
+		if (!registered) {
+			GDREGISTER_CLASS(NestedChoosingNode);
+			registered = true;
+		}
+		return memnew(NestedChoosingNode);
+	}
+
+	void set_kept_child_name(const StringName &p_name) {
+		kept_child_name = p_name;
+	}
+
+	StringName get_kept_child_name() const {
+		return kept_child_name;
+	}
+
+	void _customize_scene_instantiation(const Ref<SceneInstantiationPlanNode> &p_plan) {
+		Array children = p_plan->get_children();
+		for (int child_idx = 0; child_idx < children.size(); child_idx++) {
+			Ref<SceneInstantiationPlanNode> child_plan = children[child_idx];
+			if (child_plan.is_null()) {
+				continue;
+			}
+
+			if (child_plan->get_name() != kept_child_name) {
+				child_plan->prune();
+			}
+		}
+	}
+};
+
+class NestedPropertySelectingNode : public Node {
+	GDCLASS(NestedPropertySelectingNode, Node);
+
+	int required_number = -1;
+	bool customization_enabled = false;
+
+	static void _bind_methods() {
+		ClassDB::bind_method(D_METHOD("set_required_number", "number"), &NestedPropertySelectingNode::set_required_number);
+		ClassDB::bind_method(D_METHOD("get_required_number"), &NestedPropertySelectingNode::get_required_number);
+		ClassDB::bind_method(D_METHOD("set_customization_enabled", "enabled"), &NestedPropertySelectingNode::set_customization_enabled);
+		ClassDB::bind_method(D_METHOD("is_customization_enabled"), &NestedPropertySelectingNode::is_customization_enabled);
+		ClassDB::bind_method(D_METHOD("_customize_scene_instantiation", "plan"), &NestedPropertySelectingNode::_customize_scene_instantiation);
+		ADD_PROPERTY(PropertyInfo(Variant::INT, "required_number"), "set_required_number", "get_required_number");
+		ADD_PROPERTY(PropertyInfo(Variant::BOOL, "customization_enabled"), "set_customization_enabled", "is_customization_enabled");
+	}
+
+public:
+	static NestedPropertySelectingNode *create_registered() {
+		static bool registered = false;
+		if (!registered) {
+			GDREGISTER_CLASS(NestedPropertySelectingNode);
+			registered = true;
+		}
+		return memnew(NestedPropertySelectingNode);
+	}
+
+	void set_required_number(int p_required_number) {
+		required_number = p_required_number;
+	}
+
+	int get_required_number() const {
+		return required_number;
+	}
+
+	void set_customization_enabled(bool p_customization_enabled) {
+		customization_enabled = p_customization_enabled;
+	}
+
+	bool is_customization_enabled() const {
+		return customization_enabled;
+	}
+
+	void _customize_scene_instantiation(const Ref<SceneInstantiationPlanNode> &p_plan) {
+		if (!customization_enabled) {
+			return;
+		}
+
+		Array children = p_plan->get_children();
+		for (int child_idx = 0; child_idx < children.size(); child_idx++) {
+			Ref<SceneInstantiationPlanNode> child_plan = children[child_idx];
+			if (child_plan.is_null()) {
+				continue;
+			}
+
+			if (int(child_plan->get_property("number", -1)) != required_number) {
+				child_plan->prune();
+			}
+		}
 	}
 };
 
@@ -327,6 +639,299 @@ TEST_CASE("[PackedScene] Nested child filtering uses canonical paths") {
 
 	memdelete(scene);
 	memdelete(instance);
+}
+
+TEST_CASE("[PackedScene] Runtime plan customization prunes and duplicates children") {
+	PlanningNode *scene = PlanningNode::create_registered();
+	scene->set_name("Root");
+	scene->set_duplicate_count(3);
+
+	PlanningLeaf *template_leaf = PlanningLeaf::create_registered();
+	template_leaf->set_name("Template");
+	template_leaf->set_number(99);
+	scene->add_child(template_leaf);
+	template_leaf->set_owner(scene);
+
+	PlanningLeaf *drop_leaf = PlanningLeaf::create_registered();
+	drop_leaf->set_name("Drop");
+	drop_leaf->set_number(777);
+	scene->add_child(drop_leaf);
+	drop_leaf->set_owner(scene);
+
+	PackedScene packed_scene;
+	CHECK_EQ(packed_scene.pack(scene), OK);
+
+	Node *instance = packed_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	CHECK_EQ(instance->get_child_count(), 3);
+
+	PlanningLeaf *leaf_0 = Object::cast_to<PlanningLeaf>(instance->get_child(0));
+	PlanningLeaf *leaf_1 = Object::cast_to<PlanningLeaf>(instance->get_child(1));
+	PlanningLeaf *leaf_2 = Object::cast_to<PlanningLeaf>(instance->get_child(2));
+	REQUIRE(leaf_0 != nullptr);
+	REQUIRE(leaf_1 != nullptr);
+	REQUIRE(leaf_2 != nullptr);
+
+	CHECK_EQ(leaf_0->get_name(), StringName("Template0"));
+	CHECK_EQ(leaf_1->get_name(), StringName("Template1"));
+	CHECK_EQ(leaf_2->get_name(), StringName("Template2"));
+	CHECK_EQ(leaf_0->get_number(), 0);
+	CHECK_EQ(leaf_1->get_number(), 1);
+	CHECK_EQ(leaf_2->get_number(), 2);
+
+	memdelete(scene);
+	memdelete(instance);
+}
+
+TEST_CASE("[PackedScene] Runtime plan customization resolves deferred node properties") {
+	PlanningNode *scene = PlanningNode::create_registered();
+	scene->set_name("Scene");
+
+	Node *target = memnew(Node);
+	target->set_name("Target");
+	scene->add_child(target);
+	target->set_owner(scene);
+
+	NodeReferenceLeaf *reference_leaf = NodeReferenceLeaf::create_registered();
+	reference_leaf->set_name("Reference");
+	reference_leaf->set_exported_node(target);
+	scene->add_child(reference_leaf);
+	reference_leaf->set_owner(scene);
+
+	PackedScene packed_scene;
+	CHECK_EQ(packed_scene.pack(scene), OK);
+
+	Node *instance = packed_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	Node *instanced_target = instance->get_node_or_null(NodePath("Target"));
+	NodeReferenceLeaf *instanced_reference = Object::cast_to<NodeReferenceLeaf>(instance->get_node_or_null(NodePath("Reference")));
+	REQUIRE(instanced_target != nullptr);
+	REQUIRE(instanced_reference != nullptr);
+	CHECK_EQ(instanced_reference->get_exported_node(), instanced_target);
+
+	memdelete(scene);
+	memdelete(instance);
+}
+
+TEST_CASE("[PackedScene] Runtime plan customization preserves persistent connections") {
+	PlanningNode *scene = PlanningNode::create_registered();
+	scene->set_name("Scene");
+
+	ConnectionEmitterNode *emitter = ConnectionEmitterNode::create_registered();
+	emitter->set_name("Emitter");
+	scene->add_child(emitter);
+	emitter->set_owner(scene);
+
+	ConnectionReceiverNode *receiver = ConnectionReceiverNode::create_registered();
+	receiver->set_name("Receiver");
+	scene->add_child(receiver);
+	receiver->set_owner(scene);
+
+	CHECK_EQ(emitter->connect("ping", Callable(receiver, "mark_received"), Object::CONNECT_PERSIST), OK);
+
+	PackedScene packed_scene;
+	CHECK_EQ(packed_scene.pack(scene), OK);
+
+	Node *instance = packed_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	ConnectionEmitterNode *instanced_emitter = Object::cast_to<ConnectionEmitterNode>(instance->get_node_or_null(NodePath("Emitter")));
+	ConnectionReceiverNode *instanced_receiver = Object::cast_to<ConnectionReceiverNode>(instance->get_node_or_null(NodePath("Receiver")));
+	REQUIRE(instanced_emitter != nullptr);
+	REQUIRE(instanced_receiver != nullptr);
+	CHECK(instanced_emitter->is_connected("ping", Callable(instanced_receiver, "mark_received")));
+
+	instanced_emitter->emit_ping();
+	CHECK(instanced_receiver->was_received());
+
+	memdelete(scene);
+	memdelete(instance);
+}
+
+TEST_CASE("[PackedScene] Runtime plan customization duplicates local scene resources") {
+	PlanningNode *scene = PlanningNode::create_registered();
+	scene->set_name("Scene");
+
+	Ref<Resource> payload;
+	payload.instantiate();
+	payload->set_local_to_scene(true);
+	payload->set_name("Payload");
+
+	ResourceHolderNode *holder = ResourceHolderNode::create_registered();
+	holder->set_name("Holder");
+	holder->set_payload(payload);
+	scene->add_child(holder);
+	holder->set_owner(scene);
+
+	PackedScene packed_scene;
+	CHECK_EQ(packed_scene.pack(scene), OK);
+
+	Node *instance_a = packed_scene.instantiate();
+	Node *instance_b = packed_scene.instantiate();
+	REQUIRE(instance_a != nullptr);
+	REQUIRE(instance_b != nullptr);
+
+	ResourceHolderNode *holder_a = Object::cast_to<ResourceHolderNode>(instance_a->get_node_or_null(NodePath("Holder")));
+	ResourceHolderNode *holder_b = Object::cast_to<ResourceHolderNode>(instance_b->get_node_or_null(NodePath("Holder")));
+	REQUIRE(holder_a != nullptr);
+	REQUIRE(holder_b != nullptr);
+
+	Ref<Resource> payload_a = holder_a->get_payload();
+	Ref<Resource> payload_b = holder_b->get_payload();
+	REQUIRE(payload_a.is_valid());
+	REQUIRE(payload_b.is_valid());
+	CHECK(payload_a != payload);
+	CHECK(payload_b != payload);
+	CHECK(payload_a != payload_b);
+	CHECK_EQ(payload_a->get_local_scene(), instance_a);
+	CHECK_EQ(payload_b->get_local_scene(), instance_b);
+
+	memdelete(scene);
+	memdelete(instance_a);
+	memdelete(instance_b);
+}
+
+TEST_CASE("[PackedScene] Nested runtime plan customization merges instance children and owner overrides") {
+	NestedChoosingNode *internal_root = NestedChoosingNode::create_registered();
+	internal_root->set_name("NestedRoot");
+	internal_root->set_kept_child_name("TemplateKeep");
+
+	PlanningLeaf *internal_keep = PlanningLeaf::create_registered();
+	internal_keep->set_name("TemplateKeep");
+	internal_keep->set_number(10);
+	internal_root->add_child(internal_keep);
+	internal_keep->set_owner(internal_root);
+
+	PlanningLeaf *internal_drop = PlanningLeaf::create_registered();
+	internal_drop->set_name("TemplateDrop");
+	internal_drop->set_number(20);
+	internal_root->add_child(internal_drop);
+	internal_drop->set_owner(internal_root);
+
+	Ref<PackedScene> internal_scene;
+	internal_scene.instantiate();
+	CHECK_EQ(internal_scene->pack(internal_root), OK);
+
+	const String internal_path = TestUtils::get_temp_path("nested_runtime_plan_internal.tscn");
+	CHECK_EQ(ResourceSaver::save(internal_scene, internal_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> internal_scene_loaded = ResourceLoader::load(internal_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(internal_scene_loaded.is_valid());
+
+	Node *main_root = memnew(Node);
+	main_root->set_name("MainRoot");
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+
+	NestedChoosingNode *nested_instance = Object::cast_to<NestedChoosingNode>(internal_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN));
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(nested_instance != nullptr);
+	nested_instance->set_name("NestedInstance");
+	nested_instance->set_kept_child_name("OwnerAdded");
+	main_root->add_child(nested_instance);
+	nested_instance->set_owner(main_root);
+
+	PlanningLeaf *owner_added = PlanningLeaf::create_registered();
+	owner_added->set_name("OwnerAdded");
+	owner_added->set_number(42);
+	nested_instance->add_child(owner_added);
+	owner_added->set_owner(main_root);
+
+	Engine::get_singleton()->set_editor_hint(true);
+	PackedScene main_scene;
+	CHECK_EQ(main_scene.pack(main_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	Node *instance = main_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	NestedChoosingNode *instanced_nested = Object::cast_to<NestedChoosingNode>(instance->get_node_or_null(NodePath("NestedInstance")));
+	REQUIRE(instanced_nested != nullptr);
+	CHECK_EQ(instanced_nested->get_child_count(), 1);
+
+	PlanningLeaf *surviving_child = Object::cast_to<PlanningLeaf>(instanced_nested->get_child(0));
+	REQUIRE(surviving_child != nullptr);
+	CHECK_EQ(surviving_child->get_name(), StringName("OwnerAdded"));
+	CHECK_EQ(surviving_child->get_number(), 42);
+
+	memdelete(internal_root);
+	memdelete(main_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(internal_path);
+}
+
+TEST_CASE("[PackedScene] Nested runtime plan customization sees internal overridden child properties") {
+	NestedPropertySelectingNode *internal_root = NestedPropertySelectingNode::create_registered();
+	internal_root->set_name("NestedRoot");
+	internal_root->set_required_number(99);
+
+	PlanningLeaf *internal_keep = PlanningLeaf::create_registered();
+	internal_keep->set_name("TemplateKeep");
+	internal_keep->set_number(10);
+	internal_root->add_child(internal_keep);
+	internal_keep->set_owner(internal_root);
+
+	PlanningLeaf *internal_drop = PlanningLeaf::create_registered();
+	internal_drop->set_name("TemplateDrop");
+	internal_drop->set_number(20);
+	internal_root->add_child(internal_drop);
+	internal_drop->set_owner(internal_root);
+
+	Ref<PackedScene> internal_scene;
+	internal_scene.instantiate();
+	CHECK_EQ(internal_scene->pack(internal_root), OK);
+
+	const String internal_path = TestUtils::get_temp_path("nested_runtime_plan_internal_override.tscn");
+	CHECK_EQ(ResourceSaver::save(internal_scene, internal_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> internal_scene_loaded = ResourceLoader::load(internal_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(internal_scene_loaded.is_valid());
+
+	Node *main_root = memnew(Node);
+	main_root->set_name("MainRoot");
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+
+	NestedPropertySelectingNode *nested_instance = Object::cast_to<NestedPropertySelectingNode>(internal_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN));
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(nested_instance != nullptr);
+	nested_instance->set_name("NestedInstance");
+	nested_instance->set_customization_enabled(true);
+	main_root->add_child(nested_instance);
+	nested_instance->set_owner(main_root);
+	main_root->set_editable_instance(nested_instance, true);
+
+	PlanningLeaf *overridden_child = Object::cast_to<PlanningLeaf>(nested_instance->get_node_or_null(NodePath("TemplateKeep")));
+	REQUIRE(overridden_child != nullptr);
+	overridden_child->set_number(99);
+
+	Engine::get_singleton()->set_editor_hint(true);
+	PackedScene main_scene;
+	CHECK_EQ(main_scene.pack(main_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	Node *instance = main_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	NestedPropertySelectingNode *instanced_nested = Object::cast_to<NestedPropertySelectingNode>(instance->get_node_or_null(NodePath("NestedInstance")));
+	REQUIRE(instanced_nested != nullptr);
+	REQUIRE_EQ(instanced_nested->get_child_count(), 1);
+
+	PlanningLeaf *surviving_child = Object::cast_to<PlanningLeaf>(instanced_nested->get_child(0));
+	REQUIRE(surviving_child != nullptr);
+	CHECK_EQ(surviving_child->get_name(), StringName("TemplateKeep"));
+	CHECK_EQ(surviving_child->get_number(), 99);
+
+	memdelete(internal_root);
+	memdelete(main_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(internal_path);
 }
 
 TEST_CASE("[PackedScene] Set Path") {

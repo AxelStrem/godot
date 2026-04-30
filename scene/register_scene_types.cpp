@@ -1203,6 +1203,8 @@ void register_scene_types() {
 #endif // !defined(NAVIGATION_2D_DISABLED) || !defined(NAVIGATION_3D_DISABLED)
 
 	GDREGISTER_ABSTRACT_CLASS(SceneState);
+	GDREGISTER_CLASS(SceneInstantiationPlan);
+	GDREGISTER_CLASS(SceneInstantiationPlanNode);
 	GDREGISTER_CLASS(PackedScene);
 
 	GDREGISTER_CLASS(SceneTree);
