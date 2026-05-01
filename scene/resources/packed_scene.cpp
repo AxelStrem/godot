@@ -329,6 +329,7 @@ int SceneInstantiationPlan::add_node(const Ref<SceneState> &p_source_state, int 
 	node.source_state = p_source_state;
 	node.source_node_idx = p_source_node_idx;
 	node.source_path = p_source_path;
+	node.owner_path = NodePath();
 	node.source_scene_path = p_source_scene_path;
 	node.name = p_name;
 	node.type = p_type;
@@ -1709,16 +1710,14 @@ Node *SceneState::_get_runtime_plan_local_resource_base(const Ref<SceneInstantia
 		return p_node;
 	}
 
-	if (plan_node->source_state.is_valid()) {
-		const NodePath owner_path = plan_node->source_state->get_node_owner_path(plan_node->source_node_idx);
-		if (owner_path == NodePath(".")) {
-			return p_source_root ? p_source_root : p_node;
-		}
-		if (!owner_path.is_empty() && p_source_root) {
-			Node *owner = p_source_root->get_node_or_null(owner_path);
-			if (owner) {
-				return owner;
-			}
+	const NodePath owner_path = plan_node->owner_path;
+	if (owner_path == NodePath(".")) {
+		return p_source_root ? p_source_root : p_node;
+	}
+	if (!owner_path.is_empty() && p_source_root) {
+		Node *owner = p_source_root->get_node_or_null(owner_path);
+		if (owner) {
+			return owner;
 		}
 	}
 
@@ -1838,6 +1837,7 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 
 	const NodeData &source_node = p_source_state->nodes[p_source_node_idx];
 	const NodePath source_path = p_source_path_override.is_empty() ? p_source_state->get_node_path(p_source_node_idx) : p_source_path_override;
+	const NodePath owner_path = p_source_state->get_node_owner_path(p_source_node_idx);
 
 	if (source_node.instance >= 0) {
 		Ref<PackedScene> instance_scene = p_source_state->get_node_instance(p_source_node_idx);
@@ -1846,6 +1846,9 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 			if (instance_state.is_valid() && instance_state->get_node_count() > 0) {
 				const StringName merged_name = p_name_override == StringName() ? p_source_state->get_node_name(p_source_node_idx) : p_name_override;
 				const int plan_id = p_runtime_plan->add_node(instance_state, 0, p_parent_plan_id, source_path, instance_state->get_path(), merged_name, instance_state->get_node_type(0), SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_NESTED_SCENE, true);
+				SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data_w(plan_id);
+				ERR_FAIL_NULL_V(plan_node, plan_id);
+				plan_node->owner_path = owner_path;
 				_copy_runtime_plan_base_properties(p_runtime_plan, plan_id, instance_state, 0);
 				_apply_runtime_plan_property_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
 
@@ -1871,6 +1874,9 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 	}
 
 	const int plan_id = p_runtime_plan->add_node(p_source_state, p_source_node_idx, p_parent_plan_id, source_path, p_source_state->get_path(), node_name, node_type, p_origin, false);
+	SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data_w(plan_id);
+	ERR_FAIL_NULL_V(plan_node, plan_id);
+	plan_node->owner_path = owner_path;
 	_copy_runtime_plan_base_properties(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
 
 	const Vector<int> child_nodes = _get_runtime_plan_direct_children(p_source_state, p_source_node_idx);
@@ -2154,7 +2160,8 @@ Node *SceneState::_materialize_runtime_plan_node(const Ref<SceneInstantiationPla
 	}
 
 	Node *root = p_root ? p_root : node;
-	Node *source_root = p_source_root ? p_source_root : node;
+	Node *owner_source_root = p_source_root ? p_source_root : node;
+	Node *source_root = owner_source_root;
 	if (plan_node->source_node_idx == 0) {
 		source_root = node;
 	}
@@ -2259,13 +2266,13 @@ Node *SceneState::_materialize_runtime_plan_node(const Ref<SceneInstantiationPla
 		p_parent->_add_child_nocheck(node, plan_node->name);
 	}
 
-	NodePath owner_path = source_state->get_node_owner_path(plan_node->source_node_idx);
+	const NodePath owner_path = plan_node->owner_path;
 	if (!owner_path.is_empty()) {
 		Node *owner = nullptr;
 		if (owner_path == NodePath(".")) {
-			owner = source_root;
-		} else if (source_root) {
-			owner = source_root->get_node_or_null(owner_path);
+			owner = owner_source_root;
+		} else if (owner_source_root) {
+			owner = owner_source_root->get_node_or_null(owner_path);
 		}
 		if (owner) {
 			node->_set_owner_nocheck(owner);
