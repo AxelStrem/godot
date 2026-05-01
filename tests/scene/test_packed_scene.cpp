@@ -33,6 +33,7 @@
 TEST_FORCE_LINK(test_packed_scene)
 
 #include "core/io/dir_access.h"
+#include "core/io/file_access.h"
 #include "core/config/engine.h"
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
@@ -632,6 +633,231 @@ TEST_CASE("[PackedScene] Runtime plan keeps instanced child roots owned") {
 	memdelete(main_root);
 	memdelete(instance);
 	DirAccess::remove_file_or_error(child_path);
+}
+
+TEST_CASE("[PackedScene] Runtime plan expands inherited roots before customization") {
+	PlanningNode *base_root = PlanningNode::create_registered();
+	base_root->set_name("MainRoot");
+
+	Node *camera = memnew(Node);
+	camera->set_name("Camera");
+	base_root->add_child(camera);
+	camera->set_owner(base_root);
+
+	Node *hud = memnew(Node);
+	hud->set_name("HUD");
+	camera->add_child(hud);
+	hud->set_owner(base_root);
+
+	Ref<PackedScene> base_scene;
+	base_scene.instantiate();
+	CHECK_EQ(base_scene->pack(base_root), OK);
+
+	const String base_path = TestUtils::get_temp_path("runtime_plan_inherited_root_base.tscn");
+	CHECK_EQ(ResourceSaver::save(base_scene, base_path), OK);
+
+	const String inherited_path = TestUtils::get_temp_path("runtime_plan_inherited_root_scene.tscn");
+	Ref<FileAccess> inherited_file = FileAccess::open(inherited_path, FileAccess::WRITE);
+	REQUIRE(inherited_file.is_valid());
+	inherited_file->store_string(vformat("[gd_scene load_steps=2 format=3]\n\n[ext_resource type=\"PackedScene\" path=\"%s\" id=\"1_base\"]\n\n[node name=\"MainRoot\" instance=ExtResource(\"1_base\")]\n", base_path.replace("\\", "/")));
+	inherited_file.unref();
+
+	Error err = OK;
+	Ref<PackedScene> inherited_scene = ResourceLoader::load(inherited_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(inherited_scene.is_valid());
+
+	Node *instance = inherited_scene->instantiate();
+	REQUIRE(instance != nullptr);
+
+	Node *instanced_camera = instance->get_node_or_null(NodePath("Camera"));
+	Node *instanced_hud = instance->get_node_or_null(NodePath("Camera/HUD"));
+	REQUIRE(instanced_camera != nullptr);
+	REQUIRE(instanced_hud != nullptr);
+	CHECK_EQ(instanced_camera->get_owner(), instance);
+	CHECK_EQ(instanced_hud->get_owner(), instance);
+
+	memdelete(base_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(base_path);
+	DirAccess::remove_file_or_error(inherited_path);
+}
+
+TEST_CASE("[PackedScene] Runtime plan merges nested wrapper scene root overrides") {
+	NestedChoosingNode *base_root = NestedChoosingNode::create_registered();
+	base_root->set_name("WrappedRoot");
+	base_root->set_kept_child_name("TemplateKeep");
+
+	PlanningLeaf *base_keep = PlanningLeaf::create_registered();
+	base_keep->set_name("TemplateKeep");
+	base_keep->set_number(10);
+	base_root->add_child(base_keep);
+	base_keep->set_owner(base_root);
+
+	PlanningLeaf *base_drop = PlanningLeaf::create_registered();
+	base_drop->set_name("TemplateDrop");
+	base_drop->set_number(20);
+	base_root->add_child(base_drop);
+	base_drop->set_owner(base_root);
+
+	Ref<PackedScene> base_scene;
+	base_scene.instantiate();
+	CHECK_EQ(base_scene->pack(base_root), OK);
+
+	const String base_path = TestUtils::get_temp_path("runtime_plan_nested_wrapper_base.tscn");
+	CHECK_EQ(ResourceSaver::save(base_scene, base_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> base_scene_loaded = ResourceLoader::load(base_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(base_scene_loaded.is_valid());
+
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+	NestedChoosingNode *wrapper_root = Object::cast_to<NestedChoosingNode>(base_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN));
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(wrapper_root != nullptr);
+	wrapper_root->set_name("Wrapped");
+	wrapper_root->set_kept_child_name("OwnerAdded");
+
+	PlanningLeaf *owner_added = PlanningLeaf::create_registered();
+	owner_added->set_name("OwnerAdded");
+	owner_added->set_number(42);
+	wrapper_root->add_child(owner_added);
+	owner_added->set_owner(wrapper_root);
+
+	Ref<PackedScene> wrapper_scene;
+	wrapper_scene.instantiate();
+	Engine::get_singleton()->set_editor_hint(true);
+	CHECK_EQ(wrapper_scene->pack(wrapper_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	const String wrapper_path = TestUtils::get_temp_path("runtime_plan_nested_wrapper_scene.tscn");
+	CHECK_EQ(ResourceSaver::save(wrapper_scene, wrapper_path), OK);
+
+	Ref<PackedScene> wrapper_scene_loaded = ResourceLoader::load(wrapper_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(wrapper_scene_loaded.is_valid());
+
+	Node *outer_root = memnew(Node);
+	outer_root->set_name("Outer");
+
+	Engine::get_singleton()->set_editor_hint(true);
+	Node *nested_wrapper = wrapper_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(nested_wrapper != nullptr);
+	outer_root->add_child(nested_wrapper);
+	nested_wrapper->set_owner(outer_root);
+
+	PackedScene outer_scene;
+	Engine::get_singleton()->set_editor_hint(true);
+	CHECK_EQ(outer_scene.pack(outer_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	Node *instance = outer_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	NestedChoosingNode *instanced_wrapper = Object::cast_to<NestedChoosingNode>(instance->get_node_or_null(NodePath("Wrapped")));
+	REQUIRE(instanced_wrapper != nullptr);
+	CHECK_EQ(instanced_wrapper->get_child_count(), 1);
+
+	PlanningLeaf *surviving_child = Object::cast_to<PlanningLeaf>(instanced_wrapper->get_child(0));
+	REQUIRE(surviving_child != nullptr);
+	CHECK_EQ(surviving_child->get_name(), StringName("OwnerAdded"));
+	CHECK_EQ(surviving_child->get_number(), 42);
+
+	memdelete(base_root);
+	memdelete(wrapper_root);
+	memdelete(outer_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(base_path);
+	DirAccess::remove_file_or_error(wrapper_path);
+}
+
+TEST_CASE("[PackedScene] Runtime plan expands nested instanced wrapper roots") {
+	Node *base_root = memnew(Node);
+	base_root->set_name("WrappedRoot");
+
+	PlanningLeaf *base_child = PlanningLeaf::create_registered();
+	base_child->set_name("Inner");
+	base_child->set_number(10);
+	base_root->add_child(base_child);
+	base_child->set_owner(base_root);
+
+	Ref<PackedScene> base_scene;
+	base_scene.instantiate();
+	CHECK_EQ(base_scene->pack(base_root), OK);
+
+	const String base_path = TestUtils::get_temp_path("runtime_plan_nested_instanced_wrapper_base.tscn");
+	CHECK_EQ(ResourceSaver::save(base_scene, base_path), OK);
+
+	const String wrapper_path = TestUtils::get_temp_path("runtime_plan_nested_instanced_wrapper_scene.tscn");
+	Ref<FileAccess> wrapper_file = FileAccess::open(wrapper_path, FileAccess::WRITE);
+	REQUIRE(wrapper_file.is_valid());
+	wrapper_file->store_string(vformat("[gd_scene load_steps=2 format=3]\n\n[ext_resource type=\"PackedScene\" path=\"%s\" id=\"1_base\"]\n\n[node name=\"Wrapped\" instance=ExtResource(\"1_base\")]\n\n[node name=\"Inner\" parent=\".\"]\nnumber = 42\n", base_path.replace("\\", "/")));
+	wrapper_file.unref();
+
+	Error err = OK;
+	Ref<PackedScene> wrapper_scene = ResourceLoader::load(wrapper_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(wrapper_scene.is_valid());
+
+	NestedChoosingNode *outer_root = NestedChoosingNode::create_registered();
+	outer_root->set_name("Outer");
+	outer_root->set_kept_child_name("Wrapped");
+
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+	Node *nested_wrapper = wrapper_scene->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(nested_wrapper != nullptr);
+	outer_root->add_child(nested_wrapper);
+	nested_wrapper->set_owner(outer_root);
+
+	PackedScene outer_scene;
+	Engine::get_singleton()->set_editor_hint(true);
+	CHECK_EQ(outer_scene.pack(outer_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	Node *instance = outer_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	Node *wrapped = instance->get_node_or_null(NodePath("Wrapped"));
+	REQUIRE(wrapped != nullptr);
+
+	PlanningLeaf *instanced_inner = Object::cast_to<PlanningLeaf>(wrapped->get_node_or_null(NodePath("Inner")));
+	REQUIRE(instanced_inner != nullptr);
+	CHECK_EQ(instanced_inner->get_number(), 42);
+	CHECK_EQ(instanced_inner->get_owner(), wrapped);
+
+	memdelete(base_root);
+	memdelete(outer_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(base_path);
+	DirAccess::remove_file_or_error(wrapper_path);
+}
+
+TEST_CASE("[PackedScene] Runtime plan tolerates unavailable node classes") {
+	const String scene_path = TestUtils::get_temp_path("runtime_plan_unknown_node_type.tscn");
+	Ref<FileAccess> scene_file = FileAccess::open(scene_path, FileAccess::WRITE);
+	REQUIRE(scene_file.is_valid());
+	scene_file->store_string("[gd_scene format=3]\n\n[node name=\"Root\" type=\"PlanningNode\"]\n\n[node name=\"Broken\" type=\"MissingFancyNode\" parent=\".\"]\n");
+	scene_file.unref();
+
+	Error err = OK;
+	Ref<PackedScene> scene = ResourceLoader::load(scene_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(scene.is_valid());
+
+	Node *instance = scene->instantiate();
+	REQUIRE(instance != nullptr);
+
+	Node *broken = instance->get_node_or_null(NodePath("Broken"));
+	REQUIRE(broken != nullptr);
+	CHECK_EQ(broken->get_name(), StringName("Broken"));
+
+	memdelete(instance);
+	DirAccess::remove_file_or_error(scene_path);
 }
 
 TEST_CASE("[PackedScene] Nested child filtering uses canonical paths") {
