@@ -294,6 +294,7 @@ class NestedChoosingNode : public Node {
 	GDCLASS(NestedChoosingNode, Node);
 
 	StringName kept_child_name;
+	int customization_call_count = 0;
 
 	static void _bind_methods() {
 		ClassDB::bind_method(D_METHOD("set_kept_child_name", "name"), &NestedChoosingNode::set_kept_child_name);
@@ -320,7 +321,13 @@ public:
 		return kept_child_name;
 	}
 
+	int get_customization_call_count() const {
+		return customization_call_count;
+	}
+
 	void _customize_scene_instantiation(const Ref<SceneInstantiationPlanNode> &p_plan) {
+		customization_call_count++;
+
 		Array children = p_plan->get_children();
 		for (int child_idx = 0; child_idx < children.size(); child_idx++) {
 			Ref<SceneInstantiationPlanNode> child_plan = children[child_idx];
@@ -1013,6 +1020,193 @@ TEST_CASE("[PackedScene] Nested runtime plan customization keeps owner-added ins
 	memdelete(instance);
 	DirAccess::remove_file_or_error(child_path);
 	DirAccess::remove_file_or_error(outer_path);
+}
+
+TEST_CASE("[PackedScene] Nested runtime plan customization runs for owner-added instance children") {
+	NestedChoosingNode *child_root = NestedChoosingNode::create_registered();
+	child_root->set_name("ChildRoot");
+	child_root->set_kept_child_name("Keep");
+
+	PlanningLeaf *keep_leaf = PlanningLeaf::create_registered();
+	keep_leaf->set_name("Keep");
+	child_root->add_child(keep_leaf);
+	keep_leaf->set_owner(child_root);
+
+	PlanningLeaf *drop_leaf = PlanningLeaf::create_registered();
+	drop_leaf->set_name("Drop");
+	child_root->add_child(drop_leaf);
+	drop_leaf->set_owner(child_root);
+
+	Ref<PackedScene> child_scene;
+	child_scene.instantiate();
+	CHECK_EQ(child_scene->pack(child_root), OK);
+
+	const String child_path = TestUtils::get_temp_path("nested_runtime_plan_owner_added_customized_child.tscn");
+	CHECK_EQ(ResourceSaver::save(child_scene, child_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> child_scene_loaded = ResourceLoader::load(child_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(child_scene_loaded.is_valid());
+
+	NestedChoosingNode *outer_root = NestedChoosingNode::create_registered();
+	outer_root->set_name("OuterRoot");
+	outer_root->set_kept_child_name("ChildInstance");
+
+	Ref<PackedScene> outer_scene;
+	outer_scene.instantiate();
+	CHECK_EQ(outer_scene->pack(outer_root), OK);
+
+	const String outer_path = TestUtils::get_temp_path("nested_runtime_plan_owner_added_customized_outer.tscn");
+	CHECK_EQ(ResourceSaver::save(outer_scene, outer_path), OK);
+
+	err = OK;
+	Ref<PackedScene> outer_scene_loaded = ResourceLoader::load(outer_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(outer_scene_loaded.is_valid());
+
+	Node *main_root = memnew(Node);
+	main_root->set_name("MainRoot");
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+
+	NestedChoosingNode *outer_instance = Object::cast_to<NestedChoosingNode>(outer_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN));
+	REQUIRE(outer_instance != nullptr);
+	outer_instance->set_name("OuterInstance");
+	main_root->add_child(outer_instance);
+	outer_instance->set_owner(main_root);
+
+	Node *child_instance = child_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(child_instance != nullptr);
+	child_instance->set_name("ChildInstance");
+	outer_instance->add_child(child_instance);
+	child_instance->set_owner(main_root);
+
+	Engine::get_singleton()->set_editor_hint(true);
+	PackedScene main_scene;
+	CHECK_EQ(main_scene.pack(main_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	Node *instance = main_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	NestedChoosingNode *instanced_outer = Object::cast_to<NestedChoosingNode>(instance->get_node_or_null(NodePath("OuterInstance")));
+	REQUIRE(instanced_outer != nullptr);
+	CHECK_EQ(instanced_outer->get_customization_call_count(), 1);
+	REQUIRE_EQ(instanced_outer->get_child_count(), 1);
+
+	NestedChoosingNode *instanced_child = Object::cast_to<NestedChoosingNode>(instanced_outer->get_node_or_null(NodePath("ChildInstance")));
+	REQUIRE(instanced_child != nullptr);
+	CHECK_EQ(instanced_child->get_customization_call_count(), 1);
+	REQUIRE_EQ(instanced_child->get_child_count(), 1);
+	CHECK(instanced_child->get_node_or_null(NodePath("Keep")) != nullptr);
+	CHECK(instanced_child->get_node_or_null(NodePath("Drop")) == nullptr);
+
+	memdelete(child_root);
+	memdelete(outer_root);
+	memdelete(main_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(child_path);
+	DirAccess::remove_file_or_error(outer_path);
+}
+
+TEST_CASE("[PackedScene] Runtime plan customization ignores unrelated instanced overrides") {
+	NestedChoosingNode *custom_root = NestedChoosingNode::create_registered();
+	custom_root->set_name("CustomRoot");
+	custom_root->set_kept_child_name("Keep");
+
+	PlanningLeaf *keep_leaf = PlanningLeaf::create_registered();
+	keep_leaf->set_name("Keep");
+	custom_root->add_child(keep_leaf);
+	keep_leaf->set_owner(custom_root);
+
+	PlanningLeaf *drop_leaf = PlanningLeaf::create_registered();
+	drop_leaf->set_name("Drop");
+	custom_root->add_child(drop_leaf);
+	drop_leaf->set_owner(custom_root);
+
+	Ref<PackedScene> custom_scene;
+	custom_scene.instantiate();
+	CHECK_EQ(custom_scene->pack(custom_root), OK);
+
+	const String custom_path = TestUtils::get_temp_path("runtime_plan_custom_instance_with_unrelated_overrides_child.tscn");
+	CHECK_EQ(ResourceSaver::save(custom_scene, custom_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> custom_scene_loaded = ResourceLoader::load(custom_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(custom_scene_loaded.is_valid());
+
+	NestedPropertySelectingNode *editable_root = NestedPropertySelectingNode::create_registered();
+	editable_root->set_name("EditableRoot");
+
+	PlanningLeaf *editable_leaf = PlanningLeaf::create_registered();
+	editable_leaf->set_name("EditableLeaf");
+	editable_leaf->set_number(1);
+	editable_root->add_child(editable_leaf);
+	editable_leaf->set_owner(editable_root);
+
+	Ref<PackedScene> editable_scene;
+	editable_scene.instantiate();
+	CHECK_EQ(editable_scene->pack(editable_root), OK);
+
+	const String editable_path = TestUtils::get_temp_path("runtime_plan_custom_instance_with_unrelated_overrides_editable.tscn");
+	CHECK_EQ(ResourceSaver::save(editable_scene, editable_path), OK);
+
+	err = OK;
+	Ref<PackedScene> editable_scene_loaded = ResourceLoader::load(editable_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(editable_scene_loaded.is_valid());
+
+	Node *main_root = memnew(Node);
+	main_root->set_name("MainRoot");
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+
+	NestedChoosingNode *custom_instance = Object::cast_to<NestedChoosingNode>(custom_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN));
+	REQUIRE(custom_instance != nullptr);
+	custom_instance->set_name("CustomInstance");
+	main_root->add_child(custom_instance);
+	custom_instance->set_owner(main_root);
+
+	NestedPropertySelectingNode *editable_instance = Object::cast_to<NestedPropertySelectingNode>(editable_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN));
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(editable_instance != nullptr);
+	editable_instance->set_name("EditableInstance");
+	main_root->add_child(editable_instance);
+	editable_instance->set_owner(main_root);
+	main_root->set_editable_instance(editable_instance, true);
+
+	PlanningLeaf *overridden_leaf = Object::cast_to<PlanningLeaf>(editable_instance->get_node_or_null(NodePath("EditableLeaf")));
+	REQUIRE(overridden_leaf != nullptr);
+	overridden_leaf->set_number(5);
+
+	Engine::get_singleton()->set_editor_hint(true);
+	PackedScene main_scene;
+	CHECK_EQ(main_scene.pack(main_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	Node *instance = main_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	NestedChoosingNode *instanced_custom = Object::cast_to<NestedChoosingNode>(instance->get_node_or_null(NodePath("CustomInstance")));
+	REQUIRE(instanced_custom != nullptr);
+	CHECK_EQ(instanced_custom->get_customization_call_count(), 1);
+	REQUIRE_EQ(instanced_custom->get_child_count(), 1);
+	CHECK(instanced_custom->get_node_or_null(NodePath("Keep")) != nullptr);
+	CHECK(instanced_custom->get_node_or_null(NodePath("Drop")) == nullptr);
+
+	PlanningLeaf *instanced_overridden_leaf = Object::cast_to<PlanningLeaf>(instance->get_node_or_null(NodePath("EditableInstance/EditableLeaf")));
+	REQUIRE(instanced_overridden_leaf != nullptr);
+	CHECK_EQ(instanced_overridden_leaf->get_number(), 5);
+
+	memdelete(custom_root);
+	memdelete(editable_root);
+	memdelete(main_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(custom_path);
+	DirAccess::remove_file_or_error(editable_path);
 }
 
 TEST_CASE("[PackedScene] Set Path") {
