@@ -1817,11 +1817,24 @@ void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantia
 	ERR_FAIL_COND(p_runtime_plan.is_null());
 	ERR_FAIL_COND(p_override_state.is_null());
 	ERR_FAIL_INDEX(p_override_node_idx, p_override_state->nodes.size());
+	const SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data(p_plan_id);
+	ERR_FAIL_NULL(plan_node);
+
+	const NodePath override_root_path = p_override_state->get_node_path(p_override_node_idx);
 
 	const Vector<int> override_children = _get_runtime_plan_direct_children(p_override_state, p_override_node_idx);
 	for (int child_node_idx : override_children) {
 		const NodeData &override_child = p_override_state->nodes[child_node_idx];
-		const NodePath child_path = p_override_state->get_node_path(child_node_idx);
+		const NodePath override_child_path = p_override_state->get_node_path(child_node_idx);
+		NodePath relative_child_path = override_child_path;
+		if (!override_root_path.is_empty() && override_root_path != NodePath(".")) {
+			const String override_root_path_string = override_root_path.operator String();
+			const String override_child_path_string = override_child_path.operator String();
+			if (override_child_path_string.begins_with(override_root_path_string + "/")) {
+				relative_child_path = NodePath("." + override_child_path_string.substr(override_root_path_string.length()));
+			}
+		}
+		const NodePath child_path = _compose_runtime_plan_path(plan_node->source_path, relative_child_path);
 
 		if (override_child.type == TYPE_INSTANTIATED) {
 			const int target_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, child_path);
@@ -1846,39 +1859,28 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 	const NodeData &source_node = p_source_state->nodes[p_source_node_idx];
 	const NodePath source_path = p_source_path_override.is_empty() ? p_source_state->get_node_path(p_source_node_idx) : p_source_path_override;
 	const NodePath owner_path = p_source_state->get_node_owner_path(p_source_node_idx);
+	Ref<PackedScene> instance_scene = p_source_state->get_node_instance(p_source_node_idx);
 
-	if (source_node.instance >= 0) {
-		Ref<PackedScene> instance_scene = p_source_state->get_node_instance(p_source_node_idx);
-		if (instance_scene.is_valid()) {
-			Ref<SceneState> instance_state = instance_scene->get_state();
-			if (instance_state.is_valid() && instance_state->get_node_count() > 0) {
-				const StringName merged_name = p_name_override == StringName() ? p_source_state->get_node_name(p_source_node_idx) : p_name_override;
-				const int plan_id = p_runtime_plan->add_node(instance_state, 0, p_parent_plan_id, source_path, instance_state->get_path(), merged_name, instance_state->get_node_type(0), SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_NESTED_SCENE, true);
-				SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data_w(plan_id);
-				ERR_FAIL_NULL_V(plan_node, plan_id);
-				plan_node->owner_path = owner_path;
-				_copy_runtime_plan_base_properties(p_runtime_plan, plan_id, instance_state, 0);
-				_apply_runtime_plan_property_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
+	if (instance_scene.is_valid()) {
+		Ref<SceneState> instance_state = instance_scene->get_state();
+		if (instance_state.is_valid() && instance_state->get_node_count() > 0) {
+			const StringName merged_name = p_name_override == StringName() ? p_source_state->get_node_name(p_source_node_idx) : p_name_override;
+			const int plan_id = _append_runtime_plan_node(p_runtime_plan, instance_state, 0, p_parent_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_NESTED_SCENE, source_path, merged_name);
+			SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data_w(plan_id);
+			ERR_FAIL_NULL_V(plan_node, plan_id);
+			plan_node->owner_path = owner_path;
+			_apply_runtime_plan_property_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
 
-				const Vector<int> nested_children = _get_runtime_plan_direct_children(instance_state, 0);
-				for (int child_node_idx : nested_children) {
-					const NodePath child_path = _compose_runtime_plan_path(source_path, instance_state->get_node_path(child_node_idx));
-					_append_runtime_plan_node(p_runtime_plan, instance_state, child_node_idx, plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_NESTED_SCENE, child_path);
-				}
+			_merge_runtime_plan_instance_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
 
-				_merge_runtime_plan_instance_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
-
-				return plan_id;
-			}
+			return plan_id;
 		}
 	}
 
 	const StringName node_name = p_name_override == StringName() ? p_source_state->get_node_name(p_source_node_idx) : p_name_override;
-	StringName node_type;
-	if (source_node.type == TYPE_INSTANTIATED) {
+	StringName node_type = p_source_state->get_node_type(p_source_node_idx);
+	if (node_type == StringName() && source_node.type == TYPE_INSTANTIATED) {
 		node_type = StringName("TYPE_INSTANTIATED");
-	} else if (source_node.type >= 0 && source_node.type < p_source_state->names.size()) {
-		node_type = p_source_state->names[source_node.type];
 	}
 
 	const int plan_id = p_runtime_plan->add_node(p_source_state, p_source_node_idx, p_parent_plan_id, source_path, p_source_state->get_path(), node_name, node_type, p_origin, false);
@@ -1887,9 +1889,20 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 	plan_node->owner_path = owner_path;
 	_copy_runtime_plan_base_properties(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
 
+	const NodePath current_local_source_path = p_source_state->get_node_path(p_source_node_idx);
 	const Vector<int> child_nodes = _get_runtime_plan_direct_children(p_source_state, p_source_node_idx);
 	for (int child_node_idx : child_nodes) {
-		_append_runtime_plan_node(p_runtime_plan, p_source_state, child_node_idx, plan_id, p_origin);
+		const NodePath source_child_path = p_source_state->get_node_path(child_node_idx);
+		NodePath relative_child_path = source_child_path;
+		if (!current_local_source_path.is_empty() && current_local_source_path != NodePath(".")) {
+			const String current_local_source_path_string = current_local_source_path.operator String();
+			const String source_child_path_string = source_child_path.operator String();
+			if (source_child_path_string.begins_with(current_local_source_path_string + "/")) {
+				relative_child_path = NodePath("." + source_child_path_string.substr(current_local_source_path_string.length()));
+			}
+		}
+		const NodePath child_path = _compose_runtime_plan_path(source_path, relative_child_path);
+		_append_runtime_plan_node(p_runtime_plan, p_source_state, child_node_idx, plan_id, p_origin, child_path);
 	}
 
 	return plan_id;
@@ -2159,12 +2172,38 @@ Node *SceneState::_materialize_runtime_plan_node(const Ref<SceneInstantiationPla
 	const NodeData &source_node = source_state->nodes[plan_node->source_node_idx];
 
 	Object *obj = ::ClassDB::instantiate(plan_node->type);
-	ERR_FAIL_NULL_V(obj, nullptr);
-
 	Node *node = Object::cast_to<Node>(obj);
 	if (!node) {
-		memdelete(obj);
-		ERR_FAIL_V(nullptr);
+		if (obj) {
+			memdelete(obj);
+			obj = nullptr;
+		}
+
+		if (ResourceLoader::is_creating_missing_resources_if_class_unavailable_enabled()) {
+			MissingNode *missing_node = memnew(MissingNode);
+			if (plan_node->type != StringName()) {
+				missing_node->set_original_class(plan_node->type);
+			}
+			missing_node->set_recording_properties(true);
+			node = missing_node;
+		} else {
+			WARN_PRINT(vformat("Runtime plan node %s of type %s cannot be created. A placeholder will be created instead.", plan_node->name, plan_node->type).ascii().get_data());
+			if (p_parent) {
+				if (Object::cast_to<Control>(p_parent)) {
+					node = memnew(Control);
+				} else if (Object::cast_to<Node2D>(p_parent)) {
+					node = memnew(Node2D);
+#ifndef _3D_DISABLED
+				} else if (Object::cast_to<Node3D>(p_parent)) {
+					node = memnew(Node3D);
+#endif // _3D_DISABLED
+				}
+			}
+
+			if (!node) {
+				node = memnew(Node);
+			}
+		}
 	}
 
 	Node *root = p_root ? p_root : node;
