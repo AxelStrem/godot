@@ -582,6 +582,58 @@ TEST_CASE("[PackedScene] Instantiate Packed Scene With Children") {
 	memdelete(instance);
 }
 
+TEST_CASE("[PackedScene] Runtime plan keeps instanced child roots owned") {
+	Node *child_root = memnew(Node);
+	child_root->set_name("ChildRoot");
+
+	Node *child_leaf = memnew(Node);
+	child_leaf->set_name("Leaf");
+	child_root->add_child(child_leaf);
+	child_leaf->set_owner(child_root);
+
+	Ref<PackedScene> child_scene;
+	child_scene.instantiate();
+	CHECK_EQ(child_scene->pack(child_root), OK);
+
+	const String child_path = TestUtils::get_temp_path("runtime_plan_instanced_child_owner.tscn");
+	CHECK_EQ(ResourceSaver::save(child_scene, child_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> child_scene_loaded = ResourceLoader::load(child_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(child_scene_loaded.is_valid());
+
+	NestedChoosingNode *main_root = NestedChoosingNode::create_registered();
+	main_root->set_name("MainRoot");
+	main_root->set_kept_child_name("InstancedChild");
+
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+	Node *instanced_child = child_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(instanced_child != nullptr);
+	instanced_child->set_name("InstancedChild");
+	main_root->add_child(instanced_child);
+	instanced_child->set_owner(main_root);
+
+	Engine::get_singleton()->set_editor_hint(true);
+	PackedScene main_scene;
+	CHECK_EQ(main_scene.pack(main_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	Node *instance = main_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	Node *found_child = instance->find_child("InstancedChild", true, true);
+	REQUIRE(found_child != nullptr);
+	CHECK_EQ(found_child->get_owner(), instance);
+
+	memdelete(child_root);
+	memdelete(main_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(child_path);
+}
+
 TEST_CASE("[PackedScene] Nested child filtering uses canonical paths") {
 	Node *scene = memnew(Node);
 	scene->set_name("Root");

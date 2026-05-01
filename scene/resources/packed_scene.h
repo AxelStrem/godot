@@ -298,6 +298,7 @@ class SceneInstantiationPlan : public RefCounted {
 		Ref<SceneState> source_state;
 		int source_node_idx = -1;
 		NodePath source_path;
+		NodePath owner_path;
 		String source_scene_path;
 		StringName name;
 		StringName type;
