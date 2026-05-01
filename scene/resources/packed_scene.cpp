@@ -1909,7 +1909,11 @@ bool SceneState::_runtime_plan_requires_legacy_fallback(const Ref<SceneInstantia
 		}
 
 		const NodeData &source_node = source_state->nodes[plan_node.source_node_idx];
-		if (source_node.instance >= 0 || source_node.type == TYPE_INSTANTIATED) {
+		// Expanded instance roots and TYPE_INSTANTIATED override stubs are already
+		// represented in the runtime plan. Only unresolved scene-instance records,
+		// such as placeholders that could not be expanded into plan nodes, still
+		// need the legacy instantiate path.
+		if (source_node.instance >= 0 && !plan_node.instance_root) {
 			return true;
 		}
 
