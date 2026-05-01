@@ -1819,6 +1819,7 @@ void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantia
 		if (override_child.type == TYPE_INSTANTIATED) {
 			const int target_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, child_path);
 			if (target_plan_id < 0) {
+				_append_runtime_plan_node(p_runtime_plan, p_override_state, child_node_idx, p_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_OWNER_ADDED, child_path);
 				continue;
 			}
 			_apply_runtime_plan_property_overrides(p_runtime_plan, target_plan_id, p_override_state, child_node_idx);
