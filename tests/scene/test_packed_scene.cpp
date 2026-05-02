@@ -837,6 +837,149 @@ TEST_CASE("[PackedScene] Runtime plan expands nested instanced wrapper roots") {
 	DirAccess::remove_file_or_error(wrapper_path);
 }
 
+TEST_CASE("[PackedScene] Runtime plan applies descendant overrides across inherited scenes") {
+	PlanningNode *base_root = PlanningNode::create_registered();
+	base_root->set_name("Root");
+
+	Node *base_branch = memnew(Node);
+	base_branch->set_name("Base");
+	base_root->add_child(base_branch);
+	base_branch->set_owner(base_root);
+
+	PlanningLeaf *base_leaf = PlanningLeaf::create_registered();
+	base_leaf->set_name("Leaf");
+	base_leaf->set_number(10);
+	base_branch->add_child(base_leaf);
+	base_leaf->set_owner(base_root);
+
+	Ref<PackedScene> base_scene;
+	base_scene.instantiate();
+	CHECK_EQ(base_scene->pack(base_root), OK);
+
+	const String base_path = TestUtils::get_temp_path("runtime_plan_inherited_descendant_override_base.tscn");
+	CHECK_EQ(ResourceSaver::save(base_scene, base_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> base_scene_loaded = ResourceLoader::load(base_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(base_scene_loaded.is_valid());
+
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+	Node *mid_root = base_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(mid_root != nullptr);
+
+	PlanningLeaf *mid_leaf = Object::cast_to<PlanningLeaf>(mid_root->get_node_or_null(NodePath("Base/Leaf")));
+	REQUIRE(mid_leaf != nullptr);
+	mid_leaf->set_number(20);
+
+	Ref<PackedScene> mid_scene;
+	mid_scene.instantiate();
+	Engine::get_singleton()->set_editor_hint(true);
+	CHECK_EQ(mid_scene->pack(mid_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	const String mid_path = TestUtils::get_temp_path("runtime_plan_inherited_descendant_override_mid.tscn");
+	CHECK_EQ(ResourceSaver::save(mid_scene, mid_path), OK);
+
+	Ref<PackedScene> mid_scene_loaded = ResourceLoader::load(mid_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(mid_scene_loaded.is_valid());
+
+	Engine::get_singleton()->set_editor_hint(true);
+	Node *child_root = mid_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(child_root != nullptr);
+
+	PlanningLeaf *child_leaf = Object::cast_to<PlanningLeaf>(child_root->get_node_or_null(NodePath("Base/Leaf")));
+	REQUIRE(child_leaf != nullptr);
+	child_leaf->set_number(30);
+
+	Ref<PackedScene> child_scene;
+	child_scene.instantiate();
+	Engine::get_singleton()->set_editor_hint(true);
+	CHECK_EQ(child_scene->pack(child_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	const String child_path = TestUtils::get_temp_path("runtime_plan_inherited_descendant_override_child.tscn");
+	CHECK_EQ(ResourceSaver::save(child_scene, child_path), OK);
+
+	Ref<PackedScene> child_scene_loaded = ResourceLoader::load(child_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(child_scene_loaded.is_valid());
+
+	Node *instance = child_scene_loaded->instantiate();
+	REQUIRE(instance != nullptr);
+
+	PlanningLeaf *instanced_leaf = Object::cast_to<PlanningLeaf>(instance->get_node_or_null(NodePath("Base/Leaf")));
+	REQUIRE(instanced_leaf != nullptr);
+	CHECK_EQ(instanced_leaf->get_number(), 30);
+
+	memdelete(base_root);
+	memdelete(mid_root);
+	memdelete(child_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(base_path);
+	DirAccess::remove_file_or_error(mid_path);
+	DirAccess::remove_file_or_error(child_path);
+}
+
+TEST_CASE("[PackedScene] Runtime plan applies raw descendant overrides across inherited scenes") {
+	PlanningNode *base_root = PlanningNode::create_registered();
+	base_root->set_name("Root");
+
+	Node *base_branch = memnew(Node);
+	base_branch->set_name("Base");
+	base_branch->set_unique_scene_id(101);
+	base_root->add_child(base_branch);
+	base_branch->set_owner(base_root);
+
+	PlanningLeaf *base_leaf = PlanningLeaf::create_registered();
+	base_leaf->set_name("Leaf");
+	base_leaf->set_number(10);
+	base_leaf->set_unique_scene_id(202);
+	base_branch->add_child(base_leaf);
+	base_leaf->set_owner(base_root);
+
+	Ref<PackedScene> base_scene;
+	base_scene.instantiate();
+	CHECK_EQ(base_scene->pack(base_root), OK);
+
+	const String base_path = TestUtils::get_temp_path("runtime_plan_raw_inherited_descendant_override_base.tscn");
+	CHECK_EQ(ResourceSaver::save(base_scene, base_path), OK);
+
+	const String mid_path = TestUtils::get_temp_path("runtime_plan_raw_inherited_descendant_override_mid.tscn");
+	Ref<FileAccess> mid_file = FileAccess::open(mid_path, FileAccess::WRITE);
+	REQUIRE(mid_file.is_valid());
+	mid_file->store_string(vformat("[gd_scene load_steps=2 format=3]\n\n[ext_resource type=\"PackedScene\" path=\"%s\" id=\"1_base\"]\n\n[node name=\"Root\" instance=ExtResource(\"1_base\")]\n\n[node name=\"Leaf\" parent=\"Base\" parent_id_path=PackedInt32Array(101)]\nnumber = 20\n", base_path.replace("\\", "/")));
+	mid_file.unref();
+
+	const String child_path = TestUtils::get_temp_path("runtime_plan_raw_inherited_descendant_override_child.tscn");
+	Ref<FileAccess> child_file = FileAccess::open(child_path, FileAccess::WRITE);
+	REQUIRE(child_file.is_valid());
+	child_file->store_string(vformat("[gd_scene load_steps=2 format=3]\n\n[ext_resource type=\"PackedScene\" path=\"%s\" id=\"1_mid\"]\n\n[node name=\"Root\" instance=ExtResource(\"1_mid\")]\n\n[node name=\"Leaf\" parent=\"Base\" parent_id_path=PackedInt32Array(101)]\nnumber = 30\n", mid_path.replace("\\", "/")));
+	child_file.unref();
+
+	Error err = OK;
+	Ref<PackedScene> child_scene = ResourceLoader::load(child_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(child_scene.is_valid());
+
+	Node *instance = child_scene->instantiate();
+	REQUIRE(instance != nullptr);
+
+	PlanningLeaf *instanced_leaf = Object::cast_to<PlanningLeaf>(instance->get_node_or_null(NodePath("Base/Leaf")));
+	REQUIRE(instanced_leaf != nullptr);
+	CHECK_EQ(instanced_leaf->get_number(), 30);
+
+	memdelete(base_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(base_path);
+	DirAccess::remove_file_or_error(mid_path);
+	DirAccess::remove_file_or_error(child_path);
+}
+
 TEST_CASE("[PackedScene] Runtime plan tolerates unavailable node classes") {
 	const String scene_path = TestUtils::get_temp_path("runtime_plan_unknown_node_type.tscn");
 	Ref<FileAccess> scene_file = FileAccess::open(scene_path, FileAccess::WRITE);

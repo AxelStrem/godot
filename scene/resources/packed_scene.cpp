@@ -1602,6 +1602,91 @@ Vector<int> SceneState::_get_runtime_plan_direct_children(const Ref<SceneState> 
 	return child_indices;
 }
 
+bool SceneState::_runtime_plan_path_is_descendant(const NodePath &p_ancestor_path, const NodePath &p_descendant_path) const {
+	if (p_descendant_path.is_empty() || p_descendant_path == NodePath(".")) {
+		return false;
+	}
+
+	if (p_ancestor_path.is_empty() || p_ancestor_path == NodePath(".")) {
+		return true;
+	}
+
+	const int ancestor_name_count = p_ancestor_path.get_name_count();
+	if (p_descendant_path.get_name_count() <= ancestor_name_count) {
+		return false;
+	}
+
+	for (int name_idx = 0; name_idx < ancestor_name_count; name_idx++) {
+		if (p_ancestor_path.get_name(name_idx) != p_descendant_path.get_name(name_idx)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+NodePath SceneState::_get_runtime_plan_parent_path(const NodePath &p_path) const {
+	if (p_path.is_empty() || p_path == NodePath(".")) {
+		return NodePath();
+	}
+
+	const int name_count = p_path.get_name_count();
+	if (name_count <= 1) {
+		return NodePath(".");
+	}
+
+	Vector<StringName> parent_names;
+	parent_names.resize(name_count - 1);
+	for (int name_idx = 0; name_idx < name_count - 1; name_idx++) {
+		parent_names.write[name_idx] = p_path.get_name(name_idx);
+	}
+
+	return NodePath(parent_names, false);
+}
+
+Vector<int> SceneState::_get_runtime_plan_override_children(const Ref<SceneState> &p_source_state, int p_source_node_idx) const {
+	Vector<int> child_indices;
+	ERR_FAIL_COND_V(p_source_state.is_null(), child_indices);
+	ERR_FAIL_INDEX_V(p_source_node_idx, p_source_state->nodes.size(), child_indices);
+
+	const NodePath current_path = p_source_state->get_node_path(p_source_node_idx);
+	HashSet<NodePath> override_paths;
+	for (int node_idx = 0; node_idx < p_source_state->nodes.size(); node_idx++) {
+		if (node_idx == p_source_node_idx) {
+			continue;
+		}
+
+		override_paths.insert(p_source_state->get_node_path(node_idx));
+	}
+
+	for (int node_idx = 0; node_idx < p_source_state->nodes.size(); node_idx++) {
+		if (node_idx == p_source_node_idx) {
+			continue;
+		}
+
+		const NodePath node_path = p_source_state->get_node_path(node_idx);
+		if (!_runtime_plan_path_is_descendant(current_path, node_path)) {
+			continue;
+		}
+
+		NodePath ancestor_path = p_source_state->get_node_path(node_idx, true);
+		bool has_intermediate_override = false;
+		while (!ancestor_path.is_empty() && ancestor_path != current_path && ancestor_path != NodePath(".")) {
+			if (override_paths.has(ancestor_path)) {
+				has_intermediate_override = true;
+				break;
+			}
+			ancestor_path = _get_runtime_plan_parent_path(ancestor_path);
+		}
+
+		if (!has_intermediate_override) {
+			child_indices.push_back(node_idx);
+		}
+	}
+
+	return child_indices;
+}
+
 NodePath SceneState::_compose_runtime_plan_path(const NodePath &p_base_path, const NodePath &p_relative_path) const {
 	if (p_base_path.is_empty() || p_base_path == NodePath(".")) {
 		return p_relative_path;
@@ -1823,7 +1908,7 @@ void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantia
 
 	const NodePath override_root_path = p_override_state->get_node_path(p_override_node_idx);
 
-	const Vector<int> override_children = _get_runtime_plan_direct_children(p_override_state, p_override_node_idx);
+	const Vector<int> override_children = _get_runtime_plan_override_children(p_override_state, p_override_node_idx);
 	for (int child_node_idx : override_children) {
 		const NodeData &override_child = p_override_state->nodes[child_node_idx];
 		const NodePath override_child_path = p_override_state->get_node_path(child_node_idx);
@@ -1837,10 +1922,26 @@ void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantia
 		}
 		const NodePath child_path = _compose_runtime_plan_path(plan_source_path, relative_child_path);
 
+		NodePath override_parent_path = p_override_state->get_node_path(child_node_idx, true);
+		NodePath relative_parent_path = override_parent_path;
+		if (!override_root_path.is_empty() && override_root_path != NodePath(".")) {
+			const String override_root_path_string = override_root_path.operator String();
+			const String override_parent_path_string = override_parent_path.operator String();
+			if (override_parent_path_string.begins_with(override_root_path_string + "/")) {
+				relative_parent_path = NodePath("." + override_parent_path_string.substr(override_root_path_string.length()));
+			}
+		}
+		const NodePath parent_path = _compose_runtime_plan_path(plan_source_path, relative_parent_path);
+		int parent_plan_id = p_plan_id;
+		const int matched_parent_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, parent_path);
+		if (matched_parent_plan_id >= 0) {
+			parent_plan_id = matched_parent_plan_id;
+		}
+
 		if (override_child.type == TYPE_INSTANTIATED) {
 			const int target_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, child_path);
 			if (target_plan_id < 0) {
-				_append_runtime_plan_node(p_runtime_plan, p_override_state, child_node_idx, p_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_OWNER_ADDED, child_path);
+				_append_runtime_plan_node(p_runtime_plan, p_override_state, child_node_idx, parent_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_OWNER_ADDED, child_path);
 				continue;
 			}
 			_apply_runtime_plan_property_overrides(p_runtime_plan, target_plan_id, p_override_state, child_node_idx);
@@ -1848,7 +1949,7 @@ void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantia
 			continue;
 		}
 
-		_append_runtime_plan_node(p_runtime_plan, p_override_state, child_node_idx, p_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_OWNER_ADDED, child_path);
+		_append_runtime_plan_node(p_runtime_plan, p_override_state, child_node_idx, parent_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_OWNER_ADDED, child_path);
 	}
 }
 

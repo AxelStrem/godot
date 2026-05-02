@@ -155,6 +155,9 @@ private:
 	Node *_instantiate_runtime_plan(GenEditState p_edit_state) const;
 	Ref<SceneInstantiationPlan> _build_runtime_plan() const;
 	Vector<int> _get_runtime_plan_direct_children(const Ref<SceneState> &p_source_state, int p_source_node_idx) const;
+	Vector<int> _get_runtime_plan_override_children(const Ref<SceneState> &p_source_state, int p_source_node_idx) const;
+	bool _runtime_plan_path_is_descendant(const NodePath &p_ancestor_path, const NodePath &p_descendant_path) const;
+	NodePath _get_runtime_plan_parent_path(const NodePath &p_path) const;
 	NodePath _compose_runtime_plan_path(const NodePath &p_base_path, const NodePath &p_relative_path) const;
 	void _copy_runtime_plan_base_properties(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_source_state, int p_source_node_idx) const;
 	void _apply_runtime_plan_property_overrides(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_override_state, int p_override_node_idx) const;
