@@ -1082,10 +1082,17 @@ String EditorExportPlatform::_export_customize(const String &p_path, LocalVector
 			String base_file = p_path.get_file().get_basename() + ".scn"; // use SCN for saving (binary) and repack (If conversting, TSCN PackedScene representation is inefficient, so repacking is also desired).
 			save_path = export_base_path.path_join("export-" + p_path.md5_text() + "-" + base_file);
 
-			Ref<PackedScene> s;
-			s.instantiate();
-			s->pack(node);
-			Error err = ResourceSaver::save(s, save_path);
+			Error err;
+			if (!modified && customize_scenes_plugins.is_empty() && customize_resources_plugins.is_empty()) {
+				// Preserve inherited override data exactly as loaded when conversion only needs
+				// a binary scene copy for export and no plugin customization was applied.
+				err = ResourceSaver::save(ps, save_path);
+			} else {
+				Ref<PackedScene> s;
+				s.instantiate();
+				s->pack(node);
+				err = ResourceSaver::save(s, save_path);
+			}
 			ERR_FAIL_COND_V_MSG(err != OK, p_path, "Unable to save export scene file to: " + save_path);
 		}
 
