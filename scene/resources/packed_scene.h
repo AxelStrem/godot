@@ -297,8 +297,7 @@ class SceneInstantiationPlan : public RefCounted {
 		Vector<int> child_plan_ids;
 		Ref<SceneState> source_state;
 		int source_node_idx = -1;
-		Ref<SceneState> override_source_state;
-		int override_source_node_idx = -1;
+		Vector<SceneState::PackState> override_sources;
 		NodePath source_path;
 		NodePath owner_path;
 		String source_scene_path;

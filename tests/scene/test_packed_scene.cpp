@@ -1158,6 +1158,115 @@ TEST_CASE("[PackedScene] Runtime plan customization preserves root override conn
 	DirAccess::remove_file_or_error(override_path);
 }
 
+TEST_CASE("[PackedScene] Runtime plan customization preserves stacked root override connections for instanced scene roots") {
+	ConnectionReceiverNode *base_root = ConnectionReceiverNode::create_registered();
+	base_root->set_name("BaseReceiver");
+
+	Ref<PackedScene> base_scene;
+	base_scene.instantiate();
+	CHECK_EQ(base_scene->pack(base_root), OK);
+
+	const String base_path = TestUtils::get_temp_path("runtime_plan_stacked_root_override_connections_base.tscn");
+	CHECK_EQ(ResourceSaver::save(base_scene, base_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> base_scene_loaded = ResourceLoader::load(base_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(base_scene_loaded.is_valid());
+
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+	ConnectionReceiverNode *inner_override_root = Object::cast_to<ConnectionReceiverNode>(base_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN));
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(inner_override_root != nullptr);
+	inner_override_root->set_name("WrappedTwice");
+
+	ConnectionEmitterNode *inner_emitter = ConnectionEmitterNode::create_registered();
+	inner_emitter->set_name("Emitter");
+	inner_override_root->add_child(inner_emitter);
+	inner_emitter->set_owner(inner_override_root);
+	CHECK_EQ(inner_emitter->connect("ping", Callable(inner_override_root, "mark_received"), Object::CONNECT_PERSIST), OK);
+
+	Ref<PackedScene> inner_override_scene;
+	inner_override_scene.instantiate();
+	Engine::get_singleton()->set_editor_hint(true);
+	CHECK_EQ(inner_override_scene->pack(inner_override_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	const String inner_override_path = TestUtils::get_temp_path("runtime_plan_stacked_root_override_connections_inner_wrapper.tscn");
+	CHECK_EQ(ResourceSaver::save(inner_override_scene, inner_override_path), OK);
+
+	Ref<PackedScene> inner_override_scene_loaded = ResourceLoader::load(inner_override_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(inner_override_scene_loaded.is_valid());
+
+	Engine::get_singleton()->set_editor_hint(true);
+	ConnectionReceiverNode *outer_override_root = Object::cast_to<ConnectionReceiverNode>(inner_override_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN));
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(outer_override_root != nullptr);
+	outer_override_root->set_name("WrappedTwice");
+
+	PlanningLeaf *outer_leaf = PlanningLeaf::create_registered();
+	outer_leaf->set_name("OuterLeaf");
+	outer_leaf->set_number(42);
+	outer_override_root->add_child(outer_leaf);
+	outer_leaf->set_owner(outer_override_root);
+
+	Ref<PackedScene> outer_override_scene;
+	outer_override_scene.instantiate();
+	Engine::get_singleton()->set_editor_hint(true);
+	CHECK_EQ(outer_override_scene->pack(outer_override_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	const String outer_override_path = TestUtils::get_temp_path("runtime_plan_stacked_root_override_connections_outer_wrapper.tscn");
+	CHECK_EQ(ResourceSaver::save(outer_override_scene, outer_override_path), OK);
+
+	Ref<PackedScene> outer_override_scene_loaded = ResourceLoader::load(outer_override_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(outer_override_scene_loaded.is_valid());
+
+	PlanningNode *main_root = PlanningNode::create_registered();
+	main_root->set_name("MainRoot");
+
+	Engine::get_singleton()->set_editor_hint(true);
+	Node *nested_instance = outer_override_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(nested_instance != nullptr);
+	main_root->add_child(nested_instance);
+	nested_instance->set_owner(main_root);
+
+	PackedScene main_scene;
+	Engine::get_singleton()->set_editor_hint(true);
+	CHECK_EQ(main_scene.pack(main_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	Node *instance = main_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	ConnectionReceiverNode *instanced_root = Object::cast_to<ConnectionReceiverNode>(instance->get_node_or_null(NodePath("WrappedTwice")));
+	REQUIRE(instanced_root != nullptr);
+
+	PlanningLeaf *instanced_outer_leaf = Object::cast_to<PlanningLeaf>(instanced_root->get_node_or_null(NodePath("OuterLeaf")));
+	REQUIRE(instanced_outer_leaf != nullptr);
+	CHECK_EQ(instanced_outer_leaf->get_number(), 42);
+
+	ConnectionEmitterNode *instanced_emitter = Object::cast_to<ConnectionEmitterNode>(instanced_root->get_node_or_null(NodePath("Emitter")));
+	REQUIRE(instanced_emitter != nullptr);
+	CHECK(instanced_emitter->is_connected("ping", Callable(instanced_root, "mark_received")));
+
+	instanced_emitter->emit_ping();
+	CHECK(instanced_root->was_received());
+
+	memdelete(base_root);
+	memdelete(inner_override_root);
+	memdelete(outer_override_root);
+	memdelete(main_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(base_path);
+	DirAccess::remove_file_or_error(inner_override_path);
+	DirAccess::remove_file_or_error(outer_override_path);
+}
+
 TEST_CASE("[PackedScene] Runtime plan customization duplicates local scene resources") {
 	PlanningNode *scene = PlanningNode::create_registered();
 	scene->set_name("Scene");
