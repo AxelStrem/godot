@@ -1675,6 +1675,79 @@ TEST_CASE("[PackedScene] Nested runtime plan customization keeps owner-added ins
 	DirAccess::remove_file_or_error(outer_path);
 }
 
+TEST_CASE("[PackedScene] Nested runtime plan keeps owner-added instance children attached to the instance root") {
+	Node *child_root = memnew(Node);
+	child_root->set_name("ChildRoot");
+
+	Node *same_name_child = memnew(Node);
+	same_name_child->set_name("ParentInstance");
+	child_root->add_child(same_name_child);
+	same_name_child->set_owner(child_root);
+
+	PlanningLeaf *child_payload = PlanningLeaf::create_registered();
+	child_payload->set_name("Payload");
+	child_payload->set_number(7);
+	child_root->add_child(child_payload);
+	child_payload->set_owner(child_root);
+
+	Ref<PackedScene> child_scene;
+	child_scene.instantiate();
+	CHECK_EQ(child_scene->pack(child_root), OK);
+
+	const String child_path = TestUtils::get_temp_path("nested_runtime_plan_owner_added_instance_same_name_child.tscn");
+	CHECK_EQ(ResourceSaver::save(child_scene, child_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> child_scene_loaded = ResourceLoader::load(child_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(child_scene_loaded.is_valid());
+
+	NestedChoosingNode *main_root = NestedChoosingNode::create_registered();
+	main_root->set_name("MainRoot");
+	main_root->set_kept_child_name("ParentInstance");
+
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+
+	Node *parent_instance = child_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	REQUIRE(parent_instance != nullptr);
+	parent_instance->set_name("ParentInstance");
+	main_root->add_child(parent_instance);
+	parent_instance->set_owner(main_root);
+
+	Node *nested_instance = child_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(nested_instance != nullptr);
+	nested_instance->set_name("NestedInstance");
+	parent_instance->add_child(nested_instance);
+	nested_instance->set_owner(main_root);
+
+	PackedScene main_scene;
+	CHECK_EQ(main_scene.pack(main_root), OK);
+
+	Node *instance = main_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	Node *instanced_parent = instance->get_node_or_null(NodePath("ParentInstance"));
+	REQUIRE(instanced_parent != nullptr);
+	CHECK(instanced_parent->get_node_or_null(NodePath("ParentInstance")) != nullptr);
+
+	Node *direct_nested = instanced_parent->get_node_or_null(NodePath("NestedInstance"));
+	REQUIRE(direct_nested != nullptr);
+	if (direct_nested != nullptr) {
+		CHECK_EQ(direct_nested->get_parent(), instanced_parent);
+	}
+	CHECK(instanced_parent->get_node_or_null(NodePath("ParentInstance/NestedInstance")) == nullptr);
+	if (direct_nested != nullptr) {
+		CHECK(direct_nested->get_node_or_null(NodePath("Payload")) != nullptr);
+	}
+
+	memdelete(child_root);
+	memdelete(main_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(child_path);
+}
+
 TEST_CASE("[PackedScene] Nested runtime plan customization keeps multiple owner-added instance siblings") {
 	Node *child_root = memnew(Node);
 	child_root->set_name("ChildRoot");

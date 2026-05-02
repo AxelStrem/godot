@@ -1927,7 +1927,9 @@ void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantia
 		if (!override_root_path.is_empty() && override_root_path != NodePath(".")) {
 			const String override_root_path_string = override_root_path.operator String();
 			const String override_parent_path_string = override_parent_path.operator String();
-			if (override_parent_path_string.begins_with(override_root_path_string + "/")) {
+			if (override_parent_path == override_root_path) {
+				relative_parent_path = NodePath(".");
+			} else if (override_parent_path_string.begins_with(override_root_path_string + "/")) {
 				relative_parent_path = NodePath("." + override_parent_path_string.substr(override_root_path_string.length()));
 			}
 		}
