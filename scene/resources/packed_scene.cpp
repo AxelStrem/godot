@@ -1863,8 +1863,10 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 			ERR_FAIL_NULL_V(plan_node, plan_id);
 			plan_node->owner_path = owner_path;
 			if (p_source_node_idx == 0) {
-				plan_node->override_source_state = p_source_state;
-				plan_node->override_source_node_idx = p_source_node_idx;
+				SceneState::PackState override_source;
+				override_source.state = p_source_state;
+				override_source.node = p_source_node_idx;
+				plan_node->override_sources.push_back(override_source);
 			}
 			_apply_runtime_plan_property_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
 
@@ -1962,7 +1964,17 @@ bool SceneState::_runtime_plan_requires_legacy_connection_fallback(const Ref<Sce
 		if (plan_node.pruned || plan_node.flattened || plan_node.source_state.is_null() || plan_node.source_node_idx != 0) {
 			continue;
 		}
-		if (!plan_node.source_state->connections.is_empty() || (plan_node.override_source_state.is_valid() && !plan_node.override_source_state->connections.is_empty())) {
+		if (!plan_node.source_state->connections.is_empty()) {
+			has_connections = true;
+			break;
+		}
+		for (const SceneState::PackState &override_source : plan_node.override_sources) {
+			if (override_source.state.is_valid() && !override_source.state->connections.is_empty()) {
+				has_connections = true;
+				break;
+			}
+		}
+		if (has_connections) {
 			has_connections = true;
 			break;
 		}
@@ -2054,8 +2066,10 @@ void SceneState::_apply_runtime_plan_connections(const Ref<SceneInstantiationPla
 		}
 
 		apply_connections_from_state(scene_root_plan, scene_root_plan.source_state.ptr());
-		if (scene_root_plan.override_source_state.is_valid()) {
-			apply_connections_from_state(scene_root_plan, scene_root_plan.override_source_state.ptr());
+		for (const SceneState::PackState &override_source : scene_root_plan.override_sources) {
+			if (override_source.state.is_valid()) {
+				apply_connections_from_state(scene_root_plan, override_source.state.ptr());
+			}
 		}
 	}
 }
