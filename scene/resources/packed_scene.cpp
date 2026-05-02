@@ -1819,6 +1819,7 @@ void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantia
 	ERR_FAIL_INDEX(p_override_node_idx, p_override_state->nodes.size());
 	const SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data(p_plan_id);
 	ERR_FAIL_NULL(plan_node);
+	const NodePath plan_source_path = plan_node->source_path;
 
 	const NodePath override_root_path = p_override_state->get_node_path(p_override_node_idx);
 
@@ -1834,7 +1835,7 @@ void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantia
 				relative_child_path = NodePath("." + override_child_path_string.substr(override_root_path_string.length()));
 			}
 		}
-		const NodePath child_path = _compose_runtime_plan_path(plan_node->source_path, relative_child_path);
+		const NodePath child_path = _compose_runtime_plan_path(plan_source_path, relative_child_path);
 
 		if (override_child.type == TYPE_INSTANTIATED) {
 			const int target_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, child_path);
@@ -1869,6 +1870,10 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 			SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data_w(plan_id);
 			ERR_FAIL_NULL_V(plan_node, plan_id);
 			plan_node->owner_path = owner_path;
+			if (p_source_node_idx == 0) {
+				plan_node->override_source_state = p_source_state;
+				plan_node->override_source_node_idx = p_source_node_idx;
+			}
 			_apply_runtime_plan_property_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
 
 			_merge_runtime_plan_instance_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
@@ -1965,7 +1970,7 @@ bool SceneState::_runtime_plan_requires_legacy_connection_fallback(const Ref<Sce
 		if (plan_node.pruned || plan_node.flattened || plan_node.source_state.is_null() || plan_node.source_node_idx != 0) {
 			continue;
 		}
-		if (!plan_node.source_state->connections.is_empty()) {
+		if (!plan_node.source_state->connections.is_empty() || (plan_node.override_source_state.is_valid() && !plan_node.override_source_state->connections.is_empty())) {
 			has_connections = true;
 			break;
 		}
@@ -1986,34 +1991,36 @@ bool SceneState::_runtime_plan_requires_legacy_connection_fallback(const Ref<Sce
 
 void SceneState::_apply_runtime_plan_connections(const Ref<SceneInstantiationPlan> &p_runtime_plan, const HashMap<int, ObjectID> &p_materialized_plan_nodes, GenEditState p_edit_state) const {
 	ERR_FAIL_COND(p_runtime_plan.is_null());
-
-	for (const SceneInstantiationPlan::PlanNodeData &scene_root_plan : p_runtime_plan->plan_nodes) {
-		if (scene_root_plan.pruned || scene_root_plan.flattened || scene_root_plan.source_state.is_null() || scene_root_plan.source_node_idx != 0) {
-			continue;
+	auto canonicalize_connection_path = [](const NodePath &p_path) -> NodePath {
+		if (p_path.is_empty() || p_path.is_absolute() || (p_path.get_name_count() > 0 && p_path.get_name(0) == StringName("."))) {
+			return p_path;
+		}
+		return NodePath("./" + String(p_path));
+	};
+	auto apply_connections_from_state = [&](const SceneInstantiationPlan::PlanNodeData &p_scene_root_plan, const SceneState *p_connection_state) {
+		if (p_connection_state == nullptr || p_connection_state->connections.is_empty()) {
+			return;
 		}
 
-		const SceneState *source_state = scene_root_plan.source_state.ptr();
-		if (source_state->connections.is_empty()) {
-			continue;
-		}
-
-		for (const ConnectionData &connection : source_state->connections) {
+		for (const ConnectionData &connection : p_connection_state->connections) {
 			NodePath from_path;
 			if (connection.from & FLAG_ID_IS_PATH) {
-				from_path = source_state->node_paths[connection.from & FLAG_MASK];
+				from_path = p_connection_state->node_paths[connection.from & FLAG_MASK];
 			} else {
-				from_path = source_state->get_node_path(connection.from);
+				from_path = p_connection_state->get_node_path(connection.from);
 			}
+			from_path = canonicalize_connection_path(from_path);
 
 			NodePath to_path;
 			if (connection.to & FLAG_ID_IS_PATH) {
-				to_path = source_state->node_paths[connection.to & FLAG_MASK];
+				to_path = p_connection_state->node_paths[connection.to & FLAG_MASK];
 			} else {
-				to_path = source_state->get_node_path(connection.to);
+				to_path = p_connection_state->get_node_path(connection.to);
 			}
+			to_path = canonicalize_connection_path(to_path);
 
-			const NodePath full_from_path = _compose_runtime_plan_path(scene_root_plan.source_path, from_path);
-			const NodePath full_to_path = _compose_runtime_plan_path(scene_root_plan.source_path, to_path);
+			const NodePath full_from_path = _compose_runtime_plan_path(p_scene_root_plan.source_path, from_path);
+			const NodePath full_to_path = _compose_runtime_plan_path(p_scene_root_plan.source_path, to_path);
 
 			const int from_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, full_from_path);
 			const int to_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, full_to_path);
@@ -2027,10 +2034,10 @@ void SceneState::_apply_runtime_plan_connections(const Ref<SceneInstantiationPla
 				continue;
 			}
 
-			Callable callable(to_node, source_state->names[connection.method]);
+			Callable callable(to_node, p_connection_state->names[connection.method]);
 			Array binds;
 			for (int bind : connection.binds) {
-				binds.push_back(source_state->variants[bind]);
+				binds.push_back(p_connection_state->variants[bind]);
 			}
 
 			if (!binds.is_empty()) {
@@ -2041,7 +2048,22 @@ void SceneState::_apply_runtime_plan_connections(const Ref<SceneInstantiationPla
 				callable = callable.unbind(connection.unbinds);
 			}
 
-			from_node->connect(source_state->names[connection.signal], callable, CONNECT_PERSIST | connection.flags | (p_edit_state == GEN_EDIT_STATE_MAIN ? 0 : CONNECT_INHERITED));
+			if (from_node->is_connected(p_connection_state->names[connection.signal], callable)) {
+				continue;
+			}
+
+			from_node->connect(p_connection_state->names[connection.signal], callable, CONNECT_PERSIST | connection.flags | (p_edit_state == GEN_EDIT_STATE_MAIN ? 0 : CONNECT_INHERITED));
+		}
+	};
+
+	for (const SceneInstantiationPlan::PlanNodeData &scene_root_plan : p_runtime_plan->plan_nodes) {
+		if (scene_root_plan.pruned || scene_root_plan.flattened || scene_root_plan.source_state.is_null() || scene_root_plan.source_node_idx != 0) {
+			continue;
+		}
+
+		apply_connections_from_state(scene_root_plan, scene_root_plan.source_state.ptr());
+		if (scene_root_plan.override_source_state.is_valid()) {
+			apply_connections_from_state(scene_root_plan, scene_root_plan.override_source_state.ptr());
 		}
 	}
 }
