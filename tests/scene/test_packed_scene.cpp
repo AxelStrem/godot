@@ -1035,6 +1035,129 @@ TEST_CASE("[PackedScene] Runtime plan customization preserves persistent connect
 	memdelete(instance);
 }
 
+TEST_CASE("[PackedScene] Runtime plan customization preserves persistent connections after reload") {
+	PlanningNode *scene = PlanningNode::create_registered();
+	scene->set_name("Scene");
+
+	ConnectionEmitterNode *emitter = ConnectionEmitterNode::create_registered();
+	emitter->set_name("Emitter");
+	scene->add_child(emitter);
+	emitter->set_owner(scene);
+
+	ConnectionReceiverNode *receiver = ConnectionReceiverNode::create_registered();
+	receiver->set_name("Receiver");
+	scene->add_child(receiver);
+	receiver->set_owner(scene);
+
+	CHECK_EQ(emitter->connect("ping", Callable(receiver, "mark_received"), Object::CONNECT_PERSIST), OK);
+
+	Ref<PackedScene> packed_scene;
+	packed_scene.instantiate();
+	CHECK_EQ(packed_scene->pack(scene), OK);
+
+	const String scene_path = TestUtils::get_temp_path("runtime_plan_persistent_connections_reload.tscn");
+	CHECK_EQ(ResourceSaver::save(packed_scene, scene_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> reloaded_scene = ResourceLoader::load(scene_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(reloaded_scene.is_valid());
+
+	Node *instance = reloaded_scene->instantiate();
+	REQUIRE(instance != nullptr);
+
+	ConnectionEmitterNode *instanced_emitter = Object::cast_to<ConnectionEmitterNode>(instance->get_node_or_null(NodePath("Emitter")));
+	ConnectionReceiverNode *instanced_receiver = Object::cast_to<ConnectionReceiverNode>(instance->get_node_or_null(NodePath("Receiver")));
+	REQUIRE(instanced_emitter != nullptr);
+	REQUIRE(instanced_receiver != nullptr);
+	CHECK(instanced_emitter->is_connected("ping", Callable(instanced_receiver, "mark_received")));
+
+	instanced_emitter->emit_ping();
+	CHECK(instanced_receiver->was_received());
+
+	memdelete(scene);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(scene_path);
+}
+
+TEST_CASE("[PackedScene] Runtime plan customization preserves root override connections for instanced scene roots") {
+	ConnectionReceiverNode *base_root = ConnectionReceiverNode::create_registered();
+	base_root->set_name("BaseReceiver");
+
+	Ref<PackedScene> base_scene;
+	base_scene.instantiate();
+	CHECK_EQ(base_scene->pack(base_root), OK);
+
+	const String base_path = TestUtils::get_temp_path("runtime_plan_root_override_connections_base.tscn");
+	CHECK_EQ(ResourceSaver::save(base_scene, base_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> base_scene_loaded = ResourceLoader::load(base_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(base_scene_loaded.is_valid());
+
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+	ConnectionReceiverNode *override_root = Object::cast_to<ConnectionReceiverNode>(base_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN));
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(override_root != nullptr);
+	override_root->set_name("WrappedInstance");
+
+	ConnectionEmitterNode *override_emitter = ConnectionEmitterNode::create_registered();
+	override_emitter->set_name("Emitter");
+	override_root->add_child(override_emitter);
+	override_emitter->set_owner(override_root);
+	CHECK_EQ(override_emitter->connect("ping", Callable(override_root, "mark_received"), Object::CONNECT_PERSIST), OK);
+
+	Ref<PackedScene> override_scene;
+	override_scene.instantiate();
+	Engine::get_singleton()->set_editor_hint(true);
+	CHECK_EQ(override_scene->pack(override_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	const String override_path = TestUtils::get_temp_path("runtime_plan_root_override_connections_wrapper.tscn");
+	CHECK_EQ(ResourceSaver::save(override_scene, override_path), OK);
+
+	Ref<PackedScene> override_scene_loaded = ResourceLoader::load(override_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(override_scene_loaded.is_valid());
+
+	PlanningNode *outer_root = PlanningNode::create_registered();
+	outer_root->set_name("OuterRoot");
+
+	Engine::get_singleton()->set_editor_hint(true);
+	Node *nested_instance = override_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(nested_instance != nullptr);
+	outer_root->add_child(nested_instance);
+	nested_instance->set_owner(outer_root);
+
+	PackedScene outer_scene;
+	Engine::get_singleton()->set_editor_hint(true);
+	CHECK_EQ(outer_scene.pack(outer_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	Node *instance = outer_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	ConnectionReceiverNode *instanced_root = Object::cast_to<ConnectionReceiverNode>(instance->get_node_or_null(NodePath("WrappedInstance")));
+	REQUIRE(instanced_root != nullptr);
+
+	ConnectionEmitterNode *instanced_emitter = Object::cast_to<ConnectionEmitterNode>(instanced_root->get_node_or_null(NodePath("Emitter")));
+	REQUIRE(instanced_emitter != nullptr);
+	CHECK(instanced_emitter->is_connected("ping", Callable(instanced_root, "mark_received")));
+
+	instanced_emitter->emit_ping();
+	CHECK(instanced_root->was_received());
+
+	memdelete(base_root);
+	memdelete(override_root);
+	memdelete(outer_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(base_path);
+	DirAccess::remove_file_or_error(override_path);
+}
+
 TEST_CASE("[PackedScene] Runtime plan customization duplicates local scene resources") {
 	PlanningNode *scene = PlanningNode::create_registered();
 	scene->set_name("Scene");
@@ -1291,6 +1414,93 @@ TEST_CASE("[PackedScene] Nested runtime plan customization keeps owner-added ins
 	REQUIRE(instanced_child != nullptr);
 	CHECK_EQ(instanced_child->get_name(), StringName("ChildInstance"));
 	CHECK(instanced_child->get_node_or_null(NodePath("Payload")) != nullptr);
+
+	memdelete(child_root);
+	memdelete(outer_root);
+	memdelete(main_root);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(child_path);
+	DirAccess::remove_file_or_error(outer_path);
+}
+
+TEST_CASE("[PackedScene] Nested runtime plan customization keeps multiple owner-added instance siblings") {
+	Node *child_root = memnew(Node);
+	child_root->set_name("ChildRoot");
+
+	PlanningLeaf *child_payload = PlanningLeaf::create_registered();
+	child_payload->set_name("Payload");
+	child_payload->set_number(7);
+	child_root->add_child(child_payload);
+	child_payload->set_owner(child_root);
+
+	Ref<PackedScene> child_scene;
+	child_scene.instantiate();
+	CHECK_EQ(child_scene->pack(child_root), OK);
+
+	const String child_path = TestUtils::get_temp_path("nested_runtime_plan_owner_added_instance_siblings_child.tscn");
+	CHECK_EQ(ResourceSaver::save(child_scene, child_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> child_scene_loaded = ResourceLoader::load(child_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(child_scene_loaded.is_valid());
+
+	Node *outer_root = memnew(Node);
+	outer_root->set_name("OuterRoot");
+
+	Ref<PackedScene> outer_scene;
+	outer_scene.instantiate();
+	CHECK_EQ(outer_scene->pack(outer_root), OK);
+
+	const String outer_path = TestUtils::get_temp_path("nested_runtime_plan_owner_added_instance_siblings_outer.tscn");
+	CHECK_EQ(ResourceSaver::save(outer_scene, outer_path), OK);
+
+	err = OK;
+	Ref<PackedScene> outer_scene_loaded = ResourceLoader::load(outer_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	REQUIRE(err == OK);
+	REQUIRE(outer_scene_loaded.is_valid());
+
+	Node *main_root = memnew(Node);
+	main_root->set_name("MainRoot");
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+
+	Node *outer_instance = outer_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	REQUIRE(outer_instance != nullptr);
+	outer_instance->set_name("OuterInstance");
+	main_root->add_child(outer_instance);
+	outer_instance->set_owner(main_root);
+
+	Node *child_instance_a = child_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	REQUIRE(child_instance_a != nullptr);
+	child_instance_a->set_name("ChildA");
+	outer_instance->add_child(child_instance_a);
+	child_instance_a->set_owner(main_root);
+
+	Node *child_instance_b = child_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(child_instance_b != nullptr);
+	child_instance_b->set_name("ChildB");
+	outer_instance->add_child(child_instance_b);
+	child_instance_b->set_owner(main_root);
+
+	Engine::get_singleton()->set_editor_hint(true);
+	PackedScene main_scene;
+	CHECK_EQ(main_scene.pack(main_root), OK);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+
+	Node *instance = main_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	Node *instanced_outer = instance->get_node_or_null(NodePath("OuterInstance"));
+	REQUIRE(instanced_outer != nullptr);
+
+	Node *instanced_child_a = instanced_outer->get_node_or_null(NodePath("ChildA"));
+	Node *instanced_child_b = instanced_outer->get_node_or_null(NodePath("ChildB"));
+	REQUIRE(instanced_child_a != nullptr);
+	REQUIRE(instanced_child_b != nullptr);
+	CHECK(instanced_child_a->get_node_or_null(NodePath("Payload")) != nullptr);
+	CHECK(instanced_child_b->get_node_or_null(NodePath("Payload")) != nullptr);
 
 	memdelete(child_root);
 	memdelete(outer_root);
