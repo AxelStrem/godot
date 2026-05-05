@@ -4191,6 +4191,9 @@ void Node::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_exposed_to_owner", "exposed"), &Node::set_exposed_to_owner);
 	ClassDB::bind_method(D_METHOD("is_exposed_to_owner"), &Node::is_exposed_to_owner);
+	ClassDB::bind_method(D_METHOD("can_expose_node_to_owner", "node"), &Node::can_expose_node_to_owner);
+	ClassDB::bind_method(D_METHOD("is_exposed_node_to_owner", "node"), &Node::is_exposed_node_to_owner);
+	ClassDB::bind_method(D_METHOD("set_exposed_node_to_owner", "node", "exposed"), &Node::set_exposed_node_to_owner);
 
 	ClassDB::bind_method(D_METHOD("get_viewport"), &Node::get_viewport);
 
