@@ -411,6 +411,29 @@ Ref<PackedScene> ResourceLoaderText::_parse_node_tag(VariantParser::ResourcePars
 					return packed_scene;
 				}
 			}
+		} else if (next_tag.name == "exposed") {
+			if (!next_tag.fields.has("path")) {
+				error = ERR_FILE_CORRUPT;
+				error_text = "Missing 'path' field from exposed tag";
+				_printerr();
+				return Ref<PackedScene>();
+			}
+
+			NodePath path = next_tag.fields["path"];
+
+			packed_scene->get_state()->add_exposed_child(path.simplified());
+
+			error = VariantParser::parse_tag(&stream, lines, error_text, next_tag, &parser);
+
+			if (error) {
+				if (error != ERR_FILE_EOF) {
+					_printerr();
+					return Ref<PackedScene>();
+				} else {
+					error = OK;
+					return packed_scene;
+				}
+			}
 		} else {
 			error = ERR_FILE_CORRUPT;
 			error_text = vformat("Unknown tag '%s' in file", next_tag.name);
@@ -2137,6 +2160,14 @@ Error ResourceFormatSaverTextInstance::save(const String &p_path, const Ref<Reso
 				f->store_line("");
 			}
 			f->store_line("[editable path=\"" + editable_instances[i].operator String().c_escape() + "\"]");
+		}
+
+		Vector<NodePath> exposed_children = state->get_exposed_children();
+		for (int i = 0; i < exposed_children.size(); i++) {
+			if (i == 0 && editable_instances.is_empty()) {
+				f->store_line("");
+			}
+			f->store_line("[exposed path=\"" + exposed_children[i].operator String().c_escape() + "\"]");
 		}
 	}
 
