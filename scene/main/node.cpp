@@ -2729,6 +2729,55 @@ static bool _has_exposed_descendant_in_instance_state(const Node *p_node) {
 	return false;
 }
 
+static Array _get_foreign_exposed_paths_to_owner_meta(const Node *p_owner) {
+	return p_owner->get_meta("_edit_foreign_exposed_paths_to_owner_", Array());
+}
+
+static void _set_foreign_exposed_paths_to_owner_meta(Node *p_owner, const Array &p_paths) {
+	if (p_paths.is_empty()) {
+		p_owner->remove_meta("_edit_foreign_exposed_paths_to_owner_");
+	} else {
+		p_owner->set_meta("_edit_foreign_exposed_paths_to_owner_", p_paths);
+	}
+}
+
+static Array _get_explicit_exposed_owner_ids_meta(const Node *p_node) {
+	return p_node->get_meta("_edit_explicit_exposed_owner_ids_", Array());
+}
+
+static void _set_explicit_exposed_owner_ids_meta(Node *p_node, const Array &p_owner_ids) {
+	if (p_owner_ids.is_empty()) {
+		p_node->remove_meta("_edit_explicit_exposed_owner_ids_");
+	} else {
+		p_node->set_meta("_edit_explicit_exposed_owner_ids_", p_owner_ids);
+	}
+}
+
+static bool _array_has_owner_id(const Array &p_owner_ids, uint64_t p_owner_id) {
+	for (int i = 0; i < p_owner_ids.size(); i++) {
+		if (uint64_t(p_owner_ids[i]) == p_owner_id) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static bool _array_has_path_resolving_to_node(const Array &p_paths, const Node *p_owner, const Node *p_node) {
+	for (int i = 0; i < p_paths.size(); i++) {
+		if (p_paths[i].get_type() != Variant::NODE_PATH) {
+			continue;
+		}
+
+		Node *resolved = p_owner->get_node_or_null(p_paths[i]);
+		if (resolved == p_node) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static bool _is_exposed_in_instance_state_for_owner(const Node *p_node, const Node *p_owner) {
 	if (!p_owner) {
 		return false;
@@ -2814,6 +2863,105 @@ bool Node::is_exposed_to_owner() const {
 	return data.exposed_to_owner;
 }
 
+bool Node::can_expose_node_to_owner(const Node *p_node) const {
+	ERR_FAIL_NULL_V(p_node, false);
+
+	if (p_node == this || !is_ancestor_of(p_node)) {
+		return false;
+	}
+
+	if (p_node->get_owner() == this) {
+		return true;
+	}
+
+	return _is_exposed_to_scene_owner(p_node, this) || is_exposed_node_to_owner(p_node);
+}
+
+bool Node::is_exposed_node_to_owner(const Node *p_node) const {
+	ERR_FAIL_NULL_V(p_node, false);
+
+	if (p_node == this || !is_ancestor_of(p_node)) {
+		return false;
+	}
+
+	if (p_node->get_owner() == this) {
+		return p_node->is_exposed_to_owner();
+	}
+
+	const uint64_t owner_id = uint64_t(get_instance_id());
+	const Array owner_ids = _get_explicit_exposed_owner_ids_meta(p_node);
+	if (_array_has_owner_id(owner_ids, owner_id)) {
+		return true;
+	}
+
+	const Array foreign_paths = _get_foreign_exposed_paths_to_owner_meta(this);
+	return _array_has_path_resolving_to_node(foreign_paths, this, p_node);
+}
+
+void Node::set_exposed_node_to_owner(RequiredParam<Node> rp_node, bool p_exposed) {
+	ERR_THREAD_GUARD
+	EXTRACT_PARAM_OR_FAIL(p_node, rp_node);
+	ERR_FAIL_COND(p_node == this);
+	ERR_FAIL_COND(!is_ancestor_of(p_node));
+
+	if (p_node->get_owner() == this) {
+		p_node->set_exposed_to_owner(p_exposed);
+		return;
+	}
+
+	Array foreign_paths = _get_foreign_exposed_paths_to_owner_meta(this);
+	Array updated_paths;
+	const NodePath current_path = get_path_to(p_node);
+	bool has_current_path = false;
+
+	for (int i = 0; i < foreign_paths.size(); i++) {
+		if (foreign_paths[i].get_type() != Variant::NODE_PATH) {
+			continue;
+		}
+
+		const NodePath path = foreign_paths[i];
+		Node *resolved = get_node_or_null(path);
+		if (resolved == p_node) {
+			if (p_exposed && !has_current_path) {
+				updated_paths.push_back(current_path);
+				has_current_path = true;
+			}
+			continue;
+		}
+
+		updated_paths.push_back(path);
+		if (path == current_path) {
+			has_current_path = true;
+		}
+	}
+
+	if (p_exposed && !has_current_path) {
+		updated_paths.push_back(current_path);
+	}
+	_set_foreign_exposed_paths_to_owner_meta(this, updated_paths);
+
+	Array owner_ids = _get_explicit_exposed_owner_ids_meta(p_node);
+	const uint64_t owner_id = uint64_t(get_instance_id());
+	Array updated_owner_ids;
+	bool has_owner_id = false;
+
+	for (int i = 0; i < owner_ids.size(); i++) {
+		const uint64_t candidate_owner_id = uint64_t(owner_ids[i]);
+		if (candidate_owner_id == owner_id) {
+			has_owner_id = true;
+			if (!p_exposed) {
+				continue;
+			}
+		}
+		updated_owner_ids.push_back(candidate_owner_id);
+	}
+
+	if (p_exposed && !has_owner_id) {
+		updated_owner_ids.push_back(owner_id);
+	}
+	_set_explicit_exposed_owner_ids_meta(p_node, updated_owner_ids);
+}
+
 bool Node::has_exposed_children() const {
 	for (const KeyValue<StringName, Node *> &K : data.children) {
 		if (_has_exposed_descendant(K.value)) {
@@ -2832,6 +2980,28 @@ bool Node::has_exposed_children_for_owner(const Node *p_owner) const {
 		}
 	}
 	return false;
+}
+
+void Node::_set_foreign_exposed_node_paths_to_owner(const Vector<NodePath> &p_paths) {
+	Array foreign_paths;
+	const uint64_t owner_id = uint64_t(get_instance_id());
+
+	for (const NodePath &path : p_paths) {
+		Node *node = get_node_or_null(path);
+		if (!node || node->get_owner() == this) {
+			continue;
+		}
+
+		foreign_paths.push_back(path);
+
+		Array owner_ids = _get_explicit_exposed_owner_ids_meta(node);
+		if (!_array_has_owner_id(owner_ids, owner_id)) {
+			owner_ids.push_back(owner_id);
+			_set_explicit_exposed_owner_ids_meta(node, owner_ids);
+		}
+	}
+
+	_set_foreign_exposed_paths_to_owner_meta(this, foreign_paths);
 }
 
 Node *Node::get_deepest_editable_node(Node *p_start_node) const {

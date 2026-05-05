@@ -1572,20 +1572,18 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 				return;
 			}
 
+			Node *edited_scene = get_tree()->get_edited_scene_root();
 			List<Node *> full_selection = editor_selection->get_full_selected_node_list();
-			bool enabling = !first_selected->get()->is_exposed_to_owner();
+			bool enabling = !edited_scene->is_exposed_node_to_owner(first_selected->get());
 
 			EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
 			undo_redo->create_action(enabling ? TTR("Enable Exposed to Owner") : TTR("Disable Exposed to Owner"));
 			for (Node *node : full_selection) {
-				if (node == EditorNode::get_singleton()->get_edited_scene()) {
+				if (!edited_scene->can_expose_node_to_owner(node)) {
 					continue;
 				}
-				if (node->get_owner() != get_tree()->get_edited_scene_root()) {
-					continue;
-				}
-				undo_redo->add_do_method(node, "set_exposed_to_owner", enabling);
-				undo_redo->add_undo_method(node, "set_exposed_to_owner", !enabling);
+				undo_redo->add_do_method(edited_scene, "set_exposed_node_to_owner", node, enabling);
+				undo_redo->add_undo_method(edited_scene, "set_exposed_node_to_owner", node, !enabling);
 			}
 			undo_redo->add_do_method(scene_tree, "update_tree");
 			undo_redo->add_undo_method(scene_tree, "update_tree");
@@ -4053,32 +4051,47 @@ void SceneTreeDock::_tree_rmb(const Vector2 &p_menu_pos) {
 
 	if (profile_allow_editing) {
 		// Allow multi-toggling scene unique names but only if all selected nodes are owned by the edited scene root.
+		Node *edited_scene = EditorNode::get_singleton()->get_edited_scene();
 		bool all_owned = true;
 		for (Node *node : full_selection) {
-			if (node->get_owner() != EditorNode::get_singleton()->get_edited_scene()) {
+			if (node->get_owner() != edited_scene) {
 				all_owned = false;
 				break;
 			}
 		}
+		bool all_exposable = true;
+		for (Node *node : full_selection) {
+			if (!edited_scene->can_expose_node_to_owner(node)) {
+				all_exposable = false;
+				break;
+			}
+		}
+		bool added_profile_section = false;
 		if (all_owned) {
 			// Group "toggle_unique_name" with "copy_node_path", if it is available.
 			if (menu->get_item_index(TOOL_COPY_NODE_PATH) == -1) {
 				BEGIN_SECTION()
 			}
+			added_profile_section = true;
 			Node *node = full_selection.front()->get();
 			menu->add_icon_check_item(get_editor_theme_icon(SNAME("SceneUniqueName")), TTRC("Access as Unique Name"), TOOL_TOGGLE_SCENE_UNIQUE_NAME);
 			menu->set_item_shortcut(menu->get_item_index(TOOL_TOGGLE_SCENE_UNIQUE_NAME), ED_GET_SHORTCUT("scene_tree/toggle_unique_name"));
 			menu->set_item_checked(menu->get_item_index(TOOL_TOGGLE_SCENE_UNIQUE_NAME), node->is_unique_name_in_owner());
 		}
-		if (all_owned) {
+		if (all_exposable) {
+			if (!added_profile_section) {
+				BEGIN_SECTION()
+				added_profile_section = true;
+			}
 			Node *node = full_selection.front()->get();
-			// Don't show for root node — only non-root owned nodes can be exposed.
-			if (node != EditorNode::get_singleton()->get_edited_scene()) {
+			if (node != edited_scene) {
 				menu->add_check_item(TTR("Exposed to Owner"), TOOL_TOGGLE_EXPOSED_TO_OWNER);
-				menu->set_item_checked(menu->get_item_index(TOOL_TOGGLE_EXPOSED_TO_OWNER), node->is_exposed_to_owner());
+				menu->set_item_checked(menu->get_item_index(TOOL_TOGGLE_EXPOSED_TO_OWNER), edited_scene->is_exposed_node_to_owner(node));
 			}
 		}
-		END_SECTION()
+		if (added_profile_section) {
+			END_SECTION()
+		}
 	}
 
 	if (selection.size() == 1) {

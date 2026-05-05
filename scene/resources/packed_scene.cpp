@@ -717,6 +717,7 @@ Node *SceneState::instantiate(GenEditState p_edit_state) const {
 			ec->set_exposed_to_owner(true);
 		}
 	}
+	ret_nodes[0]->_set_foreign_exposed_node_paths_to_owner(exposed_children);
 
 	return ret_nodes[0];
 }
@@ -835,7 +836,7 @@ Error SceneState::_parse_node(Node *p_owner, Node *p_node, int p_parent_idx, Has
 	}
 
 	// Save exposed children paths.
-	if (p_node != p_owner && p_node->is_exposed_to_owner() && p_node->get_owner() == p_owner) {
+	if (p_node != p_owner && p_owner->is_exposed_node_to_owner(p_node)) {
 		exposed_children.push_back(p_owner->get_path_to(p_node));
 	}
 

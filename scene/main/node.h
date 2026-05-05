@@ -633,11 +633,15 @@ public:
 
 	void set_exposed_to_owner(bool p_exposed);
 	bool is_exposed_to_owner() const;
+	bool can_expose_node_to_owner(const Node *p_node) const;
+	bool is_exposed_node_to_owner(const Node *p_node) const;
+	void set_exposed_node_to_owner(RequiredParam<Node> rp_node, bool p_exposed);
 	bool has_exposed_children() const;
 	bool has_exposed_children_for_owner(const Node *p_owner) const;
 	static bool _is_exposed_to_scene_owner(const Node *p_node, const Node *p_owner);
 	static bool _has_exposed_descendant(const Node *p_node);
 	static bool _has_exposed_descendant_for_owner(const Node *p_node, const Node *p_owner);
+	void _set_foreign_exposed_node_paths_to_owner(const Vector<NodePath> &p_paths);
 
 #ifdef TOOLS_ENABLED
 	void set_property_pinned(const String &p_property, bool p_pinned);
