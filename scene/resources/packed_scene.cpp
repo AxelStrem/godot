@@ -152,6 +152,19 @@ static Node *_find_node_by_id(Node *p_owner, Node *p_node, int32_t p_id) {
 	return nullptr;
 }
 
+static bool _should_skip_foreign_scene_subtree(const Node *p_owner, const Node *p_node) {
+	if (!p_node || p_node == p_owner) {
+		return false;
+	}
+
+	const Node *node_owner = p_node->get_owner();
+	if (!node_owner || node_owner == p_owner || p_owner->is_editable_instance(node_owner)) {
+		return false;
+	}
+
+	return !Node::_has_exposed_descendant(p_node);
+}
+
 Node *SceneState::instantiate(GenEditState p_edit_state) const {
 	// Nodes where instantiation failed (because something is missing.)
 	List<Node *> stray_instances;
@@ -804,7 +817,7 @@ Error SceneState::_parse_node(Node *p_owner, Node *p_node, int p_parent_idx, Has
 	// document it. if you fail to understand something, please ask!
 
 	//discard nodes that do not belong to be processed
-	if (p_node != p_owner && p_node->get_owner() != p_owner && !p_owner->is_editable_instance(p_node->get_owner())) {
+	if (_should_skip_foreign_scene_subtree(p_owner, p_node)) {
 		return OK;
 	}
 
@@ -1152,7 +1165,7 @@ Error SceneState::_parse_node(Node *p_owner, Node *p_node, int p_parent_idx, Has
 
 Error SceneState::_parse_connections(Node *p_owner, Node *p_node, HashMap<StringName, int> &name_map, HashMap<Variant, int> &variant_map, HashMap<Node *, int> &node_map, HashMap<Node *, int> &nodepath_map) {
 	// Ignore nodes that are within a scene instance.
-	if (p_node != p_owner && p_node->get_owner() && p_node->get_owner() != p_owner && !p_owner->is_editable_instance(p_node->get_owner())) {
+	if (_should_skip_foreign_scene_subtree(p_owner, p_node)) {
 		return OK;
 	}
 

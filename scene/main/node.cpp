@@ -2677,8 +2677,60 @@ bool Node::is_editable_instance(const Node *p_node) const {
 	return p_node->data.editable_instance;
 }
 
+static bool _node_path_is_same_or_ancestor(const NodePath &p_ancestor, const NodePath &p_descendant) {
+	if (p_ancestor.is_empty() || p_ancestor == NodePath(".")) {
+		return true;
+	}
+
+	const int ancestor_name_count = p_ancestor.get_name_count();
+	if (ancestor_name_count > p_descendant.get_name_count()) {
+		return false;
+	}
+
+	for (int i = 0; i < ancestor_name_count; i++) {
+		if (p_ancestor.get_name(i) != p_descendant.get_name(i)) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static bool _has_exposed_descendant_in_instance_state(const Node *p_node) {
+	const Node *instance_root = p_node;
+	while (instance_root) {
+		if (instance_root->is_instance()) {
+			break;
+		}
+		instance_root = instance_root->get_parent();
+	}
+
+	while (instance_root) {
+		Ref<SceneState> instance_state = instance_root->get_scene_instance_state();
+		if (instance_state.is_valid()) {
+			const NodePath relative_path = instance_root == p_node ? NodePath(".") : instance_root->get_path_to(p_node);
+			for (const NodePath &exposed_path : instance_state->get_exposed_children()) {
+				if (_node_path_is_same_or_ancestor(relative_path, exposed_path)) {
+					return true;
+				}
+			}
+		}
+
+		const Node *next_instance_root = instance_root->get_parent();
+		while (next_instance_root) {
+			if (next_instance_root->is_instance()) {
+				break;
+			}
+			next_instance_root = next_instance_root->get_parent();
+		}
+		instance_root = next_instance_root;
+	}
+
+	return false;
+}
+
 bool Node::_has_exposed_descendant(const Node *p_node) {
-	if (p_node->data.exposed_to_owner) {
+	if (p_node->data.exposed_to_owner || _has_exposed_descendant_in_instance_state(p_node)) {
 		return true;
 	}
 	for (const KeyValue<StringName, Node *> &K : p_node->data.children) {

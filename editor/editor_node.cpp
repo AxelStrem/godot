@@ -7584,7 +7584,7 @@ void EditorNode::reload_instances_with_path_in_edited_scenes() {
 
 void EditorNode::_remove_all_not_owned_children(Node *p_node, Node *p_owner) {
 	Vector<Node *> nodes_to_remove;
-	if (p_node != p_owner && p_node->get_owner() != p_owner) {
+	if (p_node != p_owner && p_node->get_owner() != p_owner && !Node::_has_exposed_descendant(p_node)) {
 		nodes_to_remove.push_back(p_node);
 	}
 	for (int i = 0; i < p_node->get_child_count(); i++) {

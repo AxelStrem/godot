@@ -32,8 +32,13 @@
 
 TEST_FORCE_LINK(test_packed_scene)
 
+#include "core/config/engine.h"
+#include "core/io/dir_access.h"
+#include "core/io/resource_loader.h"
+#include "core/io/resource_saver.h"
 #include "core/object/callable_mp.h"
 #include "scene/resources/packed_scene.h"
+#include "tests/test_utils.h"
 
 namespace TestPackedScene {
 
@@ -120,6 +125,90 @@ TEST_CASE("[PackedScene] Signals Preserved when Packing Scene") {
 	*/
 
 	memdelete(main_scene_root);
+}
+
+TEST_CASE("[PackedScene] Pack scene preserves host-owned children under exposed instance descendants") {
+	Node *sub_scene_root = memnew(Node);
+	sub_scene_root->set_name("SubSceneRoot");
+
+	Node *wrapper = memnew(Node);
+	wrapper->set_name("Wrapper");
+	sub_scene_root->add_child(wrapper);
+	wrapper->set_owner(sub_scene_root);
+
+	Node *exposed = memnew(Node);
+	exposed->set_name("Exposed");
+	exposed->set_exposed_to_owner(true);
+	wrapper->add_child(exposed);
+	exposed->set_owner(sub_scene_root);
+
+	Ref<PackedScene> sub_scene;
+	sub_scene.instantiate();
+	CHECK_EQ(sub_scene->pack(sub_scene_root), OK);
+	Ref<SceneState> sub_scene_state = sub_scene->get_state();
+	REQUIRE(sub_scene_state.is_valid());
+	CHECK_EQ(sub_scene_state->get_exposed_children().size(), 1);
+	if (sub_scene_state->get_exposed_children().size() == 1) {
+		CHECK_EQ(String(sub_scene_state->get_exposed_children()[0]), String("Wrapper/Exposed"));
+	}
+
+	const String sub_scene_path = TestUtils::get_temp_path("packed_scene_exposed_child_host_addition.tscn");
+	CHECK_EQ(ResourceSaver::save(sub_scene, sub_scene_path), OK);
+
+	Ref<PackedScene> loaded_sub_scene = ResourceLoader::load(sub_scene_path, "PackedScene", ResourceFormatLoader::CACHE_MODE_IGNORE);
+	REQUIRE(loaded_sub_scene.is_valid());
+	Ref<SceneState> loaded_sub_scene_state = loaded_sub_scene->get_state();
+	REQUIRE(loaded_sub_scene_state.is_valid());
+	CHECK_EQ(loaded_sub_scene_state->get_exposed_children().size(), 1);
+	if (loaded_sub_scene_state->get_exposed_children().size() == 1) {
+		CHECK_EQ(String(loaded_sub_scene_state->get_exposed_children()[0]), String("Wrapper/Exposed"));
+	}
+
+	Node *main_scene_root = memnew(Node);
+	main_scene_root->set_name("MainSceneRoot");
+
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+	Node *instanced = loaded_sub_scene->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(instanced != nullptr);
+	instanced->set_name("Instanced");
+	main_scene_root->add_child(instanced);
+	instanced->set_owner(main_scene_root);
+
+	Node *exposed_in_owner = instanced->get_node_or_null(NodePath("Wrapper/Exposed"));
+	REQUIRE(exposed_in_owner != nullptr);
+	CHECK(exposed_in_owner->is_exposed_to_owner());
+	CHECK(Node::_has_exposed_descendant(instanced));
+
+	Node *added = memnew(Node);
+	added->set_name("Added");
+	exposed_in_owner->add_child(added);
+	added->set_owner(main_scene_root);
+	added->connect("ready", Callable(main_scene_root, SNAME("queue_free")), Object::CONNECT_PERSIST);
+
+	Ref<PackedScene> main_scene;
+	main_scene.instantiate();
+	CHECK_EQ(main_scene->pack(main_scene_root), OK);
+
+	Ref<SceneState> main_state = main_scene->get_state();
+	REQUIRE(main_state.is_valid());
+	CHECK_EQ(main_state->get_node_count(), 3);
+	CHECK_EQ(main_state->get_connection_count(), 1);
+
+	Node *instantiated_main = main_scene->instantiate();
+	REQUIRE(instantiated_main != nullptr);
+
+	Node *instantiated_added = instantiated_main->get_node_or_null(NodePath("Instanced/Wrapper/Exposed/Added"));
+	CHECK(instantiated_added != nullptr);
+	if (instantiated_added != nullptr) {
+		CHECK_EQ(instantiated_added->get_owner(), instantiated_main);
+	}
+
+	memdelete(sub_scene_root);
+	memdelete(main_scene_root);
+	memdelete(instantiated_main);
+	DirAccess::remove_file_or_error(sub_scene_path);
 }
 
 TEST_CASE("[PackedScene] Clear Packed Scene") {
