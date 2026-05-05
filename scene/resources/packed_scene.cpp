@@ -158,11 +158,11 @@ static bool _should_skip_foreign_scene_subtree(const Node *p_owner, const Node *
 	}
 
 	const Node *node_owner = p_node->get_owner();
-	if (!node_owner || node_owner == p_owner || p_owner->is_editable_instance(node_owner)) {
+	if (node_owner == p_owner || p_owner->is_editable_instance(node_owner)) {
 		return false;
 	}
 
-	return !Node::_has_exposed_descendant(p_node);
+	return !Node::_has_exposed_descendant_for_owner(p_node, p_owner);
 }
 
 SceneInstantiationPlan::SceneInstantiationPlan() {

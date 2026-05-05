@@ -292,7 +292,7 @@ void SceneTreeEditor::_update_node_subtree(Node *p_node, TreeItem *p_parent, boo
 		if ((show_enabled_subscene || can_open_instance) && p_node->get_owner() && (get_scene_node()->is_editable_instance(p_node->get_owner()))) {
 			part_of_subscene = true;
 			// Allow.
-		} else if (p_node->is_exposed_to_owner() || p_node->has_exposed_children()) {
+		} else if (Node::_is_exposed_to_scene_owner(p_node, get_scene_node()) || p_node->has_exposed_children_for_owner(get_scene_node())) {
 			// Node is exposed by its sub-scene, or is an ancestor of an exposed node.
 			part_of_subscene = true;
 		} else {

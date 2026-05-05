@@ -646,7 +646,10 @@ public:
 	void set_exposed_to_owner(bool p_exposed);
 	bool is_exposed_to_owner() const;
 	bool has_exposed_children() const;
+	bool has_exposed_children_for_owner(const Node *p_owner) const;
+	static bool _is_exposed_to_scene_owner(const Node *p_node, const Node *p_owner);
 	static bool _has_exposed_descendant(const Node *p_node);
+	static bool _has_exposed_descendant_for_owner(const Node *p_node, const Node *p_owner);
 
 #ifdef TOOLS_ENABLED
 	void set_property_pinned(const String &p_property, bool p_pinned);
