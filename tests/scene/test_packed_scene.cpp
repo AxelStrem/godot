@@ -647,6 +647,85 @@ TEST_CASE("[PackedScene] Owner-scoped exposed descendants do not leak across nes
 	DirAccess::remove_file_or_error(scene_c_path);
 }
 
+TEST_CASE("[PackedScene] Nested exposed nodes can be re-exposed by the host scene") {
+	Node *scene_c_root = memnew(Node);
+	scene_c_root->set_name("SceneC");
+
+	Node *exposed_d = memnew(Node);
+	exposed_d->set_name("D");
+	exposed_d->set_exposed_to_owner(true);
+	scene_c_root->add_child(exposed_d);
+	exposed_d->set_owner(scene_c_root);
+
+	Ref<PackedScene> scene_c;
+	scene_c.instantiate();
+	CHECK_EQ(scene_c->pack(scene_c_root), OK);
+
+	const String scene_c_path = TestUtils::get_temp_path("packed_scene_nested_reexpose_scene_c.tscn");
+	CHECK_EQ(ResourceSaver::save(scene_c, scene_c_path), OK);
+
+	Ref<PackedScene> loaded_scene_c = ResourceLoader::load(scene_c_path, "PackedScene", ResourceFormatLoader::CACHE_MODE_IGNORE);
+	REQUIRE(loaded_scene_c.is_valid());
+
+	Node *scene_b_root = memnew(Node);
+	scene_b_root->set_name("SceneB");
+
+	const bool was_editor_hint = Engine::get_singleton()->is_editor_hint();
+	Engine::get_singleton()->set_editor_hint(true);
+	Node *instanced_c = loaded_scene_c->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(instanced_c != nullptr);
+	instanced_c->set_name("InstancedC");
+	scene_b_root->add_child(instanced_c);
+	instanced_c->set_owner(scene_b_root);
+
+	Node *exposed_in_b = instanced_c->get_node_or_null(NodePath("D"));
+	REQUIRE(exposed_in_b != nullptr);
+	CHECK(Node::_is_exposed_to_scene_owner(exposed_in_b, scene_b_root));
+	CHECK_FALSE(scene_b_root->is_exposed_node_to_owner(exposed_in_b));
+
+	scene_b_root->set_exposed_node_to_owner(exposed_in_b, true);
+	CHECK(scene_b_root->is_exposed_node_to_owner(exposed_in_b));
+
+	Ref<PackedScene> scene_b;
+	scene_b.instantiate();
+	CHECK_EQ(scene_b->pack(scene_b_root), OK);
+	Ref<SceneState> scene_b_state = scene_b->get_state();
+	REQUIRE(scene_b_state.is_valid());
+	CHECK_EQ(scene_b_state->get_exposed_children().size(), 1);
+	if (scene_b_state->get_exposed_children().size() == 1) {
+		CHECK_EQ(String(scene_b_state->get_exposed_children()[0]), String("InstancedC/D"));
+	}
+
+	const String scene_b_path = TestUtils::get_temp_path("packed_scene_nested_reexpose_scene_b.tscn");
+	CHECK_EQ(ResourceSaver::save(scene_b, scene_b_path), OK);
+
+	Ref<PackedScene> loaded_scene_b = ResourceLoader::load(scene_b_path, "PackedScene", ResourceFormatLoader::CACHE_MODE_IGNORE);
+	REQUIRE(loaded_scene_b.is_valid());
+
+	Node *scene_a_root = memnew(Node);
+	scene_a_root->set_name("SceneA");
+
+	Engine::get_singleton()->set_editor_hint(true);
+	Node *instanced_b = loaded_scene_b->instantiate(PackedScene::GEN_EDIT_STATE_MAIN);
+	Engine::get_singleton()->set_editor_hint(was_editor_hint);
+	REQUIRE(instanced_b != nullptr);
+	instanced_b->set_name("InstancedB");
+	scene_a_root->add_child(instanced_b);
+	instanced_b->set_owner(scene_a_root);
+
+	Node *exposed_in_a = instanced_b->get_node_or_null(NodePath("InstancedC/D"));
+	REQUIRE(exposed_in_a != nullptr);
+	CHECK(instanced_b->is_exposed_node_to_owner(exposed_in_a));
+	CHECK(Node::_is_exposed_to_scene_owner(exposed_in_a, scene_a_root));
+
+	memdelete(scene_c_root);
+	memdelete(scene_b_root);
+	memdelete(scene_a_root);
+	DirAccess::remove_file_or_error(scene_b_path);
+	DirAccess::remove_file_or_error(scene_c_path);
+}
+
 TEST_CASE("[PackedScene] Clear Packed Scene") {
 	// Create a scene to pack.
 	Node *scene = memnew(Node);
