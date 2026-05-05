@@ -2729,12 +2729,77 @@ static bool _has_exposed_descendant_in_instance_state(const Node *p_node) {
 	return false;
 }
 
+static bool _is_exposed_in_instance_state_for_owner(const Node *p_node, const Node *p_owner) {
+	if (!p_owner) {
+		return false;
+	}
+
+	const Node *instance_root = p_node;
+	while (instance_root) {
+		if (instance_root->is_instance()) {
+			break;
+		}
+		instance_root = instance_root->get_parent();
+	}
+
+	while (instance_root) {
+		if (instance_root == p_owner || instance_root->get_owner() == p_owner) {
+			Ref<SceneState> instance_state = instance_root->get_scene_instance_state();
+			if (instance_state.is_valid()) {
+				const NodePath relative_path = instance_root == p_node ? NodePath(".") : instance_root->get_path_to(p_node);
+				for (const NodePath &exposed_path : instance_state->get_exposed_children()) {
+					if (relative_path == exposed_path) {
+						return true;
+					}
+				}
+			}
+		}
+
+		const Node *next_instance_root = instance_root->get_parent();
+		while (next_instance_root) {
+			if (next_instance_root->is_instance()) {
+				break;
+			}
+			next_instance_root = next_instance_root->get_parent();
+		}
+		instance_root = next_instance_root;
+	}
+
+	return false;
+}
+
+bool Node::_is_exposed_to_scene_owner(const Node *p_node, const Node *p_owner) {
+	ERR_FAIL_NULL_V(p_node, false);
+	ERR_FAIL_NULL_V(p_owner, false);
+
+	if (p_node->data.exposed_to_owner && p_node->get_owner() == p_owner) {
+		return true;
+	}
+
+	return _is_exposed_in_instance_state_for_owner(p_node, p_owner);
+}
+
 bool Node::_has_exposed_descendant(const Node *p_node) {
 	if (p_node->data.exposed_to_owner || _has_exposed_descendant_in_instance_state(p_node)) {
 		return true;
 	}
 	for (const KeyValue<StringName, Node *> &K : p_node->data.children) {
 		if (_has_exposed_descendant(K.value)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool Node::_has_exposed_descendant_for_owner(const Node *p_node, const Node *p_owner) {
+	ERR_FAIL_NULL_V(p_node, false);
+	ERR_FAIL_NULL_V(p_owner, false);
+
+	if (_is_exposed_to_scene_owner(p_node, p_owner)) {
+		return true;
+	}
+	for (const KeyValue<StringName, Node *> &K : p_node->data.children) {
+		if (_has_exposed_descendant_for_owner(K.value, p_owner)) {
 			return true;
 		}
 	}
@@ -2752,6 +2817,17 @@ bool Node::is_exposed_to_owner() const {
 bool Node::has_exposed_children() const {
 	for (const KeyValue<StringName, Node *> &K : data.children) {
 		if (_has_exposed_descendant(K.value)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool Node::has_exposed_children_for_owner(const Node *p_owner) const {
+	ERR_FAIL_NULL_V(p_owner, false);
+
+	for (const KeyValue<StringName, Node *> &K : data.children) {
+		if (_has_exposed_descendant_for_owner(K.value, p_owner)) {
 			return true;
 		}
 	}
