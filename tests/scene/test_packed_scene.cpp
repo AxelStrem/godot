@@ -39,6 +39,7 @@ TEST_FORCE_LINK(test_packed_scene)
 #include "core/io/resource_saver.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "scene/2d/node_2d.h"
 #include "scene/resources/packed_scene.h"
 #include "tests/test_utils.h"
 
@@ -421,6 +422,30 @@ TEST_CASE("[PackedScene] Pack Scene and Retrieve State") {
 	CHECK(state->get_node_name(0) == "TestScene");
 
 	memdelete(scene);
+}
+
+TEST_CASE("[PackedScene] Packing serializes untweaked base values") {
+	Node2D *scene = memnew(Node2D);
+	scene->set_name("TestScene");
+
+	const Vector2 base_position(12, 34);
+	const Vector2 tweaked_position(56, 78);
+	scene->set_position(base_position);
+
+	Ref<Tweak> tweak = scene->create_tweak(scene, SNAME("position"), tweaked_position, Tweak::ACTION_SET, 0);
+	REQUIRE(tweak.is_valid());
+	CHECK_EQ(scene->get_position(), tweaked_position);
+	CHECK_EQ(scene->get_base_value(SNAME("position")), Variant(base_position));
+
+	PackedScene packed_scene;
+	CHECK_EQ(packed_scene.pack(scene), OK);
+
+	Node2D *instance = Object::cast_to<Node2D>(packed_scene.instantiate());
+	REQUIRE(instance != nullptr);
+	CHECK_EQ(instance->get_position(), base_position);
+
+	memdelete(scene);
+	memdelete(instance);
 }
 
 TEST_CASE("[PackedScene] Signals Preserved when Packing Scene") {

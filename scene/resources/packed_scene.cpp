@@ -2692,7 +2692,7 @@ Error SceneState::_parse_node(Node *p_owner, Node *p_node, int p_parent_idx, Has
 		}
 
 		StringName name = E.name;
-		Variant value = p_node->get(name);
+		Variant value = p_node->get_base_value(name);
 		bool use_deferred_node_path_bit = false;
 
 		if (E.type == Variant::OBJECT && E.hint == PROPERTY_HINT_NODE_TYPE) {
