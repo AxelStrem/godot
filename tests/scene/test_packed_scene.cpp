@@ -32,9 +32,14 @@
 
 TEST_FORCE_LINK(test_packed_scene)
 
+#include "core/io/dir_access.h"
+#include "core/io/resource_loader.h"
+#include "core/io/resource_saver.h"
 #include "core/object/callable_mp.h"
 #include "scene/2d/node_2d.h"
+#include "scene/3d/node_3d.h"
 #include "scene/resources/packed_scene.h"
+#include "tests/test_utils.h"
 
 namespace TestPackedScene {
 
@@ -79,6 +84,81 @@ TEST_CASE("[PackedScene] Packing serializes untweaked base values") {
 
 	memdelete(scene);
 	memdelete(instance);
+}
+
+TEST_CASE("[PackedScene] Saving and reloading keeps untweaked base values") {
+	Node2D *scene = memnew(Node2D);
+	scene->set_name("TestScene");
+
+	const Vector2 base_position(12, 34);
+	const Vector2 tweaked_position(56, 78);
+	scene->set_position(base_position);
+
+	Ref<Tweak> tweak = scene->create_tweak(scene, SNAME("position"), tweaked_position, Tweak::ACTION_SET, 0);
+	REQUIRE(tweak.is_valid());
+	CHECK_EQ(scene->get_position(), tweaked_position);
+
+	Ref<PackedScene> packed_scene;
+	packed_scene.instantiate();
+	CHECK_EQ(packed_scene->pack(scene), OK);
+
+	const String scene_path = TestUtils::get_temp_path("packed_scene_tweaks_disk_roundtrip.tscn");
+	CHECK_EQ(ResourceSaver::save(packed_scene, scene_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> reloaded_scene = ResourceLoader::load(scene_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	CHECK_EQ(err, OK);
+	REQUIRE(reloaded_scene.is_valid());
+
+	Node2D *instance = Object::cast_to<Node2D>(reloaded_scene->instantiate());
+	REQUIRE(instance != nullptr);
+	CHECK_EQ(instance->get_position(), base_position);
+
+	memdelete(scene);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(scene_path);
+}
+
+TEST_CASE("[PackedScene] Saving and reloading keeps untweaked base values for local tweaked children") {
+	Node3D *scene = memnew(Node3D);
+	scene->set_name("TestScene");
+
+	Node3D *child = memnew(Node3D);
+	child->set_name("Top");
+	scene->add_child(child);
+	child->set_owner(scene);
+
+	const Vector3 base_position(12, 34, 56);
+	const Vector3 tweak_offset(3, 5, 7);
+	child->set_position(base_position);
+
+	Ref<Tweak> tweak = scene->create_tweak(child, SNAME("position"), tweak_offset, Tweak::ACTION_ADD, 0);
+	REQUIRE(tweak.is_valid());
+	CHECK_EQ(child->get_position(), base_position + tweak_offset);
+	CHECK_EQ(child->get_base_value(SNAME("position")), Variant(base_position));
+
+	Ref<PackedScene> packed_scene;
+	packed_scene.instantiate();
+	CHECK_EQ(packed_scene->pack(scene), OK);
+
+	const String scene_path = TestUtils::get_temp_path("packed_scene_tweaked_child_disk_roundtrip.tscn");
+	CHECK_EQ(ResourceSaver::save(packed_scene, scene_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> reloaded_scene = ResourceLoader::load(scene_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	CHECK_EQ(err, OK);
+	REQUIRE(reloaded_scene.is_valid());
+
+	Node3D *instance = Object::cast_to<Node3D>(reloaded_scene->instantiate());
+	REQUIRE(instance != nullptr);
+
+	Node3D *reloaded_child = Object::cast_to<Node3D>(instance->get_node_or_null(NodePath("Top")));
+	REQUIRE(reloaded_child != nullptr);
+	CHECK_EQ(reloaded_child->get_position(), base_position);
+
+	memdelete(scene);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(scene_path);
 }
 
 TEST_CASE("[PackedScene] Signals Preserved when Packing Scene") {

@@ -80,6 +80,58 @@ static Array _sanitize_node_pinned_properties(Node *p_node) {
 	return pinned;
 }
 
+static Variant _get_storable_property_base_value(Node *p_node, const StringName &p_name) {
+	Variant value = p_node->get_base_value(p_name);
+
+#ifndef _3D_DISABLED
+	if (p_name == SNAME("transform")) {
+		Node3D *node_3d = Object::cast_to<Node3D>(p_node);
+		if (node_3d != nullptr && value == p_node->get(p_name)) {
+			const Variant base_position = p_node->get_base_value(SNAME("position"));
+			const bool has_base_position = base_position != p_node->get(SNAME("position"));
+			const Variant base_basis = p_node->get_base_value(SNAME("basis"));
+			const bool has_base_basis = base_basis != p_node->get(SNAME("basis"));
+			const Variant base_quaternion = p_node->get_base_value(SNAME("quaternion"));
+			const bool has_base_quaternion = base_quaternion != p_node->get(SNAME("quaternion"));
+			const Variant base_rotation = p_node->get_base_value(SNAME("rotation"));
+			const bool has_base_rotation = base_rotation != p_node->get(SNAME("rotation"));
+			const Variant base_scale = p_node->get_base_value(SNAME("scale"));
+			const bool has_base_scale = base_scale != p_node->get(SNAME("scale"));
+
+			if (has_base_position || has_base_basis || has_base_quaternion || has_base_rotation || has_base_scale) {
+				Node3D base_node_3d;
+				base_node_3d.set_rotation_order(EulerOrder(int32_t(p_node->get_base_value(SNAME("rotation_order")))));
+				base_node_3d.set_transform(Transform3D(value));
+
+				if (has_base_basis) {
+					base_node_3d.set_basis(Basis(base_basis));
+				} else if (has_base_quaternion) {
+					base_node_3d.set_quaternion(Quaternion(base_quaternion));
+					if (has_base_scale) {
+						base_node_3d.set_scale(Vector3(base_scale));
+					}
+				} else {
+					if (has_base_rotation) {
+						base_node_3d.set_rotation(Vector3(base_rotation));
+					}
+					if (has_base_scale) {
+						base_node_3d.set_scale(Vector3(base_scale));
+					}
+				}
+
+				if (has_base_position) {
+					base_node_3d.set_position(Vector3(base_position));
+				}
+
+				value = base_node_3d.get_transform();
+			}
+		}
+	}
+#endif
+
+	return value;
+}
+
 Ref<Resource> SceneState::get_remap_resource(const Ref<Resource> &p_resource, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &remap_cache, const Ref<Resource> &p_fallback, Node *p_for_scene) {
 	ERR_FAIL_COND_V(p_resource.is_null(), Ref<Resource>());
 
@@ -880,7 +932,7 @@ Error SceneState::_parse_node(Node *p_owner, Node *p_node, int p_parent_idx, Has
 		}
 
 		StringName name = E.name;
-		Variant value = p_node->get_base_value(name);
+		Variant value = _get_storable_property_base_value(p_node, name);
 		bool use_deferred_node_path_bit = false;
 
 		if (E.type == Variant::OBJECT && E.hint == PROPERTY_HINT_NODE_TYPE) {
