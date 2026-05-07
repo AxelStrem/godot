@@ -46,6 +46,7 @@ enum SceneInstantiationPlanNodeOrigin {
 
 class SceneState : public RefCounted {
 	GDCLASS(SceneState, RefCounted);
+	friend class SceneInstantiationPlan;
 
 	Vector<StringName> names;
 	Vector<Variant> variants;
@@ -174,7 +175,10 @@ private:
 	bool _runtime_plan_requires_legacy_fallback(const Ref<SceneInstantiationPlan> &p_runtime_plan) const;
 	bool _runtime_plan_uses_customization(const Ref<SceneInstantiationPlan> &p_runtime_plan) const;
 	void _apply_legacy_filter_to_runtime_plan(Node *p_node, const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id) const;
-	Node *_materialize_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, Node *p_parent, Node *p_root, Node *p_source_root, Vector<DeferredNodePathProperties> *p_deferred_node_paths, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> *p_resources_local_to_scenes, HashMap<int, ObjectID> *p_materialized_plan_nodes, GenEditState p_edit_state) const;
+	Node *_materialize_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, Node *p_parent, Node *p_root, Node *p_source_root, Vector<DeferredNodePathProperties> *p_deferred_node_paths, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> *p_resources_local_to_scenes, HashMap<int, ObjectID> *p_materialized_plan_nodes, GenEditState p_edit_state, bool p_apply_customization = true) const;
+	NodePath _rebase_runtime_plan_subtree_path(const NodePath &p_root_source_path, const NodePath &p_path, bool p_fallback_to_root) const;
+	int _clone_runtime_plan_subtree(const Ref<SceneInstantiationPlan> &p_source_plan, int p_source_plan_id, const Ref<SceneInstantiationPlan> &p_target_plan, int p_target_parent_plan_id, const NodePath &p_root_source_path) const;
+	Ref<PackedScene> _extract_runtime_plan_scene(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id) const;
 
 public:
 
@@ -328,6 +332,7 @@ class SceneInstantiationPlan : public RefCounted {
 	void _rename_node(int p_plan_id, const StringName &p_name);
 	void _prune_node(int p_plan_id);
 	Array _duplicate_node(int p_plan_id, int p_additional_count);
+	Ref<PackedScene> _extract_scene(int p_plan_id) const;
 	void _flatten_node(int p_plan_id);
 
 protected:
@@ -383,6 +388,7 @@ public:
 	void clear_property_override(const StringName &p_name);
 	void prune();
 	Array duplicate(int p_additional_count);
+	Ref<PackedScene> extract_scene() const;
 	void flatten_into_parent();
 
 	SceneInstantiationPlanNode();

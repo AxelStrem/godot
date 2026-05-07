@@ -405,6 +405,44 @@ public:
 	}
 };
 
+class ExtractingPlanningNode : public Node {
+	GDCLASS(ExtractingPlanningNode, Node);
+
+	Ref<PackedScene> extracted_scene;
+
+	static void _bind_methods() {
+		ClassDB::bind_method(D_METHOD("_customize_scene_instantiation", "plan"), &ExtractingPlanningNode::_customize_scene_instantiation);
+	}
+
+public:
+	static ExtractingPlanningNode *create_registered() {
+		static bool registered = false;
+		if (!registered) {
+			GDREGISTER_CLASS(ExtractingPlanningNode);
+			registered = true;
+		}
+		return memnew(ExtractingPlanningNode);
+	}
+
+	Ref<PackedScene> get_extracted_scene() const {
+		return extracted_scene;
+	}
+
+	void _customize_scene_instantiation(const Ref<SceneInstantiationPlanNode> &p_plan) {
+		for (int child_idx = 0; child_idx < p_plan->get_child_count(); child_idx++) {
+			Ref<SceneInstantiationPlanNode> child_plan = p_plan->get_child(child_idx);
+			if (child_plan.is_null()) {
+				continue;
+			}
+
+			if (child_plan->get_name() == StringName("Deferred")) {
+				extracted_scene = child_plan->extract_scene();
+				child_plan->prune();
+			}
+		}
+	}
+};
+
 TEST_CASE("[PackedScene] Pack Scene and Retrieve State") {
 	// Create a scene to pack.
 	Node *scene = memnew(Node);
@@ -1483,6 +1521,62 @@ TEST_CASE("[PackedScene] Runtime plan customization preserves persistent connect
 	memdelete(scene);
 	memdelete(instance);
 	DirAccess::remove_file_or_error(scene_path);
+}
+
+TEST_CASE("[PackedScene] Runtime plan extraction can defer subtree instantiation") {
+	ExtractingPlanningNode *scene = ExtractingPlanningNode::create_registered();
+	scene->set_name("Scene");
+
+	Node *deferred_root = memnew(Node);
+	deferred_root->set_name("Deferred");
+	scene->add_child(deferred_root);
+	deferred_root->set_owner(scene);
+
+	ConnectionEmitterNode *emitter = ConnectionEmitterNode::create_registered();
+	emitter->set_name("Emitter");
+	deferred_root->add_child(emitter);
+	emitter->set_owner(scene);
+
+	ConnectionReceiverNode *receiver = ConnectionReceiverNode::create_registered();
+	receiver->set_name("Receiver");
+	deferred_root->add_child(receiver);
+	receiver->set_owner(scene);
+
+	CHECK_EQ(emitter->connect("ping", Callable(receiver, "mark_received"), Object::CONNECT_PERSIST), OK);
+
+	PackedScene packed_scene;
+	CHECK_EQ(packed_scene.pack(scene), OK);
+
+	ExtractingPlanningNode *instance = Object::cast_to<ExtractingPlanningNode>(packed_scene.instantiate());
+	REQUIRE(instance != nullptr);
+	CHECK(instance->get_node_or_null(NodePath("Deferred")) == nullptr);
+
+	Ref<PackedScene> extracted_scene = instance->get_extracted_scene();
+	REQUIRE(extracted_scene.is_valid());
+
+	Node *deferred_instance_a = extracted_scene->instantiate();
+	Node *deferred_instance_b = extracted_scene->instantiate();
+	REQUIRE(deferred_instance_a != nullptr);
+	REQUIRE(deferred_instance_b != nullptr);
+
+	ConnectionEmitterNode *deferred_emitter_a = Object::cast_to<ConnectionEmitterNode>(deferred_instance_a->get_node_or_null(NodePath("Emitter")));
+	ConnectionReceiverNode *deferred_receiver_a = Object::cast_to<ConnectionReceiverNode>(deferred_instance_a->get_node_or_null(NodePath("Receiver")));
+	REQUIRE(deferred_emitter_a != nullptr);
+	REQUIRE(deferred_receiver_a != nullptr);
+	CHECK(deferred_emitter_a->is_connected("ping", Callable(deferred_receiver_a, "mark_received")));
+	deferred_emitter_a->emit_ping();
+	CHECK(deferred_receiver_a->was_received());
+
+	ConnectionEmitterNode *deferred_emitter_b = Object::cast_to<ConnectionEmitterNode>(deferred_instance_b->get_node_or_null(NodePath("Emitter")));
+	ConnectionReceiverNode *deferred_receiver_b = Object::cast_to<ConnectionReceiverNode>(deferred_instance_b->get_node_or_null(NodePath("Receiver")));
+	REQUIRE(deferred_emitter_b != nullptr);
+	REQUIRE(deferred_receiver_b != nullptr);
+	CHECK(deferred_emitter_b->is_connected("ping", Callable(deferred_receiver_b, "mark_received")));
+
+	memdelete(scene);
+	memdelete(instance);
+	memdelete(deferred_instance_a);
+	memdelete(deferred_instance_b);
 }
 
 TEST_CASE("[PackedScene] Runtime plan customization preserves root override connections for instanced scene roots") {
