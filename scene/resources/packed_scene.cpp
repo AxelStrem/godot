@@ -1741,6 +1741,18 @@ NodePath SceneState::_rebase_runtime_plan_subtree_path(const NodePath &p_root_so
 	return p_fallback_to_root ? NodePath(".") : NodePath();
 }
 
+static void _normalize_extracted_scene_owners(Node *p_root, Node *p_node) {
+	ERR_FAIL_NULL(p_root);
+	ERR_FAIL_NULL(p_node);
+
+	for (int child_idx = 0; child_idx < p_node->get_child_count(); child_idx++) {
+		Node *child = p_node->get_child(child_idx);
+		ERR_CONTINUE(child == nullptr);
+		child->set_owner(p_root);
+		_normalize_extracted_scene_owners(p_root, child);
+	}
+}
+
 int SceneState::_clone_runtime_plan_subtree(const Ref<SceneInstantiationPlan> &p_source_plan, int p_source_plan_id, const Ref<SceneInstantiationPlan> &p_target_plan, int p_target_parent_plan_id, const NodePath &p_root_source_path) const {
 	ERR_FAIL_COND_V(p_source_plan.is_null(), -1);
 	ERR_FAIL_COND_V(p_target_plan.is_null(), -1);
@@ -1778,17 +1790,10 @@ Ref<PackedScene> SceneState::_extract_runtime_plan_scene(const Ref<SceneInstanti
 	ERR_FAIL_COND_V(source_plan_node->pruned || source_plan_node->flattened, Ref<PackedScene>());
 	ERR_FAIL_COND_V(source_plan_node->source_state.is_null(), Ref<PackedScene>());
 
-	Ref<SceneInstantiationPlan> extracted_plan;
-	extracted_plan.instantiate();
-
-	const int extracted_root_plan_id = _clone_runtime_plan_subtree(p_runtime_plan, p_plan_id, extracted_plan, -1, source_plan_node->source_path);
-	ERR_FAIL_COND_V(extracted_root_plan_id < 0, Ref<PackedScene>());
-	extracted_plan->set_root_plan_id(extracted_root_plan_id);
-
 	Vector<DeferredNodePathProperties> deferred_node_paths;
 	HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> resources_local_to_scenes;
 	HashMap<int, ObjectID> materialized_plan_nodes;
-	Node *root = _materialize_runtime_plan_node(extracted_plan, extracted_root_plan_id, nullptr, nullptr, nullptr, &deferred_node_paths, &resources_local_to_scenes, &materialized_plan_nodes, GEN_EDIT_STATE_DISABLED, false);
+	Node *root = _materialize_runtime_plan_node(p_runtime_plan, p_plan_id, nullptr, nullptr, nullptr, &deferred_node_paths, &resources_local_to_scenes, &materialized_plan_nodes, GEN_EDIT_STATE_DISABLED, false);
 	ERR_FAIL_NULL_V(root, Ref<PackedScene>());
 
 	_resolve_runtime_plan_deferred_node_paths(deferred_node_paths);
@@ -1836,8 +1841,8 @@ Ref<PackedScene> SceneState::_extract_runtime_plan_scene(const Ref<SceneInstanti
 					continue;
 				}
 
-				const int from_plan_id = _find_runtime_plan_node_by_source_path(extracted_plan, rebased_from_path);
-				const int to_plan_id = _find_runtime_plan_node_by_source_path(extracted_plan, rebased_to_path);
+				const int from_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, full_from_path);
+				const int to_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, full_to_path);
 				if (from_plan_id < 0 || to_plan_id < 0 || !materialized_plan_nodes.has(from_plan_id) || !materialized_plan_nodes.has(to_plan_id)) {
 					continue;
 				}
@@ -1878,7 +1883,8 @@ Ref<PackedScene> SceneState::_extract_runtime_plan_scene(const Ref<SceneInstanti
 		}
 	}
 
-	_apply_runtime_plan_connections(extracted_plan, materialized_plan_nodes, GEN_EDIT_STATE_DISABLED);
+	_apply_runtime_plan_connections(p_runtime_plan, materialized_plan_nodes, GEN_EDIT_STATE_DISABLED);
+	_normalize_extracted_scene_owners(root, root);
 
 	Ref<PackedScene> extracted_scene;
 	extracted_scene.instantiate();
@@ -2630,7 +2636,7 @@ Node *SceneState::_materialize_runtime_plan_node(const Ref<SceneInstantiationPla
 	}
 
 	const NodePath owner_path = plan_node->owner_path;
-	if (!owner_path.is_empty()) {
+	if (p_parent != nullptr && !owner_path.is_empty()) {
 		Node *owner = nullptr;
 		if (owner_path == NodePath(".")) {
 			owner = owner_source_root;
