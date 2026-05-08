@@ -165,6 +165,35 @@ SceneInstantiationPlan::PlanNodeData *SceneInstantiationPlan::_get_node_data_w(i
 	return &plan_nodes.write[p_plan_id];
 }
 
+void SceneInstantiationPlan::_index_source_path(int p_plan_id, const NodePath &p_source_path) {
+	source_path_index[p_source_path].insert(p_plan_id);
+}
+
+void SceneInstantiationPlan::_unindex_source_path(int p_plan_id, const NodePath &p_source_path) {
+	HashSet<int> *plan_ids = source_path_index.getptr(p_source_path);
+	if (plan_ids == nullptr) {
+		return;
+	}
+
+	plan_ids->erase(p_plan_id);
+	if (plan_ids->size() == 0) {
+		source_path_index.erase(p_source_path);
+	}
+}
+
+int SceneInstantiationPlan::_find_node_by_source_path(const NodePath &p_source_path) const {
+	const HashSet<int> *plan_ids = source_path_index.getptr(p_source_path);
+	if (plan_ids == nullptr || plan_ids->size() != 1) {
+		return -1;
+	}
+
+	for (const int &plan_id : *plan_ids) {
+		return plan_id;
+	}
+
+	return -1;
+}
+
 Ref<SceneInstantiationPlanNode> SceneInstantiationPlan::_make_node_ref(int p_plan_id) const {
 	if (!has_node(p_plan_id)) {
 		return Ref<SceneInstantiationPlanNode>();
@@ -209,6 +238,7 @@ int SceneInstantiationPlan::_duplicate_node_subtree(int p_plan_id, int p_parent_
 
 	const int new_plan_id = copy.plan_id;
 	plan_nodes.push_back(copy);
+	_index_source_path(new_plan_id, copy.source_path);
 
 	for (int child_plan_id : source_child_plan_ids) {
 		const int duplicated_child_plan_id = _duplicate_node_subtree(child_plan_id, new_plan_id);
@@ -252,6 +282,7 @@ void SceneInstantiationPlan::_prune_node(int p_plan_id) {
 		ERR_FAIL_MSG("Cannot prune the root node of an instantiation plan.");
 	}
 	_detach_from_parent(p_plan_id);
+	_unindex_source_path(p_plan_id, node->source_path);
 	node->pruned = true;
 }
 
@@ -318,6 +349,7 @@ void SceneInstantiationPlan::_flatten_node(int p_plan_id) {
 
 	node->child_plan_ids.clear();
 	node->parent_plan_id = -1;
+	_unindex_source_path(p_plan_id, node->source_path);
 	node->flattened = true;
 	node->pruned = true;
 }
@@ -338,6 +370,7 @@ int SceneInstantiationPlan::add_node(const Ref<SceneState> &p_source_state, int 
 
 	const int plan_id = node.plan_id;
 	plan_nodes.push_back(node);
+	_index_source_path(plan_id, node.source_path);
 
 	if (p_parent_plan_id >= 0) {
 		PlanNodeData *parent = _get_node_data_w(p_parent_plan_id);
@@ -1799,6 +1832,7 @@ int SceneState::_clone_runtime_plan_subtree(const Ref<SceneInstantiationPlan> &p
 
 	const int new_plan_id = copy.plan_id;
 	p_target_plan->plan_nodes.push_back(copy);
+	p_target_plan->_index_source_path(new_plan_id, copy.source_path);
 
 	const Vector<int> source_child_plan_ids = source_node->child_plan_ids;
 	for (int child_plan_id : source_child_plan_ids) {
@@ -2091,21 +2125,7 @@ Dictionary SceneState::_setup_runtime_plan_resources_in_dictionary(Dictionary &p
 
 int SceneState::_find_runtime_plan_node_by_source_path(const Ref<SceneInstantiationPlan> &p_runtime_plan, const NodePath &p_source_path) const {
 	ERR_FAIL_COND_V(p_runtime_plan.is_null(), -1);
-
-	int match_id = -1;
-	for (const SceneInstantiationPlan::PlanNodeData &plan_node : p_runtime_plan->plan_nodes) {
-		if (plan_node.pruned || plan_node.flattened) {
-			continue;
-		}
-		if (plan_node.source_path == p_source_path) {
-			if (match_id >= 0) {
-				return -1;
-			}
-			match_id = plan_node.plan_id;
-		}
-	}
-
-	return match_id;
+	return p_runtime_plan->_find_node_by_source_path(p_source_path);
 }
 
 void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_override_state, int p_override_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const {

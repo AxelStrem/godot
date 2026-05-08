@@ -321,10 +321,14 @@ class SceneInstantiationPlan : public RefCounted {
 	};
 
 	Vector<PlanNodeData> plan_nodes;
+	HashMap<NodePath, HashSet<int>> source_path_index;
 	int root_plan_id = -1;
 
 	const PlanNodeData *_get_node_data(int p_plan_id) const;
 	PlanNodeData *_get_node_data_w(int p_plan_id);
+	void _index_source_path(int p_plan_id, const NodePath &p_source_path);
+	void _unindex_source_path(int p_plan_id, const NodePath &p_source_path);
+	int _find_node_by_source_path(const NodePath &p_source_path) const;
 	Ref<SceneInstantiationPlanNode> _make_node_ref(int p_plan_id) const;
 	void _detach_from_parent(int p_plan_id);
 	int _duplicate_node_subtree(int p_plan_id, int p_parent_plan_id);
