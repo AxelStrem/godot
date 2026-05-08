@@ -151,11 +151,16 @@ public:
 		int node = -1;
 	};
 
+	struct RuntimePlanSourceStateCache {
+		Vector<Vector<int>> direct_children;
+	};
+
 private:
 	Node *_instantiate_legacy(GenEditState p_edit_state) const;
 	Node *_instantiate_runtime_plan(GenEditState p_edit_state) const;
 	Ref<SceneInstantiationPlan> _build_runtime_plan() const;
-	Vector<int> _get_runtime_plan_direct_children(const Ref<SceneState> &p_source_state, int p_source_node_idx) const;
+	const RuntimePlanSourceStateCache *_get_runtime_plan_source_state_cache(const Ref<SceneState> &p_source_state, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const;
+	Vector<int> _get_runtime_plan_direct_children(const Ref<SceneState> &p_source_state, int p_source_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const;
 	Vector<int> _get_runtime_plan_override_children(const Ref<SceneState> &p_source_state, int p_source_node_idx) const;
 	bool _runtime_plan_path_is_descendant(const NodePath &p_ancestor_path, const NodePath &p_descendant_path) const;
 	NodePath _get_runtime_plan_parent_path(const NodePath &p_path) const;
@@ -168,8 +173,8 @@ private:
 	Array _setup_runtime_plan_resources_in_array(Array &p_array_to_scan, const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &p_resources_local_to_scenes, Node *p_node, const StringName p_property_name, Node *p_root, Node *p_source_root, GenEditState p_edit_state) const;
 	Dictionary _setup_runtime_plan_resources_in_dictionary(Dictionary &p_dictionary_to_scan, const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &p_resources_local_to_scenes, Node *p_node, const StringName p_property_name, Node *p_root, Node *p_source_root, GenEditState p_edit_state) const;
 	int _find_runtime_plan_node_by_source_path(const Ref<SceneInstantiationPlan> &p_runtime_plan, const NodePath &p_source_path) const;
-	void _merge_runtime_plan_instance_overrides(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_override_state, int p_override_node_idx) const;
-	int _append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_runtime_plan, const Ref<SceneState> &p_source_state, int p_source_node_idx, int p_parent_plan_id, SceneInstantiationPlanNodeOrigin p_origin, const NodePath &p_source_path_override = NodePath(), const StringName &p_name_override = StringName()) const;
+	void _merge_runtime_plan_instance_overrides(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_override_state, int p_override_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const;
+	int _append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_runtime_plan, const Ref<SceneState> &p_source_state, int p_source_node_idx, int p_parent_plan_id, SceneInstantiationPlanNodeOrigin p_origin, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches, const NodePath &p_source_path_override = NodePath(), const StringName &p_name_override = StringName()) const;
 	bool _runtime_plan_requires_legacy_connection_fallback(const Ref<SceneInstantiationPlan> &p_runtime_plan) const;
 	void _apply_runtime_plan_connections(const Ref<SceneInstantiationPlan> &p_runtime_plan, const HashMap<int, ObjectID> &p_materialized_plan_nodes, GenEditState p_edit_state) const;
 	bool _runtime_plan_requires_legacy_fallback(const Ref<SceneInstantiationPlan> &p_runtime_plan) const;
