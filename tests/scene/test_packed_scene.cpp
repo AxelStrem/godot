@@ -444,6 +444,28 @@ public:
 	}
 };
 
+class NoopPlanningNode : public Node {
+	GDCLASS(NoopPlanningNode, Node);
+
+	static void _bind_methods() {
+		ClassDB::bind_method(D_METHOD("_customize_scene_instantiation", "plan"), &NoopPlanningNode::_customize_scene_instantiation);
+	}
+
+public:
+	static NoopPlanningNode *create_registered() {
+		static bool registered = false;
+		if (!registered) {
+			GDREGISTER_CLASS(NoopPlanningNode);
+			registered = true;
+		}
+		return memnew(NoopPlanningNode);
+	}
+
+	void _customize_scene_instantiation(const Ref<SceneInstantiationPlanNode> &p_plan) {
+		(void)p_plan;
+	}
+};
+
 TEST_CASE("[PackedScene] Pack Scene and Retrieve State") {
 	// Create a scene to pack.
 	Node *scene = memnew(Node);
@@ -1653,6 +1675,124 @@ TEST_CASE("[PackedScene] Runtime plan extraction can defer subtree instantiation
 	memdelete(instance);
 	memdelete(deferred_instance_a);
 	memdelete(deferred_instance_b);
+}
+
+TEST_CASE("[PackedScene] Runtime plan extraction preserves nested scene descendants") {
+	Node *nested_root = memnew(Node);
+	nested_root->set_name("NestedRoot");
+
+	PlanningLeaf *nested_leaf = PlanningLeaf::create_registered();
+	nested_leaf->set_name("NestedLeaf");
+	nested_leaf->set_number(42);
+	nested_root->add_child(nested_leaf);
+	nested_leaf->set_owner(nested_root);
+
+	Ref<PackedScene> nested_scene;
+	nested_scene.instantiate();
+	CHECK_EQ(nested_scene->pack(nested_root), OK);
+
+	const String nested_scene_path = TestUtils::get_temp_path("runtime_plan_extract_nested_scene_base.tscn");
+	CHECK_EQ(ResourceSaver::save(nested_scene, nested_scene_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> nested_scene_loaded = ResourceLoader::load(nested_scene_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	CHECK_EQ(err, OK);
+	REQUIRE(nested_scene_loaded.is_valid());
+
+	ExtractingPlanningNode *scene = ExtractingPlanningNode::create_registered();
+	scene->set_name("Scene");
+
+	Node *deferred_root = memnew(Node);
+	deferred_root->set_name("Deferred");
+	scene->add_child(deferred_root);
+	deferred_root->set_owner(scene);
+
+	Node *nested_instance = nested_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_INSTANCE);
+	REQUIRE(nested_instance != nullptr);
+	deferred_root->add_child(nested_instance);
+	nested_instance->set_owner(scene);
+
+	PackedScene packed_scene;
+	CHECK_EQ(packed_scene.pack(scene), OK);
+
+	ExtractingPlanningNode *instance = Object::cast_to<ExtractingPlanningNode>(packed_scene.instantiate());
+	REQUIRE(instance != nullptr);
+	CHECK(instance->get_node_or_null(NodePath("Deferred")) == nullptr);
+
+	Ref<PackedScene> extracted_scene = instance->get_extracted_scene();
+	REQUIRE(extracted_scene.is_valid());
+
+	Ref<SceneState> extracted_state = extracted_scene->get_state();
+	REQUIRE(extracted_state.is_valid());
+	CHECK_EQ(extracted_state->get_node_count(), 3);
+
+	Node *deferred_instance = extracted_scene->instantiate();
+	REQUIRE(deferred_instance != nullptr);
+
+	PlanningLeaf *extracted_leaf = Object::cast_to<PlanningLeaf>(deferred_instance->get_node_or_null(NodePath("NestedRoot/NestedLeaf")));
+	REQUIRE(extracted_leaf != nullptr);
+	if (extracted_leaf != nullptr) {
+		CHECK_EQ(extracted_leaf->get_number(), 42);
+	}
+
+	memdelete(nested_root);
+	memdelete(scene);
+	memdelete(instance);
+	memdelete(deferred_instance);
+	DirAccess::remove_file_or_error(nested_scene_path);
+}
+
+TEST_CASE("[PackedScene] Runtime plan instantiation preserves nested scene descendants") {
+	Node *nested_root = memnew(Node);
+	nested_root->set_name("NestedRoot");
+
+	PlanningLeaf *nested_leaf = PlanningLeaf::create_registered();
+	nested_leaf->set_name("NestedLeaf");
+	nested_leaf->set_number(42);
+	nested_root->add_child(nested_leaf);
+	nested_leaf->set_owner(nested_root);
+
+	Ref<PackedScene> nested_scene;
+	nested_scene.instantiate();
+	CHECK_EQ(nested_scene->pack(nested_root), OK);
+
+	const String nested_scene_path = TestUtils::get_temp_path("runtime_plan_noop_nested_scene_base.tscn");
+	CHECK_EQ(ResourceSaver::save(nested_scene, nested_scene_path), OK);
+
+	Error err = OK;
+	Ref<PackedScene> nested_scene_loaded = ResourceLoader::load(nested_scene_path, "PackedScene", ResourceFormatLoader::CacheMode::CACHE_MODE_IGNORE, &err);
+	CHECK_EQ(err, OK);
+	REQUIRE(nested_scene_loaded.is_valid());
+
+	NoopPlanningNode *scene = NoopPlanningNode::create_registered();
+	scene->set_name("Scene");
+
+	Node *deferred_root = memnew(Node);
+	deferred_root->set_name("Deferred");
+	scene->add_child(deferred_root);
+	deferred_root->set_owner(scene);
+
+	Node *nested_instance = nested_scene_loaded->instantiate(PackedScene::GEN_EDIT_STATE_INSTANCE);
+	REQUIRE(nested_instance != nullptr);
+	deferred_root->add_child(nested_instance);
+	nested_instance->set_owner(scene);
+
+	PackedScene packed_scene;
+	CHECK_EQ(packed_scene.pack(scene), OK);
+
+	NoopPlanningNode *instance = Object::cast_to<NoopPlanningNode>(packed_scene.instantiate());
+	REQUIRE(instance != nullptr);
+
+	PlanningLeaf *instanced_leaf = Object::cast_to<PlanningLeaf>(instance->get_node_or_null(NodePath("Deferred/NestedRoot/NestedLeaf")));
+	REQUIRE(instanced_leaf != nullptr);
+	if (instanced_leaf != nullptr) {
+		CHECK_EQ(instanced_leaf->get_number(), 42);
+	}
+
+	memdelete(nested_root);
+	memdelete(scene);
+	memdelete(instance);
+	DirAccess::remove_file_or_error(nested_scene_path);
 }
 
 TEST_CASE("[PackedScene] Runtime plan customization preserves root override connections for instanced scene roots") {
