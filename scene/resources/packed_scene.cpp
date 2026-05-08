@@ -1567,8 +1567,9 @@ Ref<SceneInstantiationPlan> SceneState::_build_runtime_plan() const {
 
 	Ref<SceneInstantiationPlan> runtime_plan;
 	runtime_plan.instantiate();
+	HashMap<const SceneState *, RuntimePlanSourceStateCache> source_state_caches;
 
-	const int root_plan_id = _append_runtime_plan_node(runtime_plan, const_cast<SceneState *>(this), 0, -1, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_LOCAL);
+	const int root_plan_id = _append_runtime_plan_node(runtime_plan, const_cast<SceneState *>(this), 0, -1, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_LOCAL, source_state_caches);
 	if (root_plan_id >= 0) {
 		runtime_plan->set_root_plan_id(root_plan_id);
 	}
@@ -1576,35 +1577,63 @@ Ref<SceneInstantiationPlan> SceneState::_build_runtime_plan() const {
 	return runtime_plan;
 }
 
-Vector<int> SceneState::_get_runtime_plan_direct_children(const Ref<SceneState> &p_source_state, int p_source_node_idx) const {
-	Vector<int> child_indices;
-	ERR_FAIL_COND_V(p_source_state.is_null(), child_indices);
-	ERR_FAIL_INDEX_V(p_source_node_idx, p_source_state->nodes.size(), child_indices);
 
-	const NodePath current_path = p_source_state->get_node_path(p_source_node_idx);
+const SceneState::RuntimePlanSourceStateCache *SceneState::_get_runtime_plan_source_state_cache(const Ref<SceneState> &p_source_state, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const {
+	const SceneState *source_state = p_source_state.ptr();
+	ERR_FAIL_NULL_V(source_state, nullptr);
+
+	if (const RuntimePlanSourceStateCache *cache = r_source_state_caches.getptr(source_state)) {
+		return cache;
+	}
+
+	RuntimePlanSourceStateCache cache;
+	cache.direct_children.resize(p_source_state->nodes.size());
+
+	HashMap<NodePath, int> node_path_to_idx;
 	for (int node_idx = 0; node_idx < p_source_state->nodes.size(); node_idx++) {
-		if (node_idx == p_source_node_idx) {
-			continue;
-		}
+		node_path_to_idx.insert(p_source_state->get_node_path(node_idx), node_idx);
+	}
 
+	for (int node_idx = 0; node_idx < p_source_state->nodes.size(); node_idx++) {
 		const NodeData &node = p_source_state->nodes[node_idx];
 		if (node.parent < 0) {
 			continue;
 		}
 
-		bool is_direct_child = false;
+		int parent_node_idx = -1;
 		if (node.parent & FLAG_ID_IS_PATH) {
-			is_direct_child = p_source_state->node_paths[node.parent & FLAG_MASK] == current_path;
+			const int parent_path_idx = node.parent & FLAG_MASK;
+			if (parent_path_idx < 0 || parent_path_idx >= p_source_state->node_paths.size()) {
+				continue;
+			}
+
+			const int *resolved_parent_node_idx = node_path_to_idx.getptr(p_source_state->node_paths[parent_path_idx]);
+			if (resolved_parent_node_idx == nullptr) {
+				continue;
+			}
+			parent_node_idx = *resolved_parent_node_idx;
 		} else {
-			is_direct_child = (node.parent & FLAG_MASK) == p_source_node_idx;
+			parent_node_idx = node.parent & FLAG_MASK;
 		}
 
-		if (is_direct_child) {
-			child_indices.push_back(node_idx);
+		if (parent_node_idx < 0 || parent_node_idx >= cache.direct_children.size()) {
+			continue;
 		}
+
+		cache.direct_children.write[parent_node_idx].push_back(node_idx);
 	}
 
-	return child_indices;
+	r_source_state_caches.insert(source_state, cache);
+	return r_source_state_caches.getptr(source_state);
+}
+
+Vector<int> SceneState::_get_runtime_plan_direct_children(const Ref<SceneState> &p_source_state, int p_source_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const {
+	Vector<int> child_indices;
+	ERR_FAIL_COND_V(p_source_state.is_null(), child_indices);
+	const RuntimePlanSourceStateCache *cache = _get_runtime_plan_source_state_cache(p_source_state, r_source_state_caches);
+	ERR_FAIL_NULL_V(cache, child_indices);
+	ERR_FAIL_INDEX_V(p_source_node_idx, cache->direct_children.size(), child_indices);
+	return cache->direct_children[p_source_node_idx];
 }
 
 bool SceneState::_runtime_plan_path_is_descendant(const NodePath &p_ancestor_path, const NodePath &p_descendant_path) const {
@@ -2079,7 +2108,7 @@ int SceneState::_find_runtime_plan_node_by_source_path(const Ref<SceneInstantiat
 	return match_id;
 }
 
-void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_override_state, int p_override_node_idx) const {
+void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, const Ref<SceneState> &p_override_state, int p_override_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const {
 	ERR_FAIL_COND(p_runtime_plan.is_null());
 	ERR_FAIL_COND(p_override_state.is_null());
 	ERR_FAIL_INDEX(p_override_node_idx, p_override_state->nodes.size());
@@ -2124,19 +2153,19 @@ void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantia
 		if (override_child.type == TYPE_INSTANTIATED) {
 			const int target_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, child_path);
 			if (target_plan_id < 0) {
-				_append_runtime_plan_node(p_runtime_plan, p_override_state, child_node_idx, parent_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_OWNER_ADDED, child_path);
+				_append_runtime_plan_node(p_runtime_plan, p_override_state, child_node_idx, parent_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_OWNER_ADDED, r_source_state_caches, child_path);
 				continue;
 			}
 			_apply_runtime_plan_property_overrides(p_runtime_plan, target_plan_id, p_override_state, child_node_idx);
-			_merge_runtime_plan_instance_overrides(p_runtime_plan, target_plan_id, p_override_state, child_node_idx);
+			_merge_runtime_plan_instance_overrides(p_runtime_plan, target_plan_id, p_override_state, child_node_idx, r_source_state_caches);
 			continue;
 		}
 
-		_append_runtime_plan_node(p_runtime_plan, p_override_state, child_node_idx, parent_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_OWNER_ADDED, child_path);
+		_append_runtime_plan_node(p_runtime_plan, p_override_state, child_node_idx, parent_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_OWNER_ADDED, r_source_state_caches, child_path);
 	}
 }
 
-int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_runtime_plan, const Ref<SceneState> &p_source_state, int p_source_node_idx, int p_parent_plan_id, SceneInstantiationPlanNodeOrigin p_origin, const NodePath &p_source_path_override, const StringName &p_name_override) const {
+int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_runtime_plan, const Ref<SceneState> &p_source_state, int p_source_node_idx, int p_parent_plan_id, SceneInstantiationPlanNodeOrigin p_origin, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches, const NodePath &p_source_path_override, const StringName &p_name_override) const {
 	ERR_FAIL_COND_V(p_runtime_plan.is_null(), -1);
 	ERR_FAIL_COND_V(p_source_state.is_null(), -1);
 	ERR_FAIL_INDEX_V(p_source_node_idx, p_source_state->nodes.size(), -1);
@@ -2150,7 +2179,7 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 		Ref<SceneState> instance_state = instance_scene->get_state();
 		if (instance_state.is_valid() && instance_state->get_node_count() > 0) {
 			const StringName merged_name = p_name_override == StringName() ? p_source_state->get_node_name(p_source_node_idx) : p_name_override;
-			const int plan_id = _append_runtime_plan_node(p_runtime_plan, instance_state, 0, p_parent_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_NESTED_SCENE, source_path, merged_name);
+			const int plan_id = _append_runtime_plan_node(p_runtime_plan, instance_state, 0, p_parent_plan_id, SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_NESTED_SCENE, r_source_state_caches, source_path, merged_name);
 			SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data_w(plan_id);
 			ERR_FAIL_NULL_V(plan_node, plan_id);
 			plan_node->owner_path = owner_path;
@@ -2162,7 +2191,7 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 			}
 			_apply_runtime_plan_property_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
 
-			_merge_runtime_plan_instance_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
+			_merge_runtime_plan_instance_overrides(p_runtime_plan, plan_id, p_source_state, p_source_node_idx, r_source_state_caches);
 
 			return plan_id;
 		}
@@ -2181,7 +2210,7 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 	_copy_runtime_plan_base_properties(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
 
 	const NodePath current_local_source_path = p_source_state->get_node_path(p_source_node_idx);
-	const Vector<int> child_nodes = _get_runtime_plan_direct_children(p_source_state, p_source_node_idx);
+	const Vector<int> child_nodes = _get_runtime_plan_direct_children(p_source_state, p_source_node_idx, r_source_state_caches);
 	for (int child_node_idx : child_nodes) {
 		const NodePath source_child_path = p_source_state->get_node_path(child_node_idx);
 		NodePath relative_child_path = source_child_path;
@@ -2193,7 +2222,7 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 			}
 		}
 		const NodePath child_path = _compose_runtime_plan_path(source_path, relative_child_path);
-		_append_runtime_plan_node(p_runtime_plan, p_source_state, child_node_idx, plan_id, p_origin, child_path);
+		_append_runtime_plan_node(p_runtime_plan, p_source_state, child_node_idx, plan_id, p_origin, r_source_state_caches, child_path);
 	}
 
 	return plan_id;
