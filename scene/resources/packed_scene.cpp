@@ -182,6 +182,23 @@ static String _format_runtime_plan_msec(uint64_t p_usec) {
 	return String::num(static_cast<double>(p_usec) / 1000.0, 3);
 }
 
+static String _get_runtime_plan_profile_dump_path() {
+	return OS::get_singleton()->get_temp_path().path_join("godot_runtime_plan_profile.log");
+}
+
+static void _append_runtime_plan_profile_dump(const String &p_text) {
+	const String dump_path = _get_runtime_plan_profile_dump_path();
+	Error err = OK;
+	const bool exists = FileAccess::exists(dump_path);
+	Ref<FileAccess> file = FileAccess::open(dump_path, exists ? FileAccess::READ_WRITE : FileAccess::WRITE_READ, &err);
+	if (file.is_null() || err != OK) {
+		return;
+	}
+	file->seek_end();
+	file->store_string(p_text);
+	file->flush();
+}
+
 static void _log_runtime_plan_profile(const RuntimePlanInstantiationProfile &p_profile) {
 	const String summary = vformat("PackedScene runtime-plan profile: path=%s total=%s ms runtime_plan=%s legacy_fallback=%s reason=%s", p_profile.scene_path.is_empty() ? String("<built-in>") : p_profile.scene_path, _format_runtime_plan_msec(p_profile.total_usec), p_profile.used_runtime_plan ? "yes" : "no", p_profile.fell_back_to_legacy ? "yes" : "no", p_profile.fallback_reason.is_empty() ? String("-") : p_profile.fallback_reason);
 	String report;
@@ -198,6 +215,7 @@ static void _log_runtime_plan_profile(const RuntimePlanInstantiationProfile &p_p
 	report += vformat("  build_detail: source_state_cache=%s ms (%d states, %d nodes) override_children=%s ms (%d calls, %d scans, %d ancestor_steps, %d results) compose_path=%s ms (%d calls) property_overrides=%s ms (%d props) get_node_path=%s ms (%d) get_owner_path=%s ms (%d)", _format_runtime_plan_msec(p_profile.source_state_cache_build_usec), p_profile.source_state_cache_build_count, p_profile.source_state_cache_node_count, _format_runtime_plan_msec(p_profile.override_children_usec), p_profile.override_children_call_count, p_profile.override_children_scan_count, p_profile.override_children_ancestor_step_count, p_profile.override_children_return_count, _format_runtime_plan_msec(p_profile.compose_path_usec), p_profile.compose_path_call_count, _format_runtime_plan_msec(p_profile.property_override_usec), p_profile.property_override_count, _format_runtime_plan_msec(p_profile.build_get_node_path_usec), p_profile.build_get_node_path_count, _format_runtime_plan_msec(p_profile.build_get_node_owner_path_usec), p_profile.build_get_node_owner_path_count);
 	report += "\n";
 	report += vformat("  plan_api: make_ref=%s ms (%d) get_children=%s ms (%d calls, %d children) has_property=%s ms (%d) get_property=%s ms (%d) prune=%s ms (%d calls, %d sibling_scans) extract_scene=%s ms (%d)", _format_runtime_plan_msec(p_profile.plan_make_node_ref_usec), p_profile.plan_make_node_ref_count, _format_runtime_plan_msec(p_profile.plan_get_children_usec), p_profile.plan_get_children_call_count, p_profile.plan_get_children_total_children, _format_runtime_plan_msec(p_profile.plan_has_property_usec), p_profile.plan_has_property_call_count, _format_runtime_plan_msec(p_profile.plan_get_property_usec), p_profile.plan_get_property_call_count, _format_runtime_plan_msec(p_profile.plan_prune_usec + p_profile.plan_detach_from_parent_usec), p_profile.plan_prune_call_count, p_profile.plan_prune_sibling_scan_count, _format_runtime_plan_msec(p_profile.plan_extract_scene_usec), p_profile.plan_extract_scene_call_count);
+	_append_runtime_plan_profile_dump(report + "\n");
 
 	if (EngineDebugger::is_active()) {
 		_err_print_error("PackedScene runtime-plan profile", __FILE__, __LINE__, report, summary, true, ERR_HANDLER_ERROR);
@@ -5162,6 +5180,9 @@ Node *PackedScene::instantiate(GenEditState p_edit_state) const {
 	const bool profile_once = bool(get_meta(META_RUNTIME_PLAN_PROFILE_ONCE, false));
 	const bool profile_always = bool(get_meta(META_RUNTIME_PLAN_PROFILE_ALWAYS, false));
 	const int64_t threshold_msec = MAX(int64_t(get_meta(META_RUNTIME_PLAN_PROFILE_THRESHOLD_MSEC, 3000)), int64_t(0));
+	if (profile_once || profile_always) {
+		_append_runtime_plan_profile_dump(vformat("instantiate flag seen: path=%s once=%s always=%s threshold_msec=%d\n", get_path().is_empty() ? String("<built-in>") : get_path(), profile_once ? "yes" : "no", profile_always ? "yes" : "no", threshold_msec));
+	}
 	RuntimePlanInstantiationProfileScope profile_scope(get_path(), profile_once || profile_always, static_cast<uint64_t>(threshold_msec) * 1000);
 	const uint64_t instantiate_start_usec = OS::get_singleton()->get_ticks_usec();
 
