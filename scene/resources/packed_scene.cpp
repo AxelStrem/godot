@@ -183,8 +183,9 @@ static String _format_runtime_plan_msec(uint64_t p_usec) {
 }
 
 static void _log_runtime_plan_profile(const RuntimePlanInstantiationProfile &p_profile) {
+	const String summary = vformat("PackedScene runtime-plan profile: path=%s total=%s ms runtime_plan=%s legacy_fallback=%s reason=%s", p_profile.scene_path.is_empty() ? String("<built-in>") : p_profile.scene_path, _format_runtime_plan_msec(p_profile.total_usec), p_profile.used_runtime_plan ? "yes" : "no", p_profile.fell_back_to_legacy ? "yes" : "no", p_profile.fallback_reason.is_empty() ? String("-") : p_profile.fallback_reason);
 	String report;
-	report += vformat("PackedScene runtime-plan profile: path=%s total=%s ms runtime_plan=%s legacy_fallback=%s reason=%s", p_profile.scene_path.is_empty() ? String("<built-in>") : p_profile.scene_path, _format_runtime_plan_msec(p_profile.total_usec), p_profile.used_runtime_plan ? "yes" : "no", p_profile.fell_back_to_legacy ? "yes" : "no", p_profile.fallback_reason.is_empty() ? String("-") : p_profile.fallback_reason);
+	report += summary;
 	report += "\n";
 	report += vformat("  phases ms: build=%s fallback_check=%s customization_scan=%s materialize=%s resolve_deferred=%s setup_local=%s apply_connections=%s", _format_runtime_plan_msec(p_profile.build_plan_usec), _format_runtime_plan_msec(p_profile.legacy_fallback_check_usec), _format_runtime_plan_msec(p_profile.customization_scan_usec), _format_runtime_plan_msec(p_profile.materialize_total_usec), _format_runtime_plan_msec(p_profile.resolve_deferred_usec), _format_runtime_plan_msec(p_profile.setup_local_to_scene_usec), _format_runtime_plan_msec(p_profile.apply_connections_usec));
 	report += "\n";
@@ -199,7 +200,7 @@ static void _log_runtime_plan_profile(const RuntimePlanInstantiationProfile &p_p
 	report += vformat("  plan_api: make_ref=%s ms (%d) get_children=%s ms (%d calls, %d children) has_property=%s ms (%d) get_property=%s ms (%d) prune=%s ms (%d calls, %d sibling_scans) extract_scene=%s ms (%d)", _format_runtime_plan_msec(p_profile.plan_make_node_ref_usec), p_profile.plan_make_node_ref_count, _format_runtime_plan_msec(p_profile.plan_get_children_usec), p_profile.plan_get_children_call_count, p_profile.plan_get_children_total_children, _format_runtime_plan_msec(p_profile.plan_has_property_usec), p_profile.plan_has_property_call_count, _format_runtime_plan_msec(p_profile.plan_get_property_usec), p_profile.plan_get_property_call_count, _format_runtime_plan_msec(p_profile.plan_prune_usec + p_profile.plan_detach_from_parent_usec), p_profile.plan_prune_call_count, p_profile.plan_prune_sibling_scan_count, _format_runtime_plan_msec(p_profile.plan_extract_scene_usec), p_profile.plan_extract_scene_call_count);
 
 	if (EngineDebugger::is_active()) {
-		_err_print_error("PackedScene runtime-plan profile", __FILE__, __LINE__, "PackedScene runtime-plan profile", report, false, ERR_HANDLER_WARNING);
+		_err_print_error("PackedScene runtime-plan profile", __FILE__, __LINE__, report, summary, true, ERR_HANDLER_ERROR);
 		return;
 	}
 
