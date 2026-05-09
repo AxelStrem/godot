@@ -151,7 +151,11 @@ public:
 	};
 
 	struct RuntimePlanSourceStateCache {
+		Vector<NodePath> node_paths;
+		Vector<NodePath> parent_paths;
+		Vector<NodePath> owner_paths;
 		Vector<Vector<int>> direct_children;
+		Vector<Vector<int>> override_children;
 	};
 
 private:
@@ -159,8 +163,10 @@ private:
 	Node *_instantiate_runtime_plan(GenEditState p_edit_state) const;
 	Ref<SceneInstantiationPlan> _build_runtime_plan() const;
 	const RuntimePlanSourceStateCache *_get_runtime_plan_source_state_cache(const Ref<SceneState> &p_source_state, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const;
+	NodePath _get_runtime_plan_node_path(const Ref<SceneState> &p_source_state, int p_source_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches, bool p_for_parent = false) const;
+	NodePath _get_runtime_plan_owner_path(const Ref<SceneState> &p_source_state, int p_source_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const;
 	Vector<int> _get_runtime_plan_direct_children(const Ref<SceneState> &p_source_state, int p_source_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const;
-	Vector<int> _get_runtime_plan_override_children(const Ref<SceneState> &p_source_state, int p_source_node_idx) const;
+	Vector<int> _get_runtime_plan_override_children(const Ref<SceneState> &p_source_state, int p_source_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const;
 	bool _runtime_plan_path_is_descendant(const NodePath &p_ancestor_path, const NodePath &p_descendant_path) const;
 	NodePath _get_runtime_plan_parent_path(const NodePath &p_path) const;
 	NodePath _compose_runtime_plan_path(const NodePath &p_base_path, const NodePath &p_relative_path) const;
