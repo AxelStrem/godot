@@ -31,8 +31,6 @@
 #include "packed_scene.h"
 
 #include "core/config/engine.h"
-#include "core/debugger/engine_debugger.h"
-#include "core/error/error_macros.h"
 #include "core/io/file_access.h"
 #include "core/io/missing_resource.h"
 #include "core/io/resource_loader.h"
@@ -53,190 +51,6 @@
 #endif // _3D_DISABLED
 
 #define PACKED_SCENE_VERSION 3
-
-namespace {
-
-static const StringName META_RUNTIME_PLAN_PROFILE_ONCE = SNAME("_debug_runtime_plan_profile_once");
-static const StringName META_RUNTIME_PLAN_PROFILE_ALWAYS = SNAME("_debug_runtime_plan_profile_always");
-static const StringName META_RUNTIME_PLAN_PROFILE_THRESHOLD_MSEC = SNAME("_debug_runtime_plan_profile_threshold_msec");
-
-struct RuntimePlanInstantiationProfile {
-	bool force_log = false;
-	uint64_t slow_threshold_usec = 3'000'000;
-	bool log_emitted = false;
-	String scene_path;
-
-	bool used_runtime_plan = false;
-	bool fell_back_to_legacy = false;
-	String fallback_reason;
-
-	uint64_t total_usec = 0;
-	uint64_t build_plan_usec = 0;
-	uint64_t legacy_fallback_check_usec = 0;
-	uint64_t customization_scan_usec = 0;
-	uint64_t materialize_total_usec = 0;
-	uint64_t class_instantiate_usec = 0;
-	uint64_t script_set_usec = 0;
-	uint64_t property_apply_usec = 0;
-	uint64_t local_resource_setup_usec = 0;
-	uint64_t group_setup_usec = 0;
-	uint64_t customization_call_usec = 0;
-	uint64_t resolve_deferred_usec = 0;
-	uint64_t setup_local_to_scene_usec = 0;
-	uint64_t apply_connections_usec = 0;
-	uint64_t base_property_copy_usec = 0;
-	uint64_t source_path_lookup_usec = 0;
-	uint64_t source_state_cache_build_usec = 0;
-	uint64_t override_children_usec = 0;
-	uint64_t compose_path_usec = 0;
-	uint64_t property_override_usec = 0;
-	uint64_t build_get_node_path_usec = 0;
-	uint64_t build_get_node_owner_path_usec = 0;
-	uint64_t plan_make_node_ref_usec = 0;
-	uint64_t plan_get_children_usec = 0;
-	uint64_t plan_has_property_usec = 0;
-	uint64_t plan_get_property_usec = 0;
-	uint64_t plan_prune_usec = 0;
-	uint64_t plan_extract_scene_usec = 0;
-	uint64_t plan_detach_from_parent_usec = 0;
-
-	int plan_node_count = 0;
-	int active_plan_node_count = 0;
-	int pruned_plan_node_count = 0;
-	int flattened_plan_node_count = 0;
-	int duplicated_plan_node_count = 0;
-	int override_source_count = 0;
-
-	int materialize_calls = 0;
-	int materialized_node_count = 0;
-	int pruned_before_materialize_count = 0;
-	int pruned_after_customization_count = 0;
-	int customization_call_count = 0;
-	int legacy_filter_call_count = 0;
-
-	int base_property_count = 0;
-	int property_apply_count = 0;
-	int deferred_property_count = 0;
-	int group_assignment_count = 0;
-
-	int source_path_lookup_count = 0;
-	int source_path_lookup_hit_count = 0;
-	int source_path_lookup_miss_count = 0;
-	int source_path_lookup_ambiguous_count = 0;
-
-	int connection_state_count = 0;
-	int connection_scan_count = 0;
-	int connection_apply_count = 0;
-	int deferred_node_path_queue_size = 0;
-	int local_to_scene_base_count = 0;
-	int local_to_scene_resource_count = 0;
-	int source_state_cache_build_count = 0;
-	int source_state_cache_node_count = 0;
-	int override_children_call_count = 0;
-	int override_children_return_count = 0;
-	int override_children_scan_count = 0;
-	int override_children_ancestor_step_count = 0;
-	int compose_path_call_count = 0;
-	int property_override_count = 0;
-	int build_get_node_path_count = 0;
-	int build_get_node_owner_path_count = 0;
-	int plan_make_node_ref_count = 0;
-	int plan_get_children_call_count = 0;
-	int plan_get_children_total_children = 0;
-	int plan_has_property_call_count = 0;
-	int plan_get_property_call_count = 0;
-	int plan_prune_call_count = 0;
-	int plan_prune_sibling_scan_count = 0;
-	int plan_extract_scene_call_count = 0;
-};
-
-thread_local RuntimePlanInstantiationProfile *tls_runtime_plan_profile = nullptr;
-
-class RuntimePlanInstantiationProfileScope {
-	RuntimePlanInstantiationProfile *previous_profile = nullptr;
-	RuntimePlanInstantiationProfile current_profile;
-
-public:
-	RuntimePlanInstantiationProfileScope(const String &p_scene_path, bool p_force_log, uint64_t p_slow_threshold_usec) {
-		current_profile.scene_path = p_scene_path;
-		current_profile.force_log = p_force_log;
-		current_profile.slow_threshold_usec = p_slow_threshold_usec;
-		previous_profile = tls_runtime_plan_profile;
-		tls_runtime_plan_profile = &current_profile;
-	}
-
-	~RuntimePlanInstantiationProfileScope() {
-		tls_runtime_plan_profile = previous_profile;
-	}
-
-	RuntimePlanInstantiationProfile *get_profile() {
-		return &current_profile;
-	}
-};
-
-static RuntimePlanInstantiationProfile *_get_runtime_plan_profile() {
-	return tls_runtime_plan_profile;
-}
-
-static String _format_runtime_plan_msec(uint64_t p_usec) {
-	return String::num(static_cast<double>(p_usec) / 1000.0, 3);
-}
-
-static String _get_runtime_plan_profile_dump_path() {
-	return OS::get_singleton()->get_temp_path().path_join("godot_runtime_plan_profile.log");
-}
-
-static void _append_runtime_plan_profile_dump(const String &p_text) {
-	const String dump_path = _get_runtime_plan_profile_dump_path();
-	Error err = OK;
-	const bool exists = FileAccess::exists(dump_path);
-	Ref<FileAccess> file = FileAccess::open(dump_path, exists ? FileAccess::READ_WRITE : FileAccess::WRITE_READ, &err);
-	if (file.is_null() || err != OK) {
-		return;
-	}
-	file->seek_end();
-	file->store_string(p_text);
-	file->flush();
-}
-
-static void _log_runtime_plan_profile(const RuntimePlanInstantiationProfile &p_profile) {
-	const String summary = vformat("PackedScene runtime-plan profile: path=%s total=%s ms runtime_plan=%s legacy_fallback=%s reason=%s", p_profile.scene_path.is_empty() ? String("<built-in>") : p_profile.scene_path, _format_runtime_plan_msec(p_profile.total_usec), p_profile.used_runtime_plan ? "yes" : "no", p_profile.fell_back_to_legacy ? "yes" : "no", p_profile.fallback_reason.is_empty() ? String("-") : p_profile.fallback_reason);
-	String report;
-	report += summary;
-	report += "\n";
-	report += vformat("  phases ms: build=%s fallback_check=%s customization_scan=%s materialize=%s resolve_deferred=%s setup_local=%s apply_connections=%s", _format_runtime_plan_msec(p_profile.build_plan_usec), _format_runtime_plan_msec(p_profile.legacy_fallback_check_usec), _format_runtime_plan_msec(p_profile.customization_scan_usec), _format_runtime_plan_msec(p_profile.materialize_total_usec), _format_runtime_plan_msec(p_profile.resolve_deferred_usec), _format_runtime_plan_msec(p_profile.setup_local_to_scene_usec), _format_runtime_plan_msec(p_profile.apply_connections_usec));
-	report += "\n";
-	report += vformat("  materialize ms: instantiate=%s script=%s properties=%s local_resources=%s groups=%s customize=%s", _format_runtime_plan_msec(p_profile.class_instantiate_usec), _format_runtime_plan_msec(p_profile.script_set_usec), _format_runtime_plan_msec(p_profile.property_apply_usec), _format_runtime_plan_msec(p_profile.local_resource_setup_usec), _format_runtime_plan_msec(p_profile.group_setup_usec), _format_runtime_plan_msec(p_profile.customization_call_usec));
-	report += "\n";
-	report += vformat("  counts: plan=%d active=%d pruned=%d flattened=%d duplicated=%d overrides=%d materialize_calls=%d materialized=%d pruned_before=%d pruned_after=%d customizations=%d legacy_filters=%d", p_profile.plan_node_count, p_profile.active_plan_node_count, p_profile.pruned_plan_node_count, p_profile.flattened_plan_node_count, p_profile.duplicated_plan_node_count, p_profile.override_source_count, p_profile.materialize_calls, p_profile.materialized_node_count, p_profile.pruned_before_materialize_count, p_profile.pruned_after_customization_count, p_profile.customization_call_count, p_profile.legacy_filter_call_count);
-	report += "\n";
-	report += vformat("  work: base_props=%d base_prop_copy=%s ms applied_props=%d deferred_props=%d groups=%d source_path_lookups=%d hits=%d misses=%d ambiguous=%d lookup_time=%s ms connections(states=%d scanned=%d applied=%d) deferred_queue=%d local_scene_bases=%d local_scene_resources=%d", p_profile.base_property_count, _format_runtime_plan_msec(p_profile.base_property_copy_usec), p_profile.property_apply_count, p_profile.deferred_property_count, p_profile.group_assignment_count, p_profile.source_path_lookup_count, p_profile.source_path_lookup_hit_count, p_profile.source_path_lookup_miss_count, p_profile.source_path_lookup_ambiguous_count, _format_runtime_plan_msec(p_profile.source_path_lookup_usec), p_profile.connection_state_count, p_profile.connection_scan_count, p_profile.connection_apply_count, p_profile.deferred_node_path_queue_size, p_profile.local_to_scene_base_count, p_profile.local_to_scene_resource_count);
-	report += "\n";
-	report += vformat("  build_detail: source_state_cache=%s ms (%d states, %d nodes) override_children=%s ms (%d calls, %d scans, %d ancestor_steps, %d results) compose_path=%s ms (%d calls) property_overrides=%s ms (%d props) get_node_path=%s ms (%d) get_owner_path=%s ms (%d)", _format_runtime_plan_msec(p_profile.source_state_cache_build_usec), p_profile.source_state_cache_build_count, p_profile.source_state_cache_node_count, _format_runtime_plan_msec(p_profile.override_children_usec), p_profile.override_children_call_count, p_profile.override_children_scan_count, p_profile.override_children_ancestor_step_count, p_profile.override_children_return_count, _format_runtime_plan_msec(p_profile.compose_path_usec), p_profile.compose_path_call_count, _format_runtime_plan_msec(p_profile.property_override_usec), p_profile.property_override_count, _format_runtime_plan_msec(p_profile.build_get_node_path_usec), p_profile.build_get_node_path_count, _format_runtime_plan_msec(p_profile.build_get_node_owner_path_usec), p_profile.build_get_node_owner_path_count);
-	report += "\n";
-	report += vformat("  plan_api: make_ref=%s ms (%d) get_children=%s ms (%d calls, %d children) has_property=%s ms (%d) get_property=%s ms (%d) prune=%s ms (%d calls, %d sibling_scans) extract_scene=%s ms (%d)", _format_runtime_plan_msec(p_profile.plan_make_node_ref_usec), p_profile.plan_make_node_ref_count, _format_runtime_plan_msec(p_profile.plan_get_children_usec), p_profile.plan_get_children_call_count, p_profile.plan_get_children_total_children, _format_runtime_plan_msec(p_profile.plan_has_property_usec), p_profile.plan_has_property_call_count, _format_runtime_plan_msec(p_profile.plan_get_property_usec), p_profile.plan_get_property_call_count, _format_runtime_plan_msec(p_profile.plan_prune_usec + p_profile.plan_detach_from_parent_usec), p_profile.plan_prune_call_count, p_profile.plan_prune_sibling_scan_count, _format_runtime_plan_msec(p_profile.plan_extract_scene_usec), p_profile.plan_extract_scene_call_count);
-	_append_runtime_plan_profile_dump(report + "\n");
-
-	if (EngineDebugger::is_active()) {
-		_err_print_error("PackedScene runtime-plan profile", __FILE__, __LINE__, report, summary, true, ERR_HANDLER_ERROR);
-		return;
-	}
-
-	print_line(report);
-}
-
-static void _maybe_log_runtime_plan_profile(RuntimePlanInstantiationProfile &p_profile) {
-	if (p_profile.log_emitted) {
-		return;
-	}
-	if (!p_profile.force_log && p_profile.total_usec < p_profile.slow_threshold_usec) {
-		return;
-	}
-	_log_runtime_plan_profile(p_profile);
-	p_profile.log_emitted = true;
-}
-
-} // namespace
 
 #ifdef TOOLS_ENABLED
 SceneState::InstantiationWarningNotify SceneState::instantiation_warn_notify = nullptr;
@@ -450,46 +264,29 @@ Ref<SceneInstantiationPlanNode> SceneInstantiationPlan::_make_node_ref(int p_pla
 	if (!has_node(p_plan_id)) {
 		return Ref<SceneInstantiationPlanNode>();
 	}
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 
 	Ref<SceneInstantiationPlanNode> node_ref;
 	node_ref.instantiate();
 	node_ref->_setup(const_cast<SceneInstantiationPlan *>(this), p_plan_id);
-	if (profile) {
-		profile->plan_make_node_ref_count++;
-		profile->plan_make_node_ref_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-	}
 	return node_ref;
 }
 
 void SceneInstantiationPlan::_detach_from_parent(int p_plan_id) {
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	PlanNodeData *node = _get_node_data_w(p_plan_id);
 	ERR_FAIL_NULL(node);
 	if (node->parent_plan_id < 0) {
-		if (profile) {
-			profile->plan_detach_from_parent_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-		}
 		return;
 	}
 
 	PlanNodeData *parent = _get_node_data_w(node->parent_plan_id);
 	ERR_FAIL_NULL(parent);
 	for (int i = 0; i < parent->child_plan_ids.size(); i++) {
-		if (profile) {
-			profile->plan_prune_sibling_scan_count++;
-		}
 		if (parent->child_plan_ids[i] == p_plan_id) {
 			parent->child_plan_ids.remove_at(i);
 			break;
 		}
 	}
 	node->parent_plan_id = -1;
-	if (profile) {
-		profile->plan_detach_from_parent_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-	}
 }
 
 int SceneInstantiationPlan::_duplicate_node_subtree(int p_plan_id, int p_parent_plan_id) {
@@ -545,22 +342,14 @@ void SceneInstantiationPlan::_rename_node(int p_plan_id, const StringName &p_nam
 }
 
 void SceneInstantiationPlan::_prune_node(int p_plan_id) {
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	PlanNodeData *node = _get_node_data_w(p_plan_id);
 	ERR_FAIL_NULL(node);
 	if (node->parent_plan_id < 0) {
 		ERR_FAIL_MSG("Cannot prune the root node of an instantiation plan.");
 	}
-	if (profile) {
-		profile->plan_prune_call_count++;
-	}
 	_detach_from_parent(p_plan_id);
 	_unindex_source_path(p_plan_id, node->source_path);
 	node->pruned = true;
-	if (profile) {
-		profile->plan_prune_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-	}
 }
 
 Array SceneInstantiationPlan::_duplicate_node(int p_plan_id, int p_additional_count) {
@@ -779,54 +568,29 @@ Ref<SceneInstantiationPlanNode> SceneInstantiationPlanNode::get_child(int p_inde
 Array SceneInstantiationPlanNode::get_children() const {
 	Array children;
 	ERR_FAIL_COND_V(plan.is_null(), children);
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
 	ERR_FAIL_NULL_V(node, children);
 	for (int child_plan_id : node->child_plan_ids) {
 		children.push_back(plan->_make_node_ref(child_plan_id));
-	}
-	if (profile) {
-		profile->plan_get_children_call_count++;
-		profile->plan_get_children_total_children += node->child_plan_ids.size();
-		profile->plan_get_children_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
 	}
 	return children;
 }
 
 bool SceneInstantiationPlanNode::has_property(const StringName &p_name) const {
 	ERR_FAIL_COND_V(plan.is_null(), false);
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
 	ERR_FAIL_NULL_V(node, false);
-	const bool has_property = node->properties.has(p_name);
-	if (profile) {
-		profile->plan_has_property_call_count++;
-		profile->plan_has_property_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-	}
-	return has_property;
+	return node->properties.has(p_name);
 }
 
 Variant SceneInstantiationPlanNode::get_property(const StringName &p_name, const Variant &p_default) const {
 	ERR_FAIL_COND_V(plan.is_null(), p_default);
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	const SceneInstantiationPlan::PlanNodeData *node = plan->_get_node_data(plan_id);
 	ERR_FAIL_NULL_V(node, p_default);
 	if (!node->properties.has(p_name)) {
-		if (profile) {
-			profile->plan_get_property_call_count++;
-			profile->plan_get_property_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-		}
 		return p_default;
 	}
-	Variant value = node->properties[p_name];
-	if (profile) {
-		profile->plan_get_property_call_count++;
-		profile->plan_get_property_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-	}
-	return value;
+	return node->properties[p_name];
 }
 
 void SceneInstantiationPlanNode::set_property(const StringName &p_name, const Variant &p_value) {
@@ -851,14 +615,7 @@ Array SceneInstantiationPlanNode::duplicate(int p_additional_count) {
 
 Ref<PackedScene> SceneInstantiationPlanNode::extract_scene() const {
 	ERR_FAIL_COND_V(plan.is_null(), Ref<PackedScene>());
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
-	Ref<PackedScene> extracted_scene = plan->_extract_scene(plan_id);
-	if (profile) {
-		profile->plan_extract_scene_call_count++;
-		profile->plan_extract_scene_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-	}
-	return extracted_scene;
+	return plan->_extract_scene(plan_id);
 }
 
 void SceneInstantiationPlanNode::flatten_into_parent() {
@@ -1886,107 +1643,31 @@ Node *SceneState::_instantiate_legacy(GenEditState p_edit_state) const {
 }
 
 Node *SceneState::_instantiate_runtime_plan(GenEditState p_edit_state) const {
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t total_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
-	const uint64_t build_plan_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	Ref<SceneInstantiationPlan> runtime_plan = _build_runtime_plan();
-	if (profile) {
-		profile->build_plan_usec += OS::get_singleton()->get_ticks_usec() - build_plan_start_usec;
-	}
 	if (runtime_plan.is_null() || runtime_plan->get_root_plan_id() < 0) {
-		if (profile) {
-			profile->fell_back_to_legacy = true;
-			profile->fallback_reason = "runtime plan build failed";
-			profile->total_usec = OS::get_singleton()->get_ticks_usec() - total_start_usec;
-			_maybe_log_runtime_plan_profile(*profile);
-		}
 		return _instantiate_legacy(p_edit_state);
 	}
-	if (profile) {
-		profile->plan_node_count = runtime_plan->plan_nodes.size();
-	}
-	const uint64_t fallback_check_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	const bool requires_legacy_fallback = _runtime_plan_requires_legacy_fallback(runtime_plan);
-	if (profile) {
-		profile->legacy_fallback_check_usec += OS::get_singleton()->get_ticks_usec() - fallback_check_start_usec;
-	}
-	const uint64_t customization_scan_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	const bool uses_customization = _runtime_plan_uses_customization(runtime_plan);
-	if (profile) {
-		profile->customization_scan_usec += OS::get_singleton()->get_ticks_usec() - customization_scan_start_usec;
-	}
 	if (requires_legacy_fallback || !uses_customization) {
-		if (profile) {
-			profile->fell_back_to_legacy = true;
-			profile->fallback_reason = requires_legacy_fallback ? "runtime plan requires legacy fallback" : "runtime plan has no customization";
-			profile->total_usec = OS::get_singleton()->get_ticks_usec() - total_start_usec;
-			_maybe_log_runtime_plan_profile(*profile);
-		}
 		return _instantiate_legacy(p_edit_state);
-	}
-	if (profile) {
-		profile->used_runtime_plan = true;
 	}
 
 	Vector<DeferredNodePathProperties> deferred_node_paths;
 	HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> resources_local_to_scenes;
 	HashMap<int, ObjectID> materialized_plan_nodes;
-	const uint64_t materialize_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	Node *root = _materialize_runtime_plan_node(runtime_plan, runtime_plan->get_root_plan_id(), nullptr, nullptr, nullptr, &deferred_node_paths, &resources_local_to_scenes, &materialized_plan_nodes, p_edit_state, true);
-	if (profile) {
-		profile->materialize_total_usec += OS::get_singleton()->get_ticks_usec() - materialize_start_usec;
-	}
 	if (!root) {
-		if (profile) {
-			profile->fell_back_to_legacy = true;
-			profile->fallback_reason = "runtime plan materialization failed";
-			profile->total_usec = OS::get_singleton()->get_ticks_usec() - total_start_usec;
-			_maybe_log_runtime_plan_profile(*profile);
-		}
 		return _instantiate_legacy(p_edit_state);
 	}
 
-	const uint64_t resolve_deferred_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	_resolve_runtime_plan_deferred_node_paths(deferred_node_paths);
-	if (profile) {
-		profile->resolve_deferred_usec += OS::get_singleton()->get_ticks_usec() - resolve_deferred_start_usec;
-		profile->deferred_node_path_queue_size = deferred_node_paths.size();
-	}
-	const uint64_t setup_local_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	for (KeyValue<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &E : resources_local_to_scenes) {
 		for (KeyValue<Ref<Resource>, Ref<Resource>> &R : E.value) {
 			R.value->setup_local_to_scene();
 		}
 	}
-	if (profile) {
-		profile->setup_local_to_scene_usec += OS::get_singleton()->get_ticks_usec() - setup_local_start_usec;
-		profile->local_to_scene_base_count = resources_local_to_scenes.size();
-		for (const KeyValue<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &E : resources_local_to_scenes) {
-			profile->local_to_scene_resource_count += E.value.size();
-		}
-	}
-	const uint64_t apply_connections_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	_apply_runtime_plan_connections(runtime_plan, materialized_plan_nodes, p_edit_state);
-	if (profile) {
-		profile->apply_connections_usec += OS::get_singleton()->get_ticks_usec() - apply_connections_start_usec;
-		for (const SceneInstantiationPlan::PlanNodeData &plan_node : runtime_plan->plan_nodes) {
-			if (plan_node.pruned) {
-				profile->pruned_plan_node_count++;
-			}
-			if (plan_node.flattened) {
-				profile->flattened_plan_node_count++;
-			}
-			if (!plan_node.pruned && !plan_node.flattened) {
-				profile->active_plan_node_count++;
-			}
-			if (plan_node.origin == SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_DUPLICATED) {
-				profile->duplicated_plan_node_count++;
-			}
-			profile->override_source_count += plan_node.override_sources.size();
-		}
-		profile->total_usec = OS::get_singleton()->get_ticks_usec() - total_start_usec;
-		_maybe_log_runtime_plan_profile(*profile);
-	}
 
 	return root;
 }
@@ -2010,12 +1691,10 @@ Ref<SceneInstantiationPlan> SceneState::_build_runtime_plan() const {
 const SceneState::RuntimePlanSourceStateCache *SceneState::_get_runtime_plan_source_state_cache(const Ref<SceneState> &p_source_state, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const {
 	const SceneState *source_state = p_source_state.ptr();
 	ERR_FAIL_NULL_V(source_state, nullptr);
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
 
 	if (const RuntimePlanSourceStateCache *cache = r_source_state_caches.getptr(source_state)) {
 		return cache;
 	}
-	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 
 	RuntimePlanSourceStateCache cache;
 	cache.node_paths.resize(p_source_state->nodes.size());
@@ -2026,14 +1705,9 @@ const SceneState::RuntimePlanSourceStateCache *SceneState::_get_runtime_plan_sou
 
 	HashMap<NodePath, int> node_path_to_idx;
 	for (int node_idx = 0; node_idx < p_source_state->nodes.size(); node_idx++) {
-		const uint64_t node_path_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 		cache.node_paths.write[node_idx] = p_source_state->get_node_path(node_idx);
 		cache.parent_paths.write[node_idx] = _get_runtime_plan_parent_path(cache.node_paths[node_idx]);
 		node_path_to_idx.insert(cache.node_paths[node_idx], node_idx);
-		if (profile) {
-			profile->build_get_node_path_count++;
-			profile->build_get_node_path_usec += OS::get_singleton()->get_ticks_usec() - node_path_start_usec;
-		}
 	}
 
 	for (int node_idx = 0; node_idx < p_source_state->nodes.size(); node_idx++) {
@@ -2097,11 +1771,6 @@ const SceneState::RuntimePlanSourceStateCache *SceneState::_get_runtime_plan_sou
 	}
 
 	r_source_state_caches.insert(source_state, cache);
-	if (profile) {
-		profile->source_state_cache_build_count++;
-		profile->source_state_cache_node_count += p_source_state->nodes.size();
-		profile->source_state_cache_build_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-	}
 	return r_source_state_caches.getptr(source_state);
 }
 
@@ -2184,33 +1853,14 @@ Vector<int> SceneState::_get_runtime_plan_override_children(const Ref<SceneState
 	const RuntimePlanSourceStateCache *cache = _get_runtime_plan_source_state_cache(p_source_state, r_source_state_caches);
 	ERR_FAIL_NULL_V(cache, child_indices);
 	ERR_FAIL_INDEX_V(p_source_node_idx, cache->override_children.size(), child_indices);
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
-	if (profile) {
-		profile->override_children_call_count++;
-		profile->override_children_return_count += cache->override_children[p_source_node_idx].size();
-	}
-	if (profile) {
-		profile->override_children_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-	}
 	return cache->override_children[p_source_node_idx];
 }
 
 NodePath SceneState::_compose_runtime_plan_path(const NodePath &p_base_path, const NodePath &p_relative_path) const {
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	if (p_base_path.is_empty() || p_base_path == NodePath(".")) {
-		if (profile) {
-			profile->compose_path_call_count++;
-			profile->compose_path_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-		}
 		return p_relative_path;
 	}
 	if (p_relative_path.is_empty() || p_relative_path == NodePath(".")) {
-		if (profile) {
-			profile->compose_path_call_count++;
-			profile->compose_path_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-		}
 		return p_base_path;
 	}
 
@@ -2227,19 +1877,10 @@ NodePath SceneState::_compose_runtime_plan_path(const NodePath &p_base_path, con
 	}
 
 	if (path_names.is_empty()) {
-		if (profile) {
-			profile->compose_path_call_count++;
-			profile->compose_path_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-		}
 		return NodePath(".");
 	}
 
-	NodePath composed_path = NodePath(path_names, false);
-	if (profile) {
-		profile->compose_path_call_count++;
-		profile->compose_path_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
-	}
-	return composed_path;
+	return NodePath(path_names, false);
 }
 
 NodePath SceneState::_rebase_runtime_plan_subtree_path(const NodePath &p_root_source_path, const NodePath &p_path, bool p_fallback_to_root) const {
@@ -2423,8 +2064,6 @@ void SceneState::_copy_runtime_plan_base_properties(const Ref<SceneInstantiation
 	ERR_FAIL_COND(p_runtime_plan.is_null());
 	ERR_FAIL_COND(p_source_state.is_null());
 	ERR_FAIL_INDEX(p_source_node_idx, p_source_state->nodes.size());
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t copy_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 
 	const NodeData &node = p_source_state->nodes[p_source_node_idx];
 	for (int prop_idx = 0; prop_idx < node.properties.size(); prop_idx++) {
@@ -2435,15 +2074,6 @@ void SceneState::_copy_runtime_plan_base_properties(const Ref<SceneInstantiation
 		}
 		const bool deferred_node_path = (property.name & FLAG_PATH_PROPERTY_IS_NODE) != 0;
 		p_runtime_plan->set_node_base_property(p_plan_id, p_source_state->names[property_name_idx], p_source_state->variants[property.value], deferred_node_path);
-		if (profile) {
-			profile->base_property_count++;
-			if (deferred_node_path) {
-				profile->deferred_property_count++;
-			}
-		}
-	}
-	if (profile) {
-		profile->base_property_copy_usec += OS::get_singleton()->get_ticks_usec() - copy_start_usec;
 	}
 }
 
@@ -2451,8 +2081,6 @@ void SceneState::_apply_runtime_plan_property_overrides(const Ref<SceneInstantia
 	ERR_FAIL_COND(p_runtime_plan.is_null());
 	ERR_FAIL_COND(p_override_state.is_null());
 	ERR_FAIL_INDEX(p_override_node_idx, p_override_state->nodes.size());
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 
 	const NodeData &node = p_override_state->nodes[p_override_node_idx];
 	for (int prop_idx = 0; prop_idx < node.properties.size(); prop_idx++) {
@@ -2462,12 +2090,6 @@ void SceneState::_apply_runtime_plan_property_overrides(const Ref<SceneInstantia
 			continue;
 		}
 		p_runtime_plan->_set_node_property(p_plan_id, p_override_state->names[property_name_idx], p_override_state->variants[property.value], property.name & FLAG_PATH_PROPERTY_IS_NODE);
-		if (profile) {
-			profile->property_override_count++;
-		}
-	}
-	if (profile) {
-		profile->property_override_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
 	}
 }
 
@@ -2606,24 +2228,11 @@ Dictionary SceneState::_setup_runtime_plan_resources_in_dictionary(Dictionary &p
 
 int SceneState::_find_runtime_plan_node_by_source_path(const Ref<SceneInstantiationPlan> &p_runtime_plan, const NodePath &p_source_path) const {
 	ERR_FAIL_COND_V(p_runtime_plan.is_null(), -1);
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	const uint64_t lookup_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	const HashSet<int> *indexed_plan_ids = p_runtime_plan->source_path_index.getptr(p_source_path);
-	if (profile) {
-		profile->source_path_lookup_count++;
-	}
 	if (indexed_plan_ids == nullptr || indexed_plan_ids->size() == 0) {
-		if (profile) {
-			profile->source_path_lookup_miss_count++;
-			profile->source_path_lookup_usec += OS::get_singleton()->get_ticks_usec() - lookup_start_usec;
-		}
 		return -1;
 	}
 	if (indexed_plan_ids->size() > 1) {
-		if (profile) {
-			profile->source_path_lookup_ambiguous_count++;
-			profile->source_path_lookup_usec += OS::get_singleton()->get_ticks_usec() - lookup_start_usec;
-		}
 		return -1;
 	}
 
@@ -2631,15 +2240,6 @@ int SceneState::_find_runtime_plan_node_by_source_path(const Ref<SceneInstantiat
 	for (const int &indexed_plan_id : *indexed_plan_ids) {
 		plan_id = indexed_plan_id;
 		break;
-	}
-
-	if (profile) {
-		if (plan_id >= 0) {
-			profile->source_path_lookup_hit_count++;
-		} else {
-			profile->source_path_lookup_miss_count++;
-		}
-		profile->source_path_lookup_usec += OS::get_singleton()->get_ticks_usec() - lookup_start_usec;
 	}
 
 	return plan_id;
@@ -2853,7 +2453,6 @@ bool SceneState::_runtime_plan_requires_legacy_connection_fallback(const Ref<Sce
 
 void SceneState::_apply_runtime_plan_connections(const Ref<SceneInstantiationPlan> &p_runtime_plan, const HashMap<int, ObjectID> &p_materialized_plan_nodes, GenEditState p_edit_state) const {
 	ERR_FAIL_COND(p_runtime_plan.is_null());
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
 	auto canonicalize_connection_path = [](const NodePath &p_path) -> NodePath {
 		if (p_path.is_empty() || p_path.is_absolute() || (p_path.get_name_count() > 0 && p_path.get_name(0) == StringName("."))) {
 			return p_path;
@@ -2864,14 +2463,8 @@ void SceneState::_apply_runtime_plan_connections(const Ref<SceneInstantiationPla
 		if (p_connection_state == nullptr || p_connection_state->connections.is_empty()) {
 			return;
 		}
-		if (profile) {
-			profile->connection_state_count++;
-		}
 
 		for (const ConnectionData &connection : p_connection_state->connections) {
-			if (profile) {
-				profile->connection_scan_count++;
-			}
 			NodePath from_path;
 			if (connection.from & FLAG_ID_IS_PATH) {
 				from_path = p_connection_state->node_paths[connection.from & FLAG_MASK];
@@ -2922,9 +2515,6 @@ void SceneState::_apply_runtime_plan_connections(const Ref<SceneInstantiationPla
 			}
 
 			from_node->connect(p_connection_state->names[connection.signal], callable, CONNECT_PERSIST | connection.flags | (p_edit_state == GEN_EDIT_STATE_MAIN ? 0 : CONNECT_INHERITED));
-			if (profile) {
-				profile->connection_apply_count++;
-			}
 		}
 	};
 
@@ -3055,17 +2645,10 @@ void SceneState::_apply_legacy_filter_to_runtime_plan(Node *p_node, const Ref<Sc
 
 Node *SceneState::_materialize_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_runtime_plan, int p_plan_id, Node *p_parent, Node *p_root, Node *p_source_root, Vector<DeferredNodePathProperties> *p_deferred_node_paths, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> *p_resources_local_to_scenes, HashMap<int, ObjectID> *p_materialized_plan_nodes, GenEditState p_edit_state, bool p_apply_customization) const {
 	ERR_FAIL_COND_V(p_runtime_plan.is_null(), nullptr);
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
-	if (profile) {
-		profile->materialize_calls++;
-	}
 
 	const SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data(p_plan_id);
 	ERR_FAIL_NULL_V(plan_node, nullptr);
 	if (plan_node->pruned) {
-		if (profile) {
-			profile->pruned_before_materialize_count++;
-		}
 		return nullptr;
 	}
 
@@ -3074,11 +2657,7 @@ Node *SceneState::_materialize_runtime_plan_node(const Ref<SceneInstantiationPla
 	ERR_FAIL_COND_V(plan_node->source_node_idx < 0 || plan_node->source_node_idx >= source_state->nodes.size(), nullptr);
 	const NodeData &source_node = source_state->nodes[plan_node->source_node_idx];
 
-	const uint64_t instantiate_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	Object *obj = ::ClassDB::instantiate(plan_node->type);
-	if (profile) {
-		profile->class_instantiate_usec += OS::get_singleton()->get_ticks_usec() - instantiate_start_usec;
-	}
 	Node *node = Object::cast_to<Node>(obj);
 	if (!node) {
 		if (obj) {
@@ -3121,12 +2700,8 @@ Node *SceneState::_materialize_runtime_plan_node(const Ref<SceneInstantiationPla
 	}
 
 	if (plan_node->properties.has(CoreStringName(script))) {
-		const uint64_t script_set_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 		bool valid = true;
 		node->set(CoreStringName(script), plan_node->properties[CoreStringName(script)], &valid);
-		if (profile) {
-			profile->script_set_usec += OS::get_singleton()->get_ticks_usec() - script_set_start_usec;
-		}
 	}
 
 	for (const KeyValue<StringName, Variant> &kv : plan_node->properties) {
@@ -3146,12 +2721,8 @@ Node *SceneState::_materialize_runtime_plan_node(const Ref<SceneInstantiationPla
 			}
 			continue;
 		}
-		if (profile) {
-			profile->property_apply_count++;
-		}
 		Variant value = kv.value;
 		if (p_resources_local_to_scenes) {
-			const uint64_t local_resource_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 			if (value.get_type() == Variant::OBJECT) {
 				Ref<Resource> resource = value;
 				if (resource.is_valid()) {
@@ -3192,65 +2763,35 @@ Node *SceneState::_materialize_runtime_plan_node(const Ref<SceneInstantiationPla
 
 				value = _setup_runtime_plan_resources_in_dictionary(set_dict, p_runtime_plan, p_plan_id, *p_resources_local_to_scenes, node, kv.key, root, source_root, p_edit_state);
 			}
-			if (profile) {
-				profile->local_resource_setup_usec += OS::get_singleton()->get_ticks_usec() - local_resource_start_usec;
-			}
 		}
-		const uint64_t property_set_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 		bool valid = true;
 		node->set(kv.key, value, &valid);
-		if (profile) {
-			profile->property_apply_usec += OS::get_singleton()->get_ticks_usec() - property_set_start_usec;
-		}
 	}
 
-	const uint64_t group_setup_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	for (int group_idx = 0; group_idx < source_node.groups.size(); group_idx++) {
 		const int group_name_idx = source_node.groups[group_idx];
 		ERR_FAIL_INDEX_V(group_name_idx, source_state->names.size(), nullptr);
 		node->add_to_group(source_state->names[group_name_idx], true);
-		if (profile) {
-			profile->group_assignment_count++;
-		}
-	}
-	if (profile) {
-		profile->group_setup_usec += OS::get_singleton()->get_ticks_usec() - group_setup_start_usec;
 	}
 
 	node->_set_name_nocheck(plan_node->name);
 
 	if (p_apply_customization) {
-		const uint64_t customization_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 		if (node->has_method("_customize_scene_instantiation")) {
-			if (profile) {
-				profile->customization_call_count++;
-			}
 			node->call("_customize_scene_instantiation", p_runtime_plan->_make_node_ref(p_plan_id));
 		} else if (node->has_method("_filter_scene_children")) {
-			if (profile) {
-				profile->legacy_filter_call_count++;
-			}
 			_apply_legacy_filter_to_runtime_plan(node, p_runtime_plan, p_plan_id);
-		}
-		if (profile) {
-			profile->customization_call_usec += OS::get_singleton()->get_ticks_usec() - customization_start_usec;
 		}
 	}
 
 	plan_node = p_runtime_plan->_get_node_data(p_plan_id);
 	ERR_FAIL_NULL_V(plan_node, nullptr);
 	if (plan_node->pruned || plan_node->flattened) {
-		if (profile) {
-			profile->pruned_after_customization_count++;
-		}
 		if (p_resources_local_to_scenes && p_resources_local_to_scenes->has(node)) {
 			p_resources_local_to_scenes->erase(node);
 		}
 		memdelete(node);
 		return nullptr;
-	}
-	if (profile) {
-		profile->materialized_node_count++;
 	}
 
 	if (p_materialized_plan_nodes) {
@@ -5177,28 +4718,7 @@ Node *PackedScene::instantiate(GenEditState p_edit_state) const {
 #ifndef TOOLS_ENABLED
 	ERR_FAIL_COND_V_MSG(p_edit_state != GEN_EDIT_STATE_DISABLED, nullptr, "Edit state is only for editors, does not work without tools compiled.");
 #endif
-	const bool profile_once = bool(get_meta(META_RUNTIME_PLAN_PROFILE_ONCE, false));
-	const bool profile_always = bool(get_meta(META_RUNTIME_PLAN_PROFILE_ALWAYS, false));
-	const int64_t threshold_msec = MAX(int64_t(get_meta(META_RUNTIME_PLAN_PROFILE_THRESHOLD_MSEC, 3000)), int64_t(0));
-	if (profile_once || profile_always) {
-		_append_runtime_plan_profile_dump(vformat("instantiate flag seen: path=%s once=%s always=%s threshold_msec=%d\n", get_path().is_empty() ? String("<built-in>") : get_path(), profile_once ? "yes" : "no", profile_always ? "yes" : "no", threshold_msec));
-	}
-	RuntimePlanInstantiationProfileScope profile_scope(get_path(), profile_once || profile_always, static_cast<uint64_t>(threshold_msec) * 1000);
-	const uint64_t instantiate_start_usec = OS::get_singleton()->get_ticks_usec();
-
 	Node *s = state->instantiate((SceneState::GenEditState)p_edit_state);
-	RuntimePlanInstantiationProfile *profile = profile_scope.get_profile();
-	if (profile && !profile->log_emitted) {
-		profile->total_usec = OS::get_singleton()->get_ticks_usec() - instantiate_start_usec;
-		if (!profile->used_runtime_plan && profile->fallback_reason.is_empty()) {
-			profile->fell_back_to_legacy = true;
-			profile->fallback_reason = Engine::get_singleton()->is_editor_hint() ? "editor hint uses legacy instantiate" : "instantiate completed without runtime-plan detail logging";
-		}
-		_maybe_log_runtime_plan_profile(*profile);
-	}
-	if (profile_once) {
-		const_cast<PackedScene *>(this)->remove_meta(META_RUNTIME_PLAN_PROFILE_ONCE);
-	}
 	if (!s) {
 		return nullptr;
 	}
