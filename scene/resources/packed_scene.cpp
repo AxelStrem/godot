@@ -1979,12 +1979,18 @@ const SceneState::RuntimePlanSourceStateCache *SceneState::_get_runtime_plan_sou
 	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 
 	RuntimePlanSourceStateCache cache;
+	cache.node_paths.resize(p_source_state->nodes.size());
+	cache.parent_paths.resize(p_source_state->nodes.size());
+	cache.owner_paths.resize(p_source_state->nodes.size());
 	cache.direct_children.resize(p_source_state->nodes.size());
+	cache.override_children.resize(p_source_state->nodes.size());
 
 	HashMap<NodePath, int> node_path_to_idx;
 	for (int node_idx = 0; node_idx < p_source_state->nodes.size(); node_idx++) {
 		const uint64_t node_path_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
-		node_path_to_idx.insert(p_source_state->get_node_path(node_idx), node_idx);
+		cache.node_paths.write[node_idx] = p_source_state->get_node_path(node_idx);
+		cache.parent_paths.write[node_idx] = _get_runtime_plan_parent_path(cache.node_paths[node_idx]);
+		node_path_to_idx.insert(cache.node_paths[node_idx], node_idx);
 		if (profile) {
 			profile->build_get_node_path_count++;
 			profile->build_get_node_path_usec += OS::get_singleton()->get_ticks_usec() - node_path_start_usec;
@@ -1993,6 +1999,25 @@ const SceneState::RuntimePlanSourceStateCache *SceneState::_get_runtime_plan_sou
 
 	for (int node_idx = 0; node_idx < p_source_state->nodes.size(); node_idx++) {
 		const NodeData &node = p_source_state->nodes[node_idx];
+
+		if (node.owner < 0 || node.owner == NO_PARENT_SAVED) {
+			cache.owner_paths.write[node_idx] = NodePath();
+		} else if (node.owner & FLAG_ID_IS_PATH) {
+			const int owner_path_idx = node.owner & FLAG_MASK;
+			if (owner_path_idx >= 0 && owner_path_idx < p_source_state->node_paths.size()) {
+				cache.owner_paths.write[node_idx] = p_source_state->node_paths[owner_path_idx];
+			} else {
+				cache.owner_paths.write[node_idx] = NodePath();
+			}
+		} else {
+			const int owner_node_idx = node.owner & FLAG_MASK;
+			if (owner_node_idx >= 0 && owner_node_idx < cache.node_paths.size()) {
+				cache.owner_paths.write[node_idx] = cache.node_paths[owner_node_idx];
+			} else {
+				cache.owner_paths.write[node_idx] = NodePath();
+			}
+		}
+
 		if (node.parent < 0) {
 			continue;
 		}
@@ -2020,6 +2045,18 @@ const SceneState::RuntimePlanSourceStateCache *SceneState::_get_runtime_plan_sou
 		cache.direct_children.write[parent_node_idx].push_back(node_idx);
 	}
 
+	for (int node_idx = 0; node_idx < cache.parent_paths.size(); node_idx++) {
+		NodePath ancestor_path = cache.parent_paths[node_idx];
+		while (!ancestor_path.is_empty()) {
+			const int *ancestor_node_idx = node_path_to_idx.getptr(ancestor_path);
+			if (ancestor_node_idx != nullptr) {
+				cache.override_children.write[*ancestor_node_idx].push_back(node_idx);
+				break;
+			}
+			ancestor_path = _get_runtime_plan_parent_path(ancestor_path);
+		}
+	}
+
 	r_source_state_caches.insert(source_state, cache);
 	if (profile) {
 		profile->source_state_cache_build_count++;
@@ -2027,6 +2064,28 @@ const SceneState::RuntimePlanSourceStateCache *SceneState::_get_runtime_plan_sou
 		profile->source_state_cache_build_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
 	}
 	return r_source_state_caches.getptr(source_state);
+}
+
+NodePath SceneState::_get_runtime_plan_node_path(const Ref<SceneState> &p_source_state, int p_source_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches, bool p_for_parent) const {
+	NodePath cached_path;
+	ERR_FAIL_COND_V(p_source_state.is_null(), cached_path);
+	const RuntimePlanSourceStateCache *cache = _get_runtime_plan_source_state_cache(p_source_state, r_source_state_caches);
+	ERR_FAIL_NULL_V(cache, cached_path);
+	if (p_for_parent) {
+		ERR_FAIL_INDEX_V(p_source_node_idx, cache->parent_paths.size(), cached_path);
+		return cache->parent_paths[p_source_node_idx];
+	}
+	ERR_FAIL_INDEX_V(p_source_node_idx, cache->node_paths.size(), cached_path);
+	return cache->node_paths[p_source_node_idx];
+}
+
+NodePath SceneState::_get_runtime_plan_owner_path(const Ref<SceneState> &p_source_state, int p_source_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const {
+	NodePath cached_path;
+	ERR_FAIL_COND_V(p_source_state.is_null(), cached_path);
+	const RuntimePlanSourceStateCache *cache = _get_runtime_plan_source_state_cache(p_source_state, r_source_state_caches);
+	ERR_FAIL_NULL_V(cache, cached_path);
+	ERR_FAIL_INDEX_V(p_source_node_idx, cache->owner_paths.size(), cached_path);
+	return cache->owner_paths[p_source_node_idx];
 }
 
 Vector<int> SceneState::_get_runtime_plan_direct_children(const Ref<SceneState> &p_source_state, int p_source_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const {
@@ -2080,85 +2139,22 @@ NodePath SceneState::_get_runtime_plan_parent_path(const NodePath &p_path) const
 	return NodePath(parent_names, false);
 }
 
-Vector<int> SceneState::_get_runtime_plan_override_children(const Ref<SceneState> &p_source_state, int p_source_node_idx) const {
+Vector<int> SceneState::_get_runtime_plan_override_children(const Ref<SceneState> &p_source_state, int p_source_node_idx, HashMap<const SceneState *, RuntimePlanSourceStateCache> &r_source_state_caches) const {
 	Vector<int> child_indices;
 	ERR_FAIL_COND_V(p_source_state.is_null(), child_indices);
-	ERR_FAIL_INDEX_V(p_source_node_idx, p_source_state->nodes.size(), child_indices);
+	const RuntimePlanSourceStateCache *cache = _get_runtime_plan_source_state_cache(p_source_state, r_source_state_caches);
+	ERR_FAIL_NULL_V(cache, child_indices);
+	ERR_FAIL_INDEX_V(p_source_node_idx, cache->override_children.size(), child_indices);
 	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
 	const uint64_t start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
 	if (profile) {
 		profile->override_children_call_count++;
-	}
-
-	const uint64_t current_path_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
-	const NodePath current_path = p_source_state->get_node_path(p_source_node_idx);
-	if (profile) {
-		profile->build_get_node_path_count++;
-		profile->build_get_node_path_usec += OS::get_singleton()->get_ticks_usec() - current_path_start_usec;
-	}
-	HashSet<NodePath> override_paths;
-	for (int node_idx = 0; node_idx < p_source_state->nodes.size(); node_idx++) {
-		if (profile) {
-			profile->override_children_scan_count++;
-		}
-		if (node_idx == p_source_node_idx) {
-			continue;
-		}
-
-		const uint64_t override_path_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
-		override_paths.insert(p_source_state->get_node_path(node_idx));
-		if (profile) {
-			profile->build_get_node_path_count++;
-			profile->build_get_node_path_usec += OS::get_singleton()->get_ticks_usec() - override_path_start_usec;
-		}
-	}
-
-	for (int node_idx = 0; node_idx < p_source_state->nodes.size(); node_idx++) {
-		if (profile) {
-			profile->override_children_scan_count++;
-		}
-		if (node_idx == p_source_node_idx) {
-			continue;
-		}
-
-		const uint64_t node_path_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
-		const NodePath node_path = p_source_state->get_node_path(node_idx);
-		if (profile) {
-			profile->build_get_node_path_count++;
-			profile->build_get_node_path_usec += OS::get_singleton()->get_ticks_usec() - node_path_start_usec;
-		}
-		if (!_runtime_plan_path_is_descendant(current_path, node_path)) {
-			continue;
-		}
-
-		const uint64_t ancestor_path_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
-		NodePath ancestor_path = p_source_state->get_node_path(node_idx, true);
-		if (profile) {
-			profile->build_get_node_path_count++;
-			profile->build_get_node_path_usec += OS::get_singleton()->get_ticks_usec() - ancestor_path_start_usec;
-		}
-		bool has_intermediate_override = false;
-		while (!ancestor_path.is_empty() && ancestor_path != current_path && ancestor_path != NodePath(".")) {
-			if (profile) {
-				profile->override_children_ancestor_step_count++;
-			}
-			if (override_paths.has(ancestor_path)) {
-				has_intermediate_override = true;
-				break;
-			}
-			ancestor_path = _get_runtime_plan_parent_path(ancestor_path);
-		}
-
-		if (!has_intermediate_override) {
-			child_indices.push_back(node_idx);
-		}
+		profile->override_children_return_count += cache->override_children[p_source_node_idx].size();
 	}
 	if (profile) {
-		profile->override_children_return_count += child_indices.size();
 		profile->override_children_usec += OS::get_singleton()->get_ticks_usec() - start_usec;
 	}
-
-	return child_indices;
+	return cache->override_children[p_source_node_idx];
 }
 
 NodePath SceneState::_compose_runtime_plan_path(const NodePath &p_base_path, const NodePath &p_relative_path) const {
@@ -2618,12 +2614,12 @@ void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantia
 	ERR_FAIL_NULL(plan_node);
 	const NodePath plan_source_path = plan_node->source_path;
 
-	const NodePath override_root_path = p_override_state->get_node_path(p_override_node_idx);
+	const NodePath override_root_path = _get_runtime_plan_node_path(p_override_state, p_override_node_idx, r_source_state_caches);
 
-	const Vector<int> override_children = _get_runtime_plan_override_children(p_override_state, p_override_node_idx);
+	const Vector<int> override_children = _get_runtime_plan_override_children(p_override_state, p_override_node_idx, r_source_state_caches);
 	for (int child_node_idx : override_children) {
 		const NodeData &override_child = p_override_state->nodes[child_node_idx];
-		const NodePath override_child_path = p_override_state->get_node_path(child_node_idx);
+		const NodePath override_child_path = _get_runtime_plan_node_path(p_override_state, child_node_idx, r_source_state_caches);
 		NodePath relative_child_path = override_child_path;
 		if (!override_root_path.is_empty() && override_root_path != NodePath(".")) {
 			const String override_root_path_string = override_root_path.operator String();
@@ -2634,7 +2630,7 @@ void SceneState::_merge_runtime_plan_instance_overrides(const Ref<SceneInstantia
 		}
 		const NodePath child_path = _compose_runtime_plan_path(plan_source_path, relative_child_path);
 
-		NodePath override_parent_path = p_override_state->get_node_path(child_node_idx, true);
+		NodePath override_parent_path = _get_runtime_plan_node_path(p_override_state, child_node_idx, r_source_state_caches, true);
 		NodePath relative_parent_path = override_parent_path;
 		if (!override_root_path.is_empty() && override_root_path != NodePath(".")) {
 			const String override_root_path_string = override_root_path.operator String();
@@ -2671,24 +2667,10 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 	ERR_FAIL_COND_V(p_runtime_plan.is_null(), -1);
 	ERR_FAIL_COND_V(p_source_state.is_null(), -1);
 	ERR_FAIL_INDEX_V(p_source_node_idx, p_source_state->nodes.size(), -1);
-	RuntimePlanInstantiationProfile *profile = _get_runtime_plan_profile();
 
 	const NodeData &source_node = p_source_state->nodes[p_source_node_idx];
-	NodePath source_path = p_source_path_override;
-	if (p_source_path_override.is_empty()) {
-		const uint64_t source_path_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
-		source_path = p_source_state->get_node_path(p_source_node_idx);
-		if (profile) {
-			profile->build_get_node_path_count++;
-			profile->build_get_node_path_usec += OS::get_singleton()->get_ticks_usec() - source_path_start_usec;
-		}
-	}
-	const uint64_t owner_path_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
-	const NodePath owner_path = p_source_state->get_node_owner_path(p_source_node_idx);
-	if (profile) {
-		profile->build_get_node_owner_path_count++;
-		profile->build_get_node_owner_path_usec += OS::get_singleton()->get_ticks_usec() - owner_path_start_usec;
-	}
+	const NodePath source_path = p_source_path_override.is_empty() ? _get_runtime_plan_node_path(p_source_state, p_source_node_idx, r_source_state_caches) : p_source_path_override;
+	const NodePath owner_path = _get_runtime_plan_owner_path(p_source_state, p_source_node_idx, r_source_state_caches);
 	Ref<PackedScene> instance_scene = p_source_state->get_node_instance(p_source_node_idx);
 
 	if (instance_scene.is_valid()) {
@@ -2725,20 +2707,10 @@ int SceneState::_append_runtime_plan_node(const Ref<SceneInstantiationPlan> &p_r
 	plan_node->owner_path = owner_path;
 	_copy_runtime_plan_base_properties(p_runtime_plan, plan_id, p_source_state, p_source_node_idx);
 
-	const uint64_t local_source_path_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
-	const NodePath current_local_source_path = p_source_state->get_node_path(p_source_node_idx);
-	if (profile) {
-		profile->build_get_node_path_count++;
-		profile->build_get_node_path_usec += OS::get_singleton()->get_ticks_usec() - local_source_path_start_usec;
-	}
+	const NodePath current_local_source_path = _get_runtime_plan_node_path(p_source_state, p_source_node_idx, r_source_state_caches);
 	const Vector<int> child_nodes = _get_runtime_plan_direct_children(p_source_state, p_source_node_idx, r_source_state_caches);
 	for (int child_node_idx : child_nodes) {
-		const uint64_t child_path_start_usec = profile ? OS::get_singleton()->get_ticks_usec() : 0;
-		const NodePath source_child_path = p_source_state->get_node_path(child_node_idx);
-		if (profile) {
-			profile->build_get_node_path_count++;
-			profile->build_get_node_path_usec += OS::get_singleton()->get_ticks_usec() - child_path_start_usec;
-		}
+		const NodePath source_child_path = _get_runtime_plan_node_path(p_source_state, child_node_idx, r_source_state_caches);
 		NodePath relative_child_path = source_child_path;
 		if (!current_local_source_path.is_empty() && current_local_source_path != NodePath(".")) {
 			const String current_local_source_path_string = current_local_source_path.operator String();
