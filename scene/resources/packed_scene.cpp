@@ -234,6 +234,7 @@ int SceneInstantiationPlan::_duplicate_node_subtree(int p_plan_id, int p_parent_
 	copy.parent_plan_id = p_parent_plan_id;
 	copy.child_plan_ids.clear();
 	copy.origin = SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_DUPLICATED;
+	copy.duplicated_from_plan_id = p_plan_id;
 	copy.pruned = false;
 	copy.flattened = false;
 
@@ -2159,6 +2160,20 @@ int SceneState::_find_runtime_plan_node_by_source_path(const Ref<SceneInstantiat
 		return -1;
 	}
 	if (indexed_plan_ids->size() > 1) {
+		int non_duplicated_plan_id = -1;
+		for (const int &indexed_plan_id : *indexed_plan_ids) {
+			const SceneInstantiationPlan::PlanNodeData *plan_node = p_runtime_plan->_get_node_data(indexed_plan_id);
+			if (plan_node == nullptr || plan_node->origin == SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_DUPLICATED) {
+				continue;
+			}
+			if (non_duplicated_plan_id >= 0) {
+				return -1;
+			}
+			non_duplicated_plan_id = indexed_plan_id;
+		}
+		if (non_duplicated_plan_id >= 0) {
+			return non_duplicated_plan_id;
+		}
 		return -1;
 	}
 
@@ -2379,11 +2394,166 @@ bool SceneState::_runtime_plan_requires_legacy_connection_fallback(const Ref<Sce
 
 void SceneState::_apply_runtime_plan_connections(const Ref<SceneInstantiationPlan> &p_runtime_plan, const HashMap<int, ObjectID> &p_materialized_plan_nodes, GenEditState p_edit_state) const {
 	ERR_FAIL_COND(p_runtime_plan.is_null());
+	auto get_plan_node = [&](int p_plan_id) -> const SceneInstantiationPlan::PlanNodeData * {
+		if (!p_runtime_plan->has_node(p_plan_id)) {
+			return nullptr;
+		}
+		return p_runtime_plan->_get_node_data(p_plan_id);
+	};
+	auto is_duplicate_root = [&](int p_plan_id) -> bool {
+		const SceneInstantiationPlan::PlanNodeData *plan_node = get_plan_node(p_plan_id);
+		if (plan_node == nullptr || plan_node->origin != SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_DUPLICATED || plan_node->duplicated_from_plan_id < 0) {
+			return false;
+		}
+
+		const SceneInstantiationPlan::PlanNodeData *source_plan_node = get_plan_node(plan_node->duplicated_from_plan_id);
+		if (source_plan_node == nullptr) {
+			return false;
+		}
+
+		const SceneInstantiationPlan::PlanNodeData *parent_plan_node = get_plan_node(plan_node->parent_plan_id);
+		return parent_plan_node == nullptr || parent_plan_node->duplicated_from_plan_id != source_plan_node->parent_plan_id;
+	};
+	auto is_plan_descendant_or_same = [&](int p_ancestor_plan_id, int p_plan_id) -> bool {
+		int current_plan_id = p_plan_id;
+		while (current_plan_id >= 0) {
+			if (current_plan_id == p_ancestor_plan_id) {
+				return true;
+			}
+
+			const SceneInstantiationPlan::PlanNodeData *plan_node = get_plan_node(current_plan_id);
+			if (plan_node == nullptr) {
+				break;
+			}
+
+			current_plan_id = plan_node->parent_plan_id;
+		}
+
+		return false;
+	};
+	auto map_plan_id_into_duplicate_root = [&](int p_source_plan_id, int p_duplicate_root_plan_id) -> int {
+		const SceneInstantiationPlan::PlanNodeData *duplicate_root_node = get_plan_node(p_duplicate_root_plan_id);
+		if (duplicate_root_node == nullptr || duplicate_root_node->duplicated_from_plan_id < 0) {
+			return -1;
+		}
+
+		const int source_root_plan_id = duplicate_root_node->duplicated_from_plan_id;
+		if (!is_plan_descendant_or_same(source_root_plan_id, p_source_plan_id)) {
+			return p_source_plan_id;
+		}
+
+		if (p_source_plan_id == source_root_plan_id) {
+			return p_duplicate_root_plan_id;
+		}
+
+		Vector<int> source_plan_path;
+		int current_source_plan_id = p_source_plan_id;
+		while (current_source_plan_id >= 0 && current_source_plan_id != source_root_plan_id) {
+			source_plan_path.push_back(current_source_plan_id);
+			const SceneInstantiationPlan::PlanNodeData *current_source_plan_node = get_plan_node(current_source_plan_id);
+			if (current_source_plan_node == nullptr) {
+				return -1;
+			}
+			current_source_plan_id = current_source_plan_node->parent_plan_id;
+		}
+
+		if (current_source_plan_id != source_root_plan_id) {
+			return -1;
+		}
+
+		int current_duplicate_plan_id = p_duplicate_root_plan_id;
+		for (int path_idx = source_plan_path.size() - 1; path_idx >= 0; path_idx--) {
+			const int target_source_plan_id = source_plan_path[path_idx];
+			const SceneInstantiationPlan::PlanNodeData *current_duplicate_plan_node = get_plan_node(current_duplicate_plan_id);
+			if (current_duplicate_plan_node == nullptr) {
+				return -1;
+			}
+
+			int next_duplicate_plan_id = -1;
+			for (int child_plan_id : current_duplicate_plan_node->child_plan_ids) {
+				const SceneInstantiationPlan::PlanNodeData *child_plan_node = get_plan_node(child_plan_id);
+				if (child_plan_node != nullptr && child_plan_node->duplicated_from_plan_id == target_source_plan_id) {
+					next_duplicate_plan_id = child_plan_id;
+					break;
+				}
+			}
+
+			if (next_duplicate_plan_id < 0) {
+				return -1;
+			}
+
+			current_duplicate_plan_id = next_duplicate_plan_id;
+		}
+
+		return current_duplicate_plan_id;
+	};
+	Vector<int> duplicate_root_plan_ids;
+	Vector<Vector<int>> duplicate_root_chains;
+	for (const SceneInstantiationPlan::PlanNodeData &plan_node : p_runtime_plan->plan_nodes) {
+		if (plan_node.pruned || plan_node.flattened || !is_duplicate_root(plan_node.plan_id) || !p_materialized_plan_nodes.has(plan_node.plan_id)) {
+			continue;
+		}
+
+		Vector<int> reverse_duplicate_root_chain;
+		int current_plan_id = plan_node.plan_id;
+		while (current_plan_id >= 0) {
+			if (is_duplicate_root(current_plan_id)) {
+				reverse_duplicate_root_chain.push_back(current_plan_id);
+			}
+
+			const SceneInstantiationPlan::PlanNodeData *current_plan_node = get_plan_node(current_plan_id);
+			if (current_plan_node == nullptr) {
+				break;
+			}
+
+			current_plan_id = current_plan_node->parent_plan_id;
+		}
+
+		Vector<int> duplicate_root_chain;
+		duplicate_root_chain.resize(reverse_duplicate_root_chain.size());
+		for (int chain_idx = 0; chain_idx < reverse_duplicate_root_chain.size(); chain_idx++) {
+			duplicate_root_chain.write[chain_idx] = reverse_duplicate_root_chain[reverse_duplicate_root_chain.size() - 1 - chain_idx];
+		}
+
+		duplicate_root_plan_ids.push_back(plan_node.plan_id);
+		duplicate_root_chains.push_back(duplicate_root_chain);
+	}
 	auto canonicalize_connection_path = [](const NodePath &p_path) -> NodePath {
 		if (p_path.is_empty() || p_path.is_absolute() || (p_path.get_name_count() > 0 && p_path.get_name(0) == StringName("."))) {
 			return p_path;
 		}
 		return NodePath("./" + String(p_path));
+	};
+	auto connect_plan_nodes = [&](const SceneState *p_connection_state, const ConnectionData &p_connection, int p_from_plan_id, int p_to_plan_id) {
+		if (p_from_plan_id < 0 || p_to_plan_id < 0 || !p_materialized_plan_nodes.has(p_from_plan_id) || !p_materialized_plan_nodes.has(p_to_plan_id)) {
+			return;
+		}
+
+		Node *from_node = ObjectDB::get_instance<Node>(p_materialized_plan_nodes[p_from_plan_id]);
+		Node *to_node = ObjectDB::get_instance<Node>(p_materialized_plan_nodes[p_to_plan_id]);
+		if (!from_node || !to_node) {
+			return;
+		}
+
+		Callable callable(to_node, p_connection_state->names[p_connection.method]);
+		Array binds;
+		for (int bind : p_connection.binds) {
+			binds.push_back(p_connection_state->variants[bind]);
+		}
+
+		if (!binds.is_empty()) {
+			callable = callable.bindv(binds);
+		}
+
+		if (p_connection.unbinds > 0) {
+			callable = callable.unbind(p_connection.unbinds);
+		}
+
+		if (from_node->is_connected(p_connection_state->names[p_connection.signal], callable)) {
+			return;
+		}
+
+		from_node->connect(p_connection_state->names[p_connection.signal], callable, CONNECT_PERSIST | p_connection.flags | (p_edit_state == GEN_EDIT_STATE_MAIN ? 0 : CONNECT_INHERITED));
 	};
 	auto apply_connections_from_state = [&](const SceneInstantiationPlan::PlanNodeData &p_scene_root_plan, const SceneState *p_connection_state) {
 		if (p_connection_state == nullptr || p_connection_state->connections.is_empty()) {
@@ -2412,35 +2582,31 @@ void SceneState::_apply_runtime_plan_connections(const Ref<SceneInstantiationPla
 
 			const int from_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, full_from_path);
 			const int to_plan_id = _find_runtime_plan_node_by_source_path(p_runtime_plan, full_to_path);
-			if (from_plan_id < 0 || to_plan_id < 0 || !p_materialized_plan_nodes.has(from_plan_id) || !p_materialized_plan_nodes.has(to_plan_id)) {
-				continue;
-			}
+			connect_plan_nodes(p_connection_state, connection, from_plan_id, to_plan_id);
 
-			Node *from_node = ObjectDB::get_instance<Node>(p_materialized_plan_nodes[from_plan_id]);
-			Node *to_node = ObjectDB::get_instance<Node>(p_materialized_plan_nodes[to_plan_id]);
-			if (!from_node || !to_node) {
-				continue;
-			}
+			for (int duplicate_root_idx = 0; duplicate_root_idx < duplicate_root_plan_ids.size(); duplicate_root_idx++) {
+				int duplicate_from_plan_id = from_plan_id;
+				int duplicate_to_plan_id = to_plan_id;
 
-			Callable callable(to_node, p_connection_state->names[connection.method]);
-			Array binds;
-			for (int bind : connection.binds) {
-				binds.push_back(p_connection_state->variants[bind]);
-			}
+				for (int duplicate_root_plan_id : duplicate_root_chains[duplicate_root_idx]) {
+					if (duplicate_from_plan_id >= 0) {
+						duplicate_from_plan_id = map_plan_id_into_duplicate_root(duplicate_from_plan_id, duplicate_root_plan_id);
+					}
+					if (duplicate_to_plan_id >= 0) {
+						duplicate_to_plan_id = map_plan_id_into_duplicate_root(duplicate_to_plan_id, duplicate_root_plan_id);
+					}
+				}
 
-			if (!binds.is_empty()) {
-				callable = callable.bindv(binds);
-			}
+				if (duplicate_from_plan_id < 0 || duplicate_to_plan_id < 0) {
+					continue;
+				}
 
-			if (connection.unbinds > 0) {
-				callable = callable.unbind(connection.unbinds);
-			}
+				if (duplicate_from_plan_id == from_plan_id && duplicate_to_plan_id == to_plan_id) {
+					continue;
+				}
 
-			if (from_node->is_connected(p_connection_state->names[connection.signal], callable)) {
-				continue;
+				connect_plan_nodes(p_connection_state, connection, duplicate_from_plan_id, duplicate_to_plan_id);
 			}
-
-			from_node->connect(p_connection_state->names[connection.signal], callable, CONNECT_PERSIST | connection.flags | (p_edit_state == GEN_EDIT_STATE_MAIN ? 0 : CONNECT_INHERITED));
 		}
 	};
 
