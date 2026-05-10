@@ -325,6 +325,7 @@ class SceneInstantiationPlan : public RefCounted {
 		HashMap<StringName, Variant> properties;
 		HashSet<StringName> deferred_node_properties;
 		SceneInstantiationPlanNodeOrigin origin = SCENE_INSTANTIATION_PLAN_NODE_ORIGIN_LOCAL;
+		int duplicated_from_plan_id = -1;
 		bool instance_root = false;
 		bool pruned = false;
 		bool flattened = false;

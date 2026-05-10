@@ -1576,6 +1576,67 @@ TEST_CASE("[PackedScene] Runtime plan customization preserves persistent connect
 	memdelete(instance);
 }
 
+TEST_CASE("[PackedScene] Runtime plan customization preserves persistent connections for duplicated subtrees") {
+	PlanningNode *scene = PlanningNode::create_registered();
+	scene->set_name("Scene");
+	scene->set_duplicate_count(2);
+
+	PlanningLeaf *template_root = PlanningLeaf::create_registered();
+	template_root->set_name("Template");
+	template_root->set_number(99);
+	scene->add_child(template_root);
+	template_root->set_owner(scene);
+
+	ConnectionEmitterNode *emitter = ConnectionEmitterNode::create_registered();
+	emitter->set_name("Emitter");
+	template_root->add_child(emitter);
+	emitter->set_owner(scene);
+
+	ConnectionReceiverNode *receiver = ConnectionReceiverNode::create_registered();
+	receiver->set_name("Receiver");
+	template_root->add_child(receiver);
+	receiver->set_owner(scene);
+
+	CHECK_EQ(emitter->connect("ping", Callable(receiver, "mark_received"), Object::CONNECT_PERSIST), OK);
+
+	PackedScene packed_scene;
+	CHECK_EQ(packed_scene.pack(scene), OK);
+
+	Node *instance = packed_scene.instantiate();
+	REQUIRE(instance != nullptr);
+
+	PlanningLeaf *template_0 = Object::cast_to<PlanningLeaf>(instance->get_node_or_null(NodePath("Template0")));
+	PlanningLeaf *template_1 = Object::cast_to<PlanningLeaf>(instance->get_node_or_null(NodePath("Template1")));
+	REQUIRE(template_0 != nullptr);
+	REQUIRE(template_1 != nullptr);
+
+	ConnectionEmitterNode *emitter_0 = Object::cast_to<ConnectionEmitterNode>(template_0->get_node_or_null(NodePath("Emitter")));
+	ConnectionReceiverNode *receiver_0 = Object::cast_to<ConnectionReceiverNode>(template_0->get_node_or_null(NodePath("Receiver")));
+	ConnectionEmitterNode *emitter_1 = Object::cast_to<ConnectionEmitterNode>(template_1->get_node_or_null(NodePath("Emitter")));
+	ConnectionReceiverNode *receiver_1 = Object::cast_to<ConnectionReceiverNode>(template_1->get_node_or_null(NodePath("Receiver")));
+	REQUIRE(emitter_0 != nullptr);
+	REQUIRE(receiver_0 != nullptr);
+	REQUIRE(emitter_1 != nullptr);
+	REQUIRE(receiver_1 != nullptr);
+
+	CHECK(emitter_0->is_connected("ping", Callable(receiver_0, "mark_received")));
+	CHECK_FALSE(emitter_0->is_connected("ping", Callable(receiver_1, "mark_received")));
+	CHECK(emitter_1->is_connected("ping", Callable(receiver_1, "mark_received")));
+	CHECK_FALSE(emitter_1->is_connected("ping", Callable(receiver_0, "mark_received")));
+
+	CHECK_FALSE(receiver_0->was_received());
+	CHECK_FALSE(receiver_1->was_received());
+	emitter_0->emit_ping();
+	CHECK(receiver_0->was_received());
+	CHECK_FALSE(receiver_1->was_received());
+
+	emitter_1->emit_ping();
+	CHECK(receiver_1->was_received());
+
+	memdelete(scene);
+	memdelete(instance);
+}
+
 TEST_CASE("[PackedScene] Runtime plan customization preserves persistent connections after reload") {
 	PlanningNode *scene = PlanningNode::create_registered();
 	scene->set_name("Scene");
