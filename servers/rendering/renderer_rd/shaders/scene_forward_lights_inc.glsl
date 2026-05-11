@@ -989,6 +989,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	hvec3 light_center = hvec3(area_lights.data[idx].position);
 	hvec3 light_to_vert = hvec3(vertex) - light_center;
 	hvec3 area_direction = hvec3(area_lights.data[idx].direction);
+	hvec3 camera_position = hvec3(scene_data_block.data.inv_view_matrix[0].w, scene_data_block.data.inv_view_matrix[1].w, scene_data_block.data.inv_view_matrix[2].w);
 
 	if (!line_mode && dot(area_direction, light_to_vert) <= 0) {
 		return; // vertex is behind light
@@ -1003,6 +1004,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	hvec3 closest_point_local_to_light;
 	hvec3 closest_light_point;
 	half dist;
+	half attenuation_distance;
 
 	if (line_mode) {
 		bool width_is_major = width_len >= height_len;
@@ -1010,17 +1012,18 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		a_len = width_is_major ? width_len : height_len;
 		half minor_len = width_is_major ? height_len : width_len;
 
-		hvec3 radial_dir = light_to_vert - area_a_dir * dot(light_to_vert, area_a_dir);
-		if (dot(radial_dir, radial_dir) < EPSILON) {
-			radial_dir = normal - area_a_dir * dot(normal, area_a_dir);
+		hvec3 billboard_dir = camera_position - light_center;
+		billboard_dir -= area_a_dir * dot(billboard_dir, area_a_dir);
+		if (dot(billboard_dir, billboard_dir) < EPSILON) {
+			billboard_dir = normal - area_a_dir * dot(normal, area_a_dir);
 		}
-		if (dot(radial_dir, radial_dir) < EPSILON) {
-			radial_dir = eye_vec - area_a_dir * dot(eye_vec, area_a_dir);
+		if (dot(billboard_dir, billboard_dir) < EPSILON) {
+			billboard_dir = eye_vec - area_a_dir * dot(eye_vec, area_a_dir);
 		}
-		if (dot(radial_dir, radial_dir) < EPSILON) {
-			radial_dir = abs(area_a_dir.z) < half(0.999) ? cross(area_a_dir, hvec3(0.0, 0.0, 1.0)) : cross(area_a_dir, hvec3(0.0, 1.0, 0.0));
+		if (dot(billboard_dir, billboard_dir) < EPSILON) {
+			billboard_dir = abs(area_a_dir.z) < half(0.999) ? cross(area_a_dir, hvec3(0.0, 0.0, 1.0)) : cross(area_a_dir, hvec3(0.0, 1.0, 0.0));
 		}
-		area_b_dir = normalize(radial_dir);
+		area_b_dir = normalize(billboard_dir);
 
 		b_len = max(minor_len, max(half(0.001), a_len * half(0.0005)));
 		a_half_len = a_len / half(2.0);
@@ -1032,6 +1035,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		hvec3 closest_offset = light_to_vert - closest_line_point;
 		dist = length(closest_offset);
 		closest_light_point = light_center + closest_line_point;
+		attenuation_distance = length(light_to_vert);
 
 		area_width = area_a_dir * a_len;
 		area_height = area_b_dir * b_len;
@@ -1047,9 +1051,10 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		closest_point_local_to_light = hvec3(clamp(pos_local_to_light.x, -a_half_len, a_half_len), clamp(pos_local_to_light.y, -b_half_len, b_half_len), 0);
 		dist = length(closest_point_local_to_light - pos_local_to_light);
 		closest_light_point = light_center + area_a_dir * closest_point_local_to_light.x + area_b_dir * closest_point_local_to_light.y;
+		attenuation_distance = dist;
 	}
 
-	half light_length = max(dist, half(0.001));
+	half light_length = max(attenuation_distance, half(0.001));
 	half light_attenuation_raw = get_omni_attenuation(float(light_length), area_lights.data[idx].inv_radius, area_lights.data[idx].attenuation);
 	half light_attenuation_ltc = light_attenuation_raw * half(light_length * light_length); // solid angle already decreases by inverse square, so attenuation power is 2.0 by default -> subtract 2.0
 	half shadow = half(1.0);
@@ -1174,6 +1179,8 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	light_attenuation_ltc = light_attenuation_ltc * shadow;
 	half light_attenuation = light_attenuation_raw * shadow;
 	hvec3 color = hvec3(area_lights.data[idx].color);
+	hvec3 line_light_rel_vec = light_center - hvec3(vertex);
+	hvec3 line_light_dir = dot(line_light_rel_vec, line_light_rel_vec) > EPSILON ? normalize(line_light_rel_vec) : -area_direction;
 	float max_mipmap = area_lights.data[idx].cone_angle;
 
 	vec3 points[4];
@@ -1235,7 +1242,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	vec3 albedo_highp = vec3(albedo);
 	float alpha_highp = float(alpha);
 	vec3 normal_highp = vec3(normal);
-	vec3 light_highp = normalize(vec3(closest_light_point - hvec3(vertex)));
+	vec3 light_highp = normalize(vec3((line_mode ? light_center : closest_light_point) - hvec3(vertex)));
 	vec3 view_highp = vec3(eye_vec);
 	float specular_amount_highp = float(area_lights.data[idx].specular_amount);
 	vec3 light_color_highp = vec3(color);
@@ -1257,6 +1264,28 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	half specular_amount = half(area_lights.data[idx].specular_amount);
 	half area = a_len * b_len;
 	half cc_attenuation = half(1.0);
+	if (line_mode) {
+		light_compute(normal, line_light_dir, eye_vec, half(0.0), color, false, light_attenuation, f0, roughness, metallic, half(0.0), albedo, alpha, screen_uv, energy_compensation,
+#ifdef LIGHT_BACKLIGHT_USED
+				backlight,
+#endif
+#ifdef LIGHT_TRANSMITTANCE_USED
+				transmittance_color,
+				transmittance_depth,
+				transmittance_boost,
+				transmittance_depth,
+#endif
+#ifdef LIGHT_RIM_USED
+				rim, rim_tint,
+#endif
+#ifdef LIGHT_CLEARCOAT_USED
+				clearcoat, clearcoat_roughness, vertex_normal,
+#endif
+#ifdef LIGHT_ANISOTROPY_USED
+				B, T, anisotropy,
+#endif
+				diffuse_light, specular_light);
+	}
 
 #if defined(LIGHT_TRANSMITTANCE_USED) || defined(LIGHT_BACKLIGHT_USED) || defined(LIGHT_RIM_USED) || defined(DIFFUSE_TOON)
 	hvec3 isotropic_light_color = hvec3(1.0); // independent of normal
@@ -1269,7 +1298,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	}
 #endif
 #ifdef LIGHT_TRANSMITTANCE_USED
-	{
+	if (!line_mode) {
 		half transmittance_z = transmittance_depth;
 		transmittance_color.a *= light_attenuation_raw; // not including shadows or ltc falloff
 #ifndef SHADOWS_DISABLED
@@ -1319,7 +1348,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	specular_light += half(cc_specular_ltc) * hvec3(cc_specular_tex_color) * Fr * color * light_attenuation_ltc * specular_amount;
 #endif // LIGHT_CLEARCOAT_USED
 
-	if (metallic < half(1.0)) {
+	if (!line_mode && metallic < half(1.0)) {
 #if defined(DIFFUSE_TOON)
 		float backface_ltc_diffuse = 0.0;
 		vec3 backface_ltc_tex_color_discard = vec3(1.0);
@@ -1338,9 +1367,11 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	}
 
 #if defined(LIGHT_RIM_USED) // same as for point lights
+	if (!line_mode) {
 	half cNdotV = max(dot(normal, eye_vec), half(1e-4));
 	half rim_light = pow(max(half(1e-4), half(1.0) - cNdotV), max(half(0.0), (half(1.0) - roughness) * half(16.0)));
 	diffuse_light += rim_light * rim * mix(hvec3(1.0), albedo, rim_tint) * isotropic_light_color * color * half(solid_angle) * light_attenuation_ltc;
+	}
 #endif
 
 #if defined(SPECULAR_TOON)
