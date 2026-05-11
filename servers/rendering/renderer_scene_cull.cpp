@@ -2600,16 +2600,27 @@ bool RendererSceneCull::_light_instance_update_shadow(Instance *p_instance, cons
 
 			real_t radius = RSG::light_storage->light_get_param(p_instance->base, RSE::LIGHT_PARAM_RANGE);
 			Vector2 half_size = RSG::light_storage->light_area_get_size(p_instance->base) / 2.0;
+			bool line_mode = RSG::light_storage->light_area_get_line_mode(p_instance->base);
 
-			real_t z = -1;
 			Vector<Plane> planes;
 			planes.resize(6);
-			planes.write[0] = light_transform.xform(Plane(Vector3(0, 0, z), radius));
-			planes.write[1] = light_transform.xform(Plane(Vector3(1, 0, 0).normalized(), radius + half_size.x));
-			planes.write[2] = light_transform.xform(Plane(Vector3(-1, 0, 0).normalized(), radius + half_size.x));
-			planes.write[3] = light_transform.xform(Plane(Vector3(0, 1, 0).normalized(), radius + half_size.y));
-			planes.write[4] = light_transform.xform(Plane(Vector3(0, -1, 0).normalized(), radius + half_size.y));
-			planes.write[5] = light_transform.xform(Plane(Vector3(0, 0, -z), 0));
+			if (line_mode) {
+				Vector3 half_extents = half_size.x >= half_size.y ? Vector3(half_size.x + radius, radius, radius) : Vector3(radius, half_size.y + radius, radius);
+				planes.write[0] = light_transform.xform(Plane(Vector3(1, 0, 0), half_extents.x));
+				planes.write[1] = light_transform.xform(Plane(Vector3(-1, 0, 0), half_extents.x));
+				planes.write[2] = light_transform.xform(Plane(Vector3(0, 1, 0), half_extents.y));
+				planes.write[3] = light_transform.xform(Plane(Vector3(0, -1, 0), half_extents.y));
+				planes.write[4] = light_transform.xform(Plane(Vector3(0, 0, 1), half_extents.z));
+				planes.write[5] = light_transform.xform(Plane(Vector3(0, 0, -1), half_extents.z));
+			} else {
+				real_t z = -1;
+				planes.write[0] = light_transform.xform(Plane(Vector3(0, 0, z), radius));
+				planes.write[1] = light_transform.xform(Plane(Vector3(1, 0, 0).normalized(), radius + half_size.x));
+				planes.write[2] = light_transform.xform(Plane(Vector3(-1, 0, 0).normalized(), radius + half_size.x));
+				planes.write[3] = light_transform.xform(Plane(Vector3(0, 1, 0).normalized(), radius + half_size.y));
+				planes.write[4] = light_transform.xform(Plane(Vector3(0, -1, 0).normalized(), radius + half_size.y));
+				planes.write[5] = light_transform.xform(Plane(Vector3(0, 0, -z), 0));
+			}
 
 			instance_shadow_cull_result.clear();
 

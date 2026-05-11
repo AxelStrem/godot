@@ -449,6 +449,26 @@ bool LightStorage::light_area_get_normalize_energy(RID p_light) const {
 	return light->area_normalize_energy;
 }
 
+void LightStorage::light_area_set_line_mode(RID p_light, bool p_enabled) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+
+	if (light->area_line_mode == p_enabled) {
+		return;
+	}
+
+	light->area_line_mode = p_enabled;
+	light->version++;
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+bool LightStorage::light_area_get_line_mode(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, false);
+
+	return light->area_line_mode;
+}
+
 void LightStorage::light_area_set_texture(RID p_light, RID p_texture) {
 	TextureStorage *texture_storage = TextureStorage::get_singleton();
 	Light *light = light_owner.get_or_null(p_light);
@@ -528,6 +548,10 @@ AABB LightStorage::light_get_aabb(RID p_light) const {
 		};
 		case RSE::LIGHT_AREA: {
 			float len = light->param[RSE::LIGHT_PARAM_RANGE];
+			if (light->area_line_mode) {
+				Vector3 half_extents = light->area_size.x >= light->area_size.y ? Vector3(light->area_size.x * 0.5f + len, len, len) : Vector3(len, light->area_size.y * 0.5f + len, len);
+				return AABB(-half_extents, half_extents * 2.0f);
+			}
 			float width = light->area_size.x / 2.0 + len;
 			float height = light->area_size.y / 2.0 + len;
 			return AABB(-Vector3(width, height, 0), Vector3(width * 2, height * 2, -len));
@@ -1056,6 +1080,8 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 		light_data.specular_amount = light->param[RSE::LIGHT_PARAM_SPECULAR] * 2.0;
 		light_data.volumetric_fog_energy = light->param[RSE::LIGHT_PARAM_VOLUMETRIC_FOG_ENERGY];
 		light_data.bake_mode = light->bake_mode;
+		light_data.pad[0] = 0.0f;
+		light_data.pad[1] = 0.0f;
 
 		float radius = MAX(0.001, light->param[RSE::LIGHT_PARAM_RANGE]);
 		light_data.inv_radius = 1.0 / radius;
@@ -1079,6 +1105,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 		float spot_angle = light->param[RSE::LIGHT_PARAM_SPOT_ANGLE];
 		light_data.cos_spot_angle = Math::cos(Math::deg_to_rad(spot_angle));
 		if (type == RSE::LIGHT_AREA) {
+			light_data.pad[0] = light->area_line_mode ? 1.0f : 0.0f;
 			Vector3 area_vec_a = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(1, 0, 0))).normalized() * area_size.x;
 			Vector3 area_vec_b = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(0, 1, 0))).normalized() * area_size.y;
 
@@ -1094,6 +1121,13 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 			if (light->area_normalize_energy) {
 				// normalization to make larger lights output same amount of light as smaller lights with same energy
 				float surface_area = area_size.x * area_size.y;
+				if (light->area_line_mode) {
+					float major_len = MAX(area_size.x, area_size.y);
+					float minor_len = MIN(area_size.x, area_size.y);
+					float effective_minor_len = MAX(minor_len, MAX(major_len * 0.0005f, 0.001f));
+					surface_area = major_len * effective_minor_len;
+				}
+				surface_area = MAX(surface_area, 0.00001f);
 				light_data.color[0] /= surface_area;
 				light_data.color[1] /= surface_area;
 				light_data.color[2] /= surface_area;

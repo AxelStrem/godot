@@ -181,6 +181,11 @@ AABB Light3D::get_aabb() const {
 		float len = param[PARAM_RANGE];
 
 		const AreaLight3D *l = Object::cast_to<const AreaLight3D>(this);
+		if (l->is_area_line_mode()) {
+			Vector2 area_size = l->get_area_size();
+			Vector3 half_extents = area_size.x >= area_size.y ? Vector3(area_size.x * 0.5f + len, len, len) : Vector3(len, area_size.y * 0.5f + len, len);
+			return AABB(-half_extents, half_extents * 2.0f);
+		}
 		float width = l->get_area_size().x / 2.0 + len;
 		float height = l->get_area_size().y / 2.0 + len;
 
@@ -740,6 +745,18 @@ bool AreaLight3D::is_area_normalizing_energy() const {
 	return area_normalize_energy;
 }
 
+void AreaLight3D::set_area_line_mode(bool p_enabled) {
+	area_line_mode = p_enabled;
+	RS::get_singleton()->light_area_set_line_mode(light, p_enabled);
+
+	update_gizmos();
+	update_configuration_warnings();
+}
+
+bool AreaLight3D::is_area_line_mode() const {
+	return area_line_mode;
+}
+
 AreaLight3D::AreaLight3D() :
 		Light3D(RSE::LIGHT_AREA) {
 	// Decrease the default shadow bias to better suit most scenes.
@@ -759,11 +776,14 @@ void AreaLight3D::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_area_normalize_energy", "enable"), &AreaLight3D::set_area_normalize_energy);
 	ClassDB::bind_method(D_METHOD("is_area_normalizing_energy"), &AreaLight3D::is_area_normalizing_energy);
+	ClassDB::bind_method(D_METHOD("set_area_line_mode", "enable"), &AreaLight3D::set_area_line_mode);
+	ClassDB::bind_method(D_METHOD("is_area_line_mode"), &AreaLight3D::is_area_line_mode);
 
 	ADD_GROUP("Area", "area_");
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "area_range", PROPERTY_HINT_RANGE, "0,4096,0.001,or_greater,exp,suffix:m"), "set_param", "get_param", PARAM_RANGE);
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "area_attenuation", PROPERTY_HINT_RANGE, "-10,10,0.001,or_greater,or_less"), "set_param", "get_param", PARAM_ATTENUATION);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "area_normalize_energy"), "set_area_normalize_energy", "is_area_normalizing_energy");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "area_line_mode"), "set_area_line_mode", "is_area_line_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "area_size", PROPERTY_HINT_LINK, "suffix:m"), "set_area_size", "get_area_size");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "area_texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D,-AnimatedTexture,-AtlasTexture,-CameraTexture,-CanvasTexture,-MeshTexture,-Texture2DRD,-ViewportTexture"), "set_area_texture", "get_area_texture");
 }
@@ -780,6 +800,9 @@ PackedStringArray AreaLight3D::get_configuration_warnings() const {
 
 	if (has_shadow() && OS::get_singleton()->get_current_rendering_method() == "gl_compatibility") {
 		warnings.push_back(RTR("Rendering area light shadows does not work in the Compatibility rendering mode."));
+	}
+	if (is_area_line_mode() && OS::get_singleton()->get_current_rendering_method() == "gl_compatibility") {
+		warnings.push_back(RTR("Area light line mode is only implemented in the Forward+ renderer."));
 	}
 
 	return warnings;

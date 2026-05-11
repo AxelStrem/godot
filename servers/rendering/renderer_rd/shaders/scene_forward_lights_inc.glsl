@@ -975,32 +975,81 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 #endif
 		inout hvec3 diffuse_light, inout hvec3 specular_light) {
 	half EPSILON = half(1e-7);
+	bool line_mode = area_lights.data[idx].pad[0] > 0.5;
 	hvec3 area_width = hvec3(area_lights.data[idx].area_width);
 	hvec3 area_height = hvec3(area_lights.data[idx].area_height);
 
-	if (dot(area_width, area_width) < EPSILON || dot(area_height, area_height) < EPSILON) { // area is 0
+	half width_len = length(area_width);
+	half height_len = length(area_height);
+
+	if ((!line_mode && (width_len < EPSILON || height_len < EPSILON)) || max(width_len, height_len) < EPSILON) {
 		return;
 	}
 
-	if (dot(area_lights.data[idx].direction, vertex - area_lights.data[idx].position) <= 0) {
+	hvec3 light_center = hvec3(area_lights.data[idx].position);
+	hvec3 light_to_vert = hvec3(vertex) - light_center;
+	hvec3 area_direction = hvec3(area_lights.data[idx].direction);
+
+	if (!line_mode && dot(area_direction, light_to_vert) <= 0) {
 		return; // vertex is behind light
 	}
 
-	half a_len = length(area_width);
-	half b_len = length(area_height);
-	half a_half_len = a_len / half(2.0);
-	half b_half_len = b_len / half(2.0);
-	hvec3 light_center = hvec3(area_lights.data[idx].position);
-	hvec3 light_to_vert = hvec3(vertex) - light_center;
-	hvec3 area_a_dir = normalize(area_width);
-	hvec3 area_b_dir = normalize(area_height);
-	hvec3 area_direction = hvec3(area_lights.data[idx].direction);
-	hvec3 pos_local_to_light = hvec3(dot(light_to_vert, area_a_dir), dot(light_to_vert, area_b_dir), dot(light_to_vert, -area_direction));
+	half a_len;
+	half b_len;
+	half a_half_len;
+	half b_half_len;
+	hvec3 area_a_dir;
+	hvec3 area_b_dir;
+	hvec3 closest_point_local_to_light;
+	hvec3 closest_light_point;
+	half dist;
 
-	hvec3 closest_point_local_to_light = hvec3(clamp(pos_local_to_light.x, -a_half_len, a_half_len), clamp(pos_local_to_light.y, -b_half_len, b_half_len), 0);
-	half dist = length(closest_point_local_to_light - pos_local_to_light);
+	if (line_mode) {
+		bool width_is_major = width_len >= height_len;
+		area_a_dir = normalize(width_is_major ? area_width : area_height);
+		a_len = width_is_major ? width_len : height_len;
+		half minor_len = width_is_major ? height_len : width_len;
 
-	half light_length = max(half(0.0), dist);
+		hvec3 radial_dir = light_to_vert - area_a_dir * dot(light_to_vert, area_a_dir);
+		if (dot(radial_dir, radial_dir) < EPSILON) {
+			radial_dir = normal - area_a_dir * dot(normal, area_a_dir);
+		}
+		if (dot(radial_dir, radial_dir) < EPSILON) {
+			radial_dir = eye_vec - area_a_dir * dot(eye_vec, area_a_dir);
+		}
+		if (dot(radial_dir, radial_dir) < EPSILON) {
+			radial_dir = abs(area_a_dir.z) < half(0.999) ? cross(area_a_dir, hvec3(0.0, 0.0, 1.0)) : cross(area_a_dir, hvec3(0.0, 1.0, 0.0));
+		}
+		area_b_dir = normalize(radial_dir);
+
+		b_len = max(minor_len, max(half(0.001), a_len * half(0.0005)));
+		a_half_len = a_len / half(2.0);
+		b_half_len = b_len / half(2.0);
+
+		half line_coord = clamp(dot(light_to_vert, area_a_dir), -a_half_len, a_half_len);
+		closest_point_local_to_light = hvec3(line_coord, half(0.0), half(0.0));
+		hvec3 closest_line_point = area_a_dir * line_coord;
+		hvec3 closest_offset = light_to_vert - closest_line_point;
+		dist = length(closest_offset);
+		closest_light_point = light_center + closest_line_point;
+
+		area_width = area_a_dir * a_len;
+		area_height = area_b_dir * b_len;
+	} else {
+		area_a_dir = normalize(area_width);
+		area_b_dir = normalize(area_height);
+		a_len = width_len;
+		b_len = height_len;
+		a_half_len = a_len / half(2.0);
+		b_half_len = b_len / half(2.0);
+
+		hvec3 pos_local_to_light = hvec3(dot(light_to_vert, area_a_dir), dot(light_to_vert, area_b_dir), dot(light_to_vert, -area_direction));
+		closest_point_local_to_light = hvec3(clamp(pos_local_to_light.x, -a_half_len, a_half_len), clamp(pos_local_to_light.y, -b_half_len, b_half_len), 0);
+		dist = length(closest_point_local_to_light - pos_local_to_light);
+		closest_light_point = light_center + area_a_dir * closest_point_local_to_light.x + area_b_dir * closest_point_local_to_light.y;
+	}
+
+	half light_length = max(dist, half(0.001));
 	half light_attenuation_raw = get_omni_attenuation(float(light_length), area_lights.data[idx].inv_radius, area_lights.data[idx].attenuation);
 	half light_attenuation_ltc = light_attenuation_raw * half(light_length * light_length); // solid angle already decreases by inverse square, so attenuation power is 2.0 by default -> subtract 2.0
 	half shadow = half(1.0);
@@ -1186,7 +1235,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	vec3 albedo_highp = vec3(albedo);
 	float alpha_highp = float(alpha);
 	vec3 normal_highp = vec3(normal);
-	vec3 light_highp = (light_center - vertex) / light_length;
+	vec3 light_highp = normalize(vec3(closest_light_point - hvec3(vertex)));
 	vec3 view_highp = vec3(eye_vec);
 	float specular_amount_highp = float(area_lights.data[idx].specular_amount);
 	vec3 light_color_highp = vec3(color);
