@@ -606,11 +606,11 @@ static int _pick_weighted_option(const SolvedElement &p_element, RandomPCG &p_rn
 	return enabled_options[enabled_options.size() - 1];
 }
 
-static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot) {
+static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, Vector<ConnectionBuild> *r_connection_preview = nullptr) {
 	SolveResult result;
 	SolveContext context;
 	String error;
-	if (!_build_solve_context(p_snapshot, context, nullptr, error)) {
+	if (!_build_solve_context(p_snapshot, context, r_connection_preview, error)) {
 		result.error = error;
 		return result;
 	}
@@ -991,11 +991,10 @@ bool WFCSolver::resolve() {
 		return false;
 	}
 	Vector<ConnectionBuild> preview_connections;
-	_build_connections(snapshot, preview_connections);
-	_apply_preview_connections(snapshot, preview_connections);
 
 	emit_signal(SNAME("solve_started"));
-	SolveResult result = _solve_snapshot(snapshot);
+	SolveResult result = _solve_snapshot(snapshot, &preview_connections);
+	_apply_preview_connections(snapshot, preview_connections);
 	last_error = result.error;
 	if (!result.success) {
 		emit_signal(SNAME("solve_completed"), false, last_error);
