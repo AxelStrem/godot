@@ -8,6 +8,7 @@
 
 #include "wfc_types.h"
 
+#include "core/config/engine.h"
 #include "core/object/class_db.h"
 
 HashMap<String, Ref<PackedScene>> WFCElement::nested_scene_cache;
@@ -257,6 +258,9 @@ void WFCElement::_bind_methods() {
 
 void WFCElement::_notification(int p_what) {
 	if (p_what == NOTIFICATION_SCENE_INSTANTIATED) {
+		if (Engine::get_singleton()->is_editor_hint()) {
+			return;
+		}
 		_capture_nested_scenes();
 	}
 }
