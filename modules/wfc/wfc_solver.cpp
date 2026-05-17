@@ -11,12 +11,20 @@
 #include "core/math/math_funcs.h"
 #include "core/math/random_pcg.h"
 #include "core/object/class_db.h"
-#include "core/object/object_db.h"
 #include "core/templates/hash_map.h"
 
 namespace {
 
 static const StringName WFC_NONE_CONNECTION = SNAME("none");
+
+static int _count_bits_u64(uint64_t p_value) {
+	int count = 0;
+	while (p_value != 0) {
+		p_value &= p_value - 1;
+		count++;
+	}
+	return count;
+}
 
 struct BitMask {
 	Vector<uint64_t> words;
@@ -48,7 +56,7 @@ struct BitMask {
 	int count_bits() const {
 		int count = 0;
 		for (int i = 0; i < words.size(); i++) {
-			count += uint64_t_count_bits(words[i]);
+			count += _count_bits_u64(words[i]);
 		}
 		return count;
 	}
@@ -168,12 +176,6 @@ struct SolveResult {
 	Vector<ObjectID> node_ids;
 	Vector<StringName> selected_options;
 	int connection_count = 0;
-};
-
-struct WFCSolver::AsyncJob {
-	AuthoringSnapshot snapshot;
-	SolveResult result;
-	bool wait_called = false;
 };
 
 struct SpatialKey {
@@ -548,6 +550,26 @@ static bool _build_solve_context(const AuthoringSnapshot &p_snapshot, SolveConte
 	return true;
 }
 
+static void _apply_preview_connections(const AuthoringSnapshot &p_snapshot, const Vector<ConnectionBuild> &p_connections) {
+	for (int element_index = 0; element_index < p_snapshot.elements.size(); element_index++) {
+		WFCElement *element = Object::cast_to<WFCElement>(ObjectDB::get_instance(p_snapshot.elements[element_index].node_id));
+		if (element != nullptr) {
+			element->clear_connected_neighbors();
+		}
+	}
+
+	for (int connection_index = 0; connection_index < p_connections.size(); connection_index++) {
+		const ConnectionBuild &connection = p_connections[connection_index];
+		WFCElement *from_element = Object::cast_to<WFCElement>(ObjectDB::get_instance(p_snapshot.elements[connection.from_index].node_id));
+		WFCElement *to_element = Object::cast_to<WFCElement>(ObjectDB::get_instance(p_snapshot.elements[connection.to_index].node_id));
+		if (from_element == nullptr || to_element == nullptr) {
+			continue;
+		}
+		from_element->set_connected_neighbor(connection.from_side, to_element);
+		to_element->set_connected_neighbor(connection.to_side, from_element);
+	}
+}
+
 static int _pick_weighted_option(const SolvedElement &p_element, RandomPCG &p_rng) {
 	float total_weight = 0.0f;
 	Vector<int> enabled_options;
@@ -706,12 +728,18 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot) {
 	return result;
 }
 
-static void _solve_async_task(void *p_userdata) {
-	WFCSolver::AsyncJob *job = static_cast<WFCSolver::AsyncJob *>(p_userdata);
+} // namespace
+
+struct WFCSolver::AsyncJob {
+	AuthoringSnapshot snapshot;
+	SolveResult result;
+	bool wait_called = false;
+};
+
+void WFCSolver::_solve_async_task(void *p_userdata) {
+	AsyncJob *job = static_cast<AsyncJob *>(p_userdata);
 	job->result = _solve_snapshot(job->snapshot);
 }
-
-} // namespace
 
 void WFCSolver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_catalog_set", "catalog_set"), &WFCSolver::set_catalog_set);
@@ -801,7 +829,7 @@ static bool _build_authoring_snapshot(HashSet<ObjectID> &p_tracked_elements, con
 				continue;
 			}
 			AuthoringNeighbor snapshot_neighbor;
-			snapshot_neighbor.name = neighbor->get_name();
+			snapshot_neighbor.name = neighbor->get_side_name();
 			snapshot_neighbor.inv_name = neighbor->get_inv_name();
 			snapshot_neighbor.type = neighbor->get_type();
 			snapshot_neighbor.offset = neighbor->get_offset();
@@ -941,6 +969,7 @@ int WFCSolver::connect_neighbors() {
 		last_error = error;
 		return 0;
 	}
+	_apply_preview_connections(snapshot, preview_connections);
 	last_error = String();
 	return preview_connections.size();
 }
@@ -961,6 +990,9 @@ bool WFCSolver::resolve() {
 		emit_signal(SNAME("solve_completed"), false, last_error);
 		return false;
 	}
+	Vector<ConnectionBuild> preview_connections;
+	_build_connections(snapshot, preview_connections);
+	_apply_preview_connections(snapshot, preview_connections);
 
 	emit_signal(SNAME("solve_started"));
 	SolveResult result = _solve_snapshot(snapshot);
@@ -999,10 +1031,13 @@ Error WFCSolver::resolve_async() {
 		emit_signal(SNAME("solve_completed"), false, last_error);
 		return ERR_CANT_CREATE;
 	}
+	Vector<ConnectionBuild> preview_connections;
+	_build_connections(snapshot, preview_connections);
+	_apply_preview_connections(snapshot, preview_connections);
 
 	async_job = memnew(AsyncJob);
 	async_job->snapshot = snapshot;
-	async_task_id = WorkerThreadPool::get_singleton()->add_native_task(&_solve_async_task, async_job, true, SNAME("WFCSolver"));
+	async_task_id = WorkerThreadPool::get_singleton()->add_native_task(&WFCSolver::_solve_async_task, async_job, true, SNAME("WFCSolver"));
 	set_process(true);
 	emit_signal(SNAME("solve_started"));
 	return OK;

@@ -129,8 +129,8 @@ Ref<PackedScene> WFCParam::get_scene() const {
 }
 
 void WFCNeighbor::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("set_name", "name"), &WFCNeighbor::set_name);
-	ClassDB::bind_method(D_METHOD("get_name"), &WFCNeighbor::get_name);
+	ClassDB::bind_method(D_METHOD("set_side_name", "name"), &WFCNeighbor::set_side_name);
+	ClassDB::bind_method(D_METHOD("get_side_name"), &WFCNeighbor::get_side_name);
 	ClassDB::bind_method(D_METHOD("set_inv_name", "inv_name"), &WFCNeighbor::set_inv_name);
 	ClassDB::bind_method(D_METHOD("get_inv_name"), &WFCNeighbor::get_inv_name);
 	ClassDB::bind_method(D_METHOD("set_type", "type"), &WFCNeighbor::set_type);
@@ -148,7 +148,7 @@ void WFCNeighbor::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_primary", "primary"), &WFCNeighbor::set_primary);
 	ClassDB::bind_method(D_METHOD("is_primary"), &WFCNeighbor::is_primary);
 
-	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "name"), "set_name", "get_name");
+	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "name"), "set_side_name", "get_side_name");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "inv_name"), "set_inv_name", "get_inv_name");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "type"), "set_type", "get_type");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "offset"), "set_offset", "get_offset");
@@ -159,11 +159,11 @@ void WFCNeighbor::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "primary"), "set_primary", "is_primary");
 }
 
-void WFCNeighbor::set_name(const StringName &p_name) {
+void WFCNeighbor::set_side_name(const StringName &p_name) {
 	name = p_name;
 }
 
-StringName WFCNeighbor::get_name() const {
+StringName WFCNeighbor::get_side_name() const {
 	return name;
 }
 
@@ -241,11 +241,13 @@ void WFCElement::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_selected_option", "selected_option"), &WFCElement::set_selected_option);
 	ClassDB::bind_method(D_METHOD("get_selected_option"), &WFCElement::get_selected_option);
 	ClassDB::bind_method(D_METHOD("get_enabled_options"), &WFCElement::get_enabled_options);
+	ClassDB::bind_method(D_METHOD("has_connected_neighbor", "side_name"), &WFCElement::has_connected_neighbor);
+	ClassDB::bind_method(D_METHOD("get_connected_neighbor", "side_name"), &WFCElement::get_connected_neighbor);
 	ClassDB::bind_method(D_METHOD("apply_selected_option", "option"), &WFCElement::apply_selected_option);
 	ClassDB::bind_method(D_METHOD("clear_materialized"), &WFCElement::clear_materialized);
 	ClassDB::bind_method(D_METHOD("materialize"), &WFCElement::materialize);
 	ClassDB::bind_method(D_METHOD("post_materialize"), &WFCElement::post_materialize);
-	GDVIRTUAL_BIND(post_materialize);
+	GDVIRTUAL_BIND(_post_materialize);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "type"), "set_type", "get_type");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "options", PROPERTY_HINT_ARRAY_TYPE, MAKE_RESOURCE_TYPE_HINT("WFCParam")), "set_options", "get_options");
@@ -267,12 +269,12 @@ void WFCElement::_capture_nested_scenes() {
 			continue;
 		}
 
-		Variant metadata = child->get_meta("wfc");
-		if (metadata.get_type() != Variant::STRING_NAME && metadata.get_type() != Variant::STRING) {
+		Variant meta_value = child->get_meta("wfc");
+		if (meta_value.get_type() != Variant::STRING_NAME && meta_value.get_type() != Variant::STRING) {
 			continue;
 		}
 
-		StringName scene_name = metadata;
+		StringName scene_name = meta_value;
 		String cache_key = String(type) + "/" + String(scene_name);
 		Ref<PackedScene> packed_scene;
 		if (nested_scene_cache.has(cache_key)) {
@@ -307,16 +309,28 @@ StringName WFCElement::get_type() const {
 	return type;
 }
 
-void WFCElement::set_options(const TypedArray<WFCParam> &p_options) {
-	options = p_options;
+void WFCElement::set_options(const Array &p_options) {
+	options.clear();
+	for (int i = 0; i < p_options.size(); i++) {
+		Ref<WFCParam> option = p_options[i];
+		if (option.is_valid()) {
+			options.append(option);
+		}
+	}
 }
 
 TypedArray<WFCParam> WFCElement::get_options() const {
 	return options;
 }
 
-void WFCElement::set_neighbor_points(const TypedArray<WFCNeighbor> &p_neighbor_points) {
-	neighbor_points = p_neighbor_points;
+void WFCElement::set_neighbor_points(const Array &p_neighbor_points) {
+	neighbor_points.clear();
+	for (int i = 0; i < p_neighbor_points.size(); i++) {
+		Ref<WFCNeighbor> neighbor = p_neighbor_points[i];
+		if (neighbor.is_valid()) {
+			neighbor_points.append(neighbor);
+		}
+	}
 }
 
 TypedArray<WFCNeighbor> WFCElement::get_neighbor_points() const {
@@ -340,6 +354,29 @@ PackedStringArray WFCElement::get_enabled_options() const {
 		}
 	}
 	return enabled_options;
+}
+
+void WFCElement::clear_connected_neighbors() {
+	connected_neighbors.clear();
+}
+
+void WFCElement::set_connected_neighbor(const StringName &p_side_name, WFCElement *p_element) {
+	if (p_element == nullptr) {
+		connected_neighbors.erase(p_side_name);
+		return;
+	}
+	connected_neighbors.insert(p_side_name, p_element->get_instance_id());
+}
+
+bool WFCElement::has_connected_neighbor(const StringName &p_side_name) const {
+	return connected_neighbors.has(p_side_name) && ObjectDB::get_instance(connected_neighbors[p_side_name]) != nullptr;
+}
+
+WFCElement *WFCElement::get_connected_neighbor(const StringName &p_side_name) const {
+	if (!connected_neighbors.has(p_side_name)) {
+		return nullptr;
+	}
+	return Object::cast_to<WFCElement>(ObjectDB::get_instance(connected_neighbors[p_side_name]));
 }
 
 bool WFCElement::apply_selected_option(const StringName &p_option) {
@@ -397,5 +434,5 @@ void WFCElement::materialize() {
 }
 
 void WFCElement::post_materialize() {
-	GDVIRTUAL_CALL(post_materialize);
+	GDVIRTUAL_CALL(_post_materialize);
 }
