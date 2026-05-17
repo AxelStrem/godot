@@ -413,6 +413,13 @@ void WFCElement::clear_materialized() {
 
 void WFCElement::materialize() {
 	clear_materialized();
+	for (int i = 0; i < get_child_count(); i++) {
+		Node *child = get_child(i);
+		if (child != nullptr && child->has_meta("wfc")) {
+			_capture_nested_scenes();
+			break;
+		}
+	}
 	if (selected_option.is_empty()) {
 		return;
 	}

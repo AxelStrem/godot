@@ -724,6 +724,11 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, Vector<C
 				break;
 			}
 		}
+		if (result.selected_options[element_index].is_empty()) {
+			result.success = false;
+			result.error = vformat("WFC solver failed to export a selected option for element type '%s'.", String(type_data.name));
+			return result;
+		}
 	}
 	return result;
 }
@@ -868,7 +873,7 @@ void WFCSolver::_finish_async_job() {
 		for (int i = 0; i < async_job->result.node_ids.size(); i++) {
 			WFCElement *element = Object::cast_to<WFCElement>(ObjectDB::get_instance(async_job->result.node_ids[i]));
 			if (element != nullptr) {
-				element->apply_selected_option(async_job->result.selected_options[i]);
+				element->set_selected_option(async_job->result.selected_options[i]);
 			}
 		}
 		if (auto_materialize) {
@@ -1004,7 +1009,7 @@ bool WFCSolver::resolve() {
 	for (int i = 0; i < result.node_ids.size(); i++) {
 		WFCElement *element = Object::cast_to<WFCElement>(ObjectDB::get_instance(result.node_ids[i]));
 		if (element != nullptr) {
-			element->apply_selected_option(result.selected_options[i]);
+			element->set_selected_option(result.selected_options[i]);
 		}
 	}
 	if (auto_materialize) {
@@ -1043,6 +1048,12 @@ Error WFCSolver::resolve_async() {
 }
 
 void WFCSolver::materialize() {
+	if (async_job != nullptr) {
+		last_error = "WFCSolver cannot materialize while an async solve is still in progress.";
+		ERR_PRINT(last_error);
+		return;
+	}
+
 	Vector<WFCElement *> elements;
 	for (const ObjectID &element_id : tracked_elements) {
 		WFCElement *element = Object::cast_to<WFCElement>(ObjectDB::get_instance(element_id));
@@ -1054,6 +1065,9 @@ void WFCSolver::materialize() {
 		elements[i]->materialize();
 	}
 	for (int i = 0; i < elements.size(); i++) {
+		if (elements[i]->get_selected_option().is_empty()) {
+			continue;
+		}
 		elements[i]->post_materialize();
 	}
 }
