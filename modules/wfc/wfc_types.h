@@ -85,8 +85,8 @@ protected:
 	static void _bind_methods();
 
 public:
-	void set_name(const StringName &p_name);
-	StringName get_name() const;
+	void set_side_name(const StringName &p_name);
+	StringName get_side_name() const;
 
 	void set_inv_name(const StringName &p_name);
 	StringName get_inv_name() const;
@@ -121,6 +121,7 @@ class WFCElement : public Node3D {
 	TypedArray<WFCNeighbor> neighbor_points;
 	StringName selected_option;
 	HashMap<StringName, Ref<PackedScene>> nested_scenes;
+	HashMap<StringName, ObjectID> connected_neighbors;
 	static HashMap<String, Ref<PackedScene>> nested_scene_cache;
 	Vector<ObjectID> materialized_children;
 
@@ -129,22 +130,26 @@ class WFCElement : public Node3D {
 protected:
 	static void _bind_methods();
 	void _notification(int p_what);
-	GDVIRTUAL0(post_materialize);
+	GDVIRTUAL0(_post_materialize);
 
 public:
 	void set_type(const StringName &p_type);
 	StringName get_type() const;
 
-	void set_options(const TypedArray<WFCParam> &p_options);
+	void set_options(const Array &p_options);
 	TypedArray<WFCParam> get_options() const;
 
-	void set_neighbor_points(const TypedArray<WFCNeighbor> &p_neighbor_points);
+	void set_neighbor_points(const Array &p_neighbor_points);
 	TypedArray<WFCNeighbor> get_neighbor_points() const;
 
 	void set_selected_option(const StringName &p_selected_option);
 	StringName get_selected_option() const;
 
 	PackedStringArray get_enabled_options() const;
+	void clear_connected_neighbors();
+	void set_connected_neighbor(const StringName &p_side_name, WFCElement *p_element);
+	bool has_connected_neighbor(const StringName &p_side_name) const;
+	WFCElement *get_connected_neighbor(const StringName &p_side_name) const;
 	bool apply_selected_option(const StringName &p_option);
 	void clear_materialized();
 	void materialize();

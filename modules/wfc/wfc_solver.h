@@ -30,6 +30,7 @@ class WFCSolver : public Node {
 	AsyncJob *async_job = nullptr;
 	WorkerThreadPool::TaskID async_task_id = WorkerThreadPool::INVALID_TASK_ID;
 
+	static void _solve_async_task(void *p_userdata);
 	void _add_branch_recursive(Node *p_node);
 	void _finish_async_job();
 	void _clear_async_job();
