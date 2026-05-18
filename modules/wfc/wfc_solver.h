@@ -26,6 +26,7 @@ class WFCSolver : public Node {
 	float cell_size = 4.0f;
 	uint64_t seed = 0;
 	bool auto_materialize = false;
+	uint64_t materialize_pass_id = 0;
 	String last_error;
 	AsyncJob *async_job = nullptr;
 	WorkerThreadPool::TaskID async_task_id = WorkerThreadPool::INVALID_TASK_ID;
