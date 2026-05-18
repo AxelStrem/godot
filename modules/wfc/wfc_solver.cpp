@@ -18,6 +18,7 @@
 namespace {
 
 static const StringName WFC_NONE_CONNECTION = SNAME("none");
+static const StringName WFC_MATERIALIZE_PASS_META = SNAME("_wfc_materialize_pass");
 static constexpr int WFC_LOOKUP_RANGE = 3;
 
 static double _usec_to_msec(uint64_t p_usec) {
@@ -1114,11 +1115,13 @@ void WFCSolver::materialize() {
 		ERR_PRINT(last_error);
 		return;
 	}
+	materialize_pass_id++;
 
 	Vector<WFCElement *> elements;
 	for (const ObjectID &element_id : tracked_elements) {
 		WFCElement *element = Object::cast_to<WFCElement>(ObjectDB::get_instance(element_id));
 		if (element != nullptr) {
+			element->set_meta(WFC_MATERIALIZE_PASS_META, int64_t(materialize_pass_id));
 			elements.push_back(element);
 		}
 	}
