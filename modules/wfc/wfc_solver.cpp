@@ -16,6 +16,7 @@
 namespace {
 
 static const StringName WFC_NONE_CONNECTION = SNAME("none");
+static constexpr int WFC_LOOKUP_RANGE = 3;
 
 static int _count_bits_u64(uint64_t p_value) {
 	int count = 0;
@@ -232,23 +233,19 @@ static int _build_connections(const AuthoringSnapshot &p_snapshot, Vector<Connec
 	for (int element_index = 0; element_index < p_snapshot.elements.size(); element_index++) {
 		const AuthoringElement &element = p_snapshot.elements[element_index];
 		Transform3D inverse = element.global_transform.affine_inverse();
+		SpatialKey element_key = _make_spatial_key(element.global_transform.origin, p_snapshot.cell_size);
 		for (int neighbor_index = 0; neighbor_index < element.neighbors.size(); neighbor_index++) {
 			const AuthoringNeighbor &neighbor = element.neighbors[neighbor_index];
 			if (!neighbor.primary) {
 				continue;
 			}
 
-			Vector3 expected_position = element.global_transform.xform(neighbor.offset);
-			SpatialKey expected_key = _make_spatial_key(expected_position, p_snapshot.cell_size);
-			float wobble_radius = Math::sqrt(MAX(neighbor.wobble, 0.0f));
-			int margin = MAX(1, int(Math::ceil(wobble_radius / p_snapshot.cell_size)));
-
 			int best_match = -1;
 			float best_distance = FLT_MAX;
 
-			for (int x = expected_key.x - margin; x <= expected_key.x + margin; x++) {
-				for (int y = expected_key.y - margin; y <= expected_key.y + margin; y++) {
-					for (int z = expected_key.z - margin; z <= expected_key.z + margin; z++) {
+			for (int x = element_key.x - WFC_LOOKUP_RANGE; x <= element_key.x + WFC_LOOKUP_RANGE; x++) {
+				for (int y = element_key.y - WFC_LOOKUP_RANGE; y <= element_key.y + WFC_LOOKUP_RANGE; y++) {
+					for (int z = element_key.z - WFC_LOOKUP_RANGE; z <= element_key.z + WFC_LOOKUP_RANGE; z++) {
 						SpatialKey candidate_key;
 						candidate_key.x = x;
 						candidate_key.y = y;
