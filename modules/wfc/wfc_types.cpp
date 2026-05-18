@@ -13,6 +13,42 @@
 
 HashMap<String, Ref<PackedScene>> WFCElement::nested_scene_cache;
 
+namespace {
+
+static void _normalize_packed_scene_ownership(Node *p_node, Node *p_root) {
+	if (p_node == p_root) {
+		p_node->set_owner(nullptr);
+	} else {
+		p_node->set_owner(p_root);
+	}
+
+	for (int i = 0; i < p_node->get_child_count(); i++) {
+		_normalize_packed_scene_ownership(p_node->get_child(i), p_root);
+	}
+}
+
+static Ref<PackedScene> _pack_wfc_variant(Node *p_node) {
+	ERR_FAIL_NULL_V(p_node, Ref<PackedScene>());
+
+	Node *duplicate = p_node->duplicate(Node::DUPLICATE_DEFAULT | Node::DUPLICATE_INTERNAL_STATE);
+	ERR_FAIL_NULL_V(duplicate, Ref<PackedScene>());
+
+	_normalize_packed_scene_ownership(duplicate, duplicate);
+
+	Ref<PackedScene> packed_scene;
+	packed_scene.instantiate();
+	Error err = packed_scene->pack(duplicate);
+	memdelete(duplicate);
+
+	if (err != OK) {
+		packed_scene.unref();
+	}
+
+	return packed_scene;
+}
+
+} // namespace
+
 void WFCCatalog::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_rules", "rules"), &WFCCatalog::set_rules);
 	ClassDB::bind_method(D_METHOD("get_rules"), &WFCCatalog::get_rules);
@@ -284,11 +320,8 @@ void WFCElement::_capture_nested_scenes() {
 		if (nested_scene_cache.has(cache_key)) {
 			packed_scene = nested_scene_cache[cache_key];
 		} else {
-			packed_scene.instantiate();
-			Error err = packed_scene->pack(child);
-			if (err != OK) {
-				packed_scene.unref();
-			} else {
+			packed_scene = _pack_wfc_variant(child);
+			if (packed_scene.is_valid()) {
 				nested_scene_cache.insert(cache_key, packed_scene);
 			}
 		}
