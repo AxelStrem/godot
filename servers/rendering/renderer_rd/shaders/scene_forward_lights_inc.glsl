@@ -953,7 +953,6 @@ void light_process_spot(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 
 			diffuse_light, specular_light);
 }
-
 // implementation of area lights with Linearly Transformed Cosines (LTC): https://eheitzresearch.wordpress.com/415-2/
 void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3 vertex_ddx, vec3 vertex_ddy, hvec3 f0, half roughness, half metallic, float taa_frame_count, hvec3 albedo, inout half alpha, vec2 screen_uv, hvec3 energy_compensation,
 #ifdef LIGHT_BACKLIGHT_USED
@@ -989,7 +988,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	hvec3 light_center = hvec3(area_lights.data[idx].position);
 	hvec3 light_to_vert = hvec3(vertex) - light_center;
 	hvec3 area_direction = hvec3(area_lights.data[idx].direction);
-	hvec3 camera_position = hvec3(scene_data_block.data.inv_view_matrix[0].w, scene_data_block.data.inv_view_matrix[1].w, scene_data_block.data.inv_view_matrix[2].w);
+	vec3 points[4];
 
 	if (!line_mode && dot(area_direction, light_to_vert) <= 0) {
 		return; // vertex is behind light
@@ -1003,6 +1002,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	hvec3 area_b_dir;
 	hvec3 closest_point_local_to_light;
 	hvec3 closest_light_point;
+	vec3 line_points[2];
 	half dist;
 	half attenuation_distance;
 
@@ -1012,33 +1012,41 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		a_len = width_is_major ? width_len : height_len;
 		half minor_len = width_is_major ? height_len : width_len;
 
-		hvec3 billboard_dir = camera_position - light_center;
-		billboard_dir -= area_a_dir * dot(billboard_dir, area_a_dir);
-		if (dot(billboard_dir, billboard_dir) < EPSILON) {
-			billboard_dir = normal - area_a_dir * dot(normal, area_a_dir);
-		}
-		if (dot(billboard_dir, billboard_dir) < EPSILON) {
-			billboard_dir = eye_vec - area_a_dir * dot(eye_vec, area_a_dir);
-		}
-		if (dot(billboard_dir, billboard_dir) < EPSILON) {
-			billboard_dir = abs(area_a_dir.z) < half(0.999) ? cross(area_a_dir, hvec3(0.0, 0.0, 1.0)) : cross(area_a_dir, hvec3(0.0, 1.0, 0.0));
-		}
-		area_b_dir = normalize(billboard_dir);
-
 		b_len = max(minor_len, max(half(0.001), a_len * half(0.0005)));
 		a_half_len = a_len / half(2.0);
 		b_half_len = b_len / half(2.0);
 
-		half line_coord = clamp(dot(light_to_vert, area_a_dir), -a_half_len, a_half_len);
-		closest_point_local_to_light = hvec3(line_coord, half(0.0), half(0.0));
-		hvec3 closest_line_point = area_a_dir * line_coord;
-		hvec3 closest_offset = light_to_vert - closest_line_point;
-		dist = length(closest_offset);
-		closest_light_point = light_center + closest_line_point;
-		attenuation_distance = length(light_to_vert);
+		mat3 cosine_basis = ltc_get_matrix(vec3(normal), vec3(eye_vec), mat3(1.0));
+		mat3 cosine_basis_inv = transpose(cosine_basis);
+		line_points[0] = vec3(light_center - area_a_dir * a_half_len - hvec3(vertex));
+		line_points[1] = vec3(light_center + area_a_dir * a_half_len - hvec3(vertex));
+		vec3 line_start_cosine = cosine_basis * line_points[0];
+		vec3 line_end_cosine = cosine_basis * line_points[1];
+		vec3 line_dir_cosine = normalize(line_end_cosine - line_start_cosine);
 
-		area_width = area_a_dir * a_len;
-		area_height = area_b_dir * b_len;
+		float line_coord = clamp(dot(-line_start_cosine, line_dir_cosine), 0.0, float(a_len));
+		vec3 closest_line_point_cosine = line_start_cosine + line_dir_cosine * line_coord;
+		vec3 billboard_dir_cosine = vec3(0.0, 1.0, 0.0);
+		billboard_dir_cosine -= line_dir_cosine * dot(billboard_dir_cosine, line_dir_cosine);
+		if (dot(billboard_dir_cosine, billboard_dir_cosine) < 1e-8) {
+			billboard_dir_cosine = abs(line_dir_cosine.x) < 0.999 ? cross(vec3(1.0, 0.0, 0.0), line_dir_cosine) : cross(vec3(0.0, 0.0, 1.0), line_dir_cosine);
+		}
+		billboard_dir_cosine = normalize(billboard_dir_cosine);
+		area_b_dir = hvec3(cosine_basis_inv * billboard_dir_cosine);
+
+		float width_coord = clamp(dot(-closest_line_point_cosine, billboard_dir_cosine), -float(b_half_len), float(b_half_len));
+		vec3 width_offset_cosine = billboard_dir_cosine * float(b_half_len);
+		vec3 closest_rect_point_cosine = closest_line_point_cosine + billboard_dir_cosine * width_coord;
+
+		points[0] = cosine_basis_inv * (line_start_cosine - width_offset_cosine);
+		points[1] = cosine_basis_inv * (line_end_cosine - width_offset_cosine);
+		points[2] = cosine_basis_inv * (line_end_cosine + width_offset_cosine);
+		points[3] = cosine_basis_inv * (line_start_cosine + width_offset_cosine);
+
+		closest_point_local_to_light = hvec3(half(line_coord) - a_half_len, half(width_coord), half(0.0));
+		dist = half(length(closest_rect_point_cosine));
+		closest_light_point = hvec3(vertex) + hvec3(cosine_basis_inv * closest_rect_point_cosine);
+		attenuation_distance = dist;
 	} else {
 		area_a_dir = normalize(area_width);
 		area_b_dir = normalize(area_height);
@@ -1052,6 +1060,13 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		dist = length(closest_point_local_to_light - pos_local_to_light);
 		closest_light_point = light_center + area_a_dir * closest_point_local_to_light.x + area_b_dir * closest_point_local_to_light.y;
 		attenuation_distance = dist;
+
+		hvec3 h_area_width = area_width / half(2.0);
+		hvec3 h_area_height = area_height / half(2.0);
+		points[0] = area_lights.data[idx].position - h_area_width - h_area_height - vertex;
+		points[1] = area_lights.data[idx].position + h_area_width - h_area_height - vertex;
+		points[2] = area_lights.data[idx].position + h_area_width + h_area_height - vertex;
+		points[3] = area_lights.data[idx].position - h_area_width + h_area_height - vertex;
 	}
 
 	half light_length = max(attenuation_distance, half(0.001));
@@ -1179,17 +1194,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	light_attenuation_ltc = light_attenuation_ltc * shadow;
 	half light_attenuation = light_attenuation_raw * shadow;
 	hvec3 color = hvec3(area_lights.data[idx].color);
-	hvec3 line_light_rel_vec = light_center - hvec3(vertex);
-	hvec3 line_light_dir = dot(line_light_rel_vec, line_light_rel_vec) > EPSILON ? normalize(line_light_rel_vec) : -area_direction;
 	float max_mipmap = area_lights.data[idx].cone_angle;
-
-	vec3 points[4];
-	hvec3 h_area_width = area_width / half(2.0);
-	hvec3 h_area_height = area_height / half(2.0);
-	points[0] = area_lights.data[idx].position - h_area_width - h_area_height - vertex;
-	points[1] = area_lights.data[idx].position + h_area_width - h_area_height - vertex;
-	points[2] = area_lights.data[idx].position + h_area_width + h_area_height - vertex;
-	points[3] = area_lights.data[idx].position - h_area_width + h_area_height - vertex;
 
 	float ltc_diffuse = 0.0;
 	vec3 ltc_diffuse_tex_color = vec3(1.0);
@@ -1197,10 +1202,18 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	vec3 ltc_specular_tex_color = vec3(1.0);
 	vec2 ltc_fresnel = vec2(0.0);
 	hvec3 fresnel_color = hvec3(0.0);
-	ltc_evaluate(vec3(normal), vec3(eye_vec), mat3(1), points, area_lights.data[idx].projector_rect, max_mipmap, area_light_atlas, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP, ltc_diffuse, ltc_diffuse_tex_color);
+	if (line_mode) {
+		ltc_evaluate_line(vec3(normal), vec3(eye_vec), mat3(1), line_points, float(b_half_len), area_lights.data[idx].projector_rect, max_mipmap, area_light_atlas, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP, ltc_diffuse, ltc_diffuse_tex_color);
+	} else {
+		ltc_evaluate(vec3(normal), vec3(eye_vec), mat3(1), points, area_lights.data[idx].projector_rect, max_mipmap, area_light_atlas, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP, ltc_diffuse, ltc_diffuse_tex_color);
+	}
 
 #if !defined(SPECULAR_DISABLED) || (defined(LIGHT_CODE_USED) && defined(AREA_LIGHT_CODE_USED))
-	ltc_evaluate_specular(vec3(normal), vec3(eye_vec), roughness, points, area_lights.data[idx].projector_rect, max_mipmap, area_light_atlas, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP, ltc_lut1, ltc_lut2, ltc_specular, ltc_fresnel, ltc_specular_tex_color);
+	if (line_mode) {
+		ltc_evaluate_specular_line(vec3(normal), vec3(eye_vec), roughness, line_points, float(b_half_len), area_lights.data[idx].projector_rect, max_mipmap, area_light_atlas, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP, ltc_lut1, ltc_lut2, ltc_specular, ltc_fresnel, ltc_specular_tex_color);
+	} else {
+		ltc_evaluate_specular(vec3(normal), vec3(eye_vec), roughness, points, area_lights.data[idx].projector_rect, max_mipmap, area_light_atlas, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP, ltc_lut1, ltc_lut2, ltc_specular, ltc_fresnel, ltc_specular_tex_color);
+	}
 	half f90 = clamp(dot(f0, hvec3(50.0 * 0.33)), metallic, half(1.0));
 	fresnel_color = f0 * max(half(ltc_fresnel.x), half(0.0)) + (f90 - f0) * max(half(ltc_fresnel.y), half(0.0));
 #endif
@@ -1264,28 +1277,6 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	half specular_amount = half(area_lights.data[idx].specular_amount);
 	half area = a_len * b_len;
 	half cc_attenuation = half(1.0);
-	if (line_mode) {
-		light_compute(normal, line_light_dir, eye_vec, half(0.0), color, false, light_attenuation, f0, roughness, metallic, half(0.0), albedo, alpha, screen_uv, energy_compensation,
-#ifdef LIGHT_BACKLIGHT_USED
-				backlight,
-#endif
-#ifdef LIGHT_TRANSMITTANCE_USED
-				transmittance_color,
-				transmittance_depth,
-				transmittance_boost,
-				transmittance_depth,
-#endif
-#ifdef LIGHT_RIM_USED
-				rim, rim_tint,
-#endif
-#ifdef LIGHT_CLEARCOAT_USED
-				clearcoat, clearcoat_roughness, vertex_normal,
-#endif
-#ifdef LIGHT_ANISOTROPY_USED
-				B, T, anisotropy,
-#endif
-				diffuse_light, specular_light);
-	}
 
 #if defined(LIGHT_TRANSMITTANCE_USED) || defined(LIGHT_BACKLIGHT_USED) || defined(LIGHT_RIM_USED) || defined(DIFFUSE_TOON)
 	hvec3 isotropic_light_color = hvec3(1.0); // independent of normal
@@ -1342,17 +1333,25 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	vec3 cc_specular_tex_color = vec3(1.0);
 	float cc_specular_ltc = 0.0;
 	vec2 cc_fresnel;
-	ltc_evaluate_specular(vec3(vertex_normal), vec3(eye_vec), sqrt(mix(0.001, 0.1, float(clearcoat_roughness))), points, area_lights.data[idx].projector_rect, max_mipmap, area_light_atlas, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP, ltc_lut1, ltc_lut2, cc_specular_ltc, cc_fresnel, cc_specular_tex_color);
+	if (line_mode) {
+		ltc_evaluate_specular_line(vec3(vertex_normal), vec3(eye_vec), sqrt(mix(0.001, 0.1, float(clearcoat_roughness))), line_points, float(b_half_len), area_lights.data[idx].projector_rect, max_mipmap, area_light_atlas, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP, ltc_lut1, ltc_lut2, cc_specular_ltc, cc_fresnel, cc_specular_tex_color);
+	} else {
+		ltc_evaluate_specular(vec3(vertex_normal), vec3(eye_vec), sqrt(mix(0.001, 0.1, float(clearcoat_roughness))), points, area_lights.data[idx].projector_rect, max_mipmap, area_light_atlas, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP, ltc_lut1, ltc_lut2, cc_specular_ltc, cc_fresnel, cc_specular_tex_color);
+	}
 	half Fr = half(0.04) * max(half(cc_fresnel.x), half(0.0)) + half(1.0 - 0.04) * max(half(cc_fresnel.y), half(0.0)) * clearcoat;
 	cc_attenuation = half(1.0) - Fr;
 	specular_light += half(cc_specular_ltc) * hvec3(cc_specular_tex_color) * Fr * color * light_attenuation_ltc * specular_amount;
 #endif // LIGHT_CLEARCOAT_USED
 
-	if (!line_mode && metallic < half(1.0)) {
+	if (metallic < half(1.0)) {
 #if defined(DIFFUSE_TOON)
 		float backface_ltc_diffuse = 0.0;
 		vec3 backface_ltc_tex_color_discard = vec3(1.0);
-		ltc_evaluate(vec3(-normal), vec3(eye_vec), mat3(1), points, vec4(0.0), max_mipmap, area_light_atlas, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP, backface_ltc_diffuse, backface_ltc_tex_color_discard);
+		if (line_mode) {
+			ltc_evaluate_line(vec3(-normal), vec3(eye_vec), mat3(1), line_points, float(b_half_len), vec4(0.0), max_mipmap, area_light_atlas, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP, backface_ltc_diffuse, backface_ltc_tex_color_discard);
+		} else {
+			ltc_evaluate(vec3(-normal), vec3(eye_vec), mat3(1), points, vec4(0.0), max_mipmap, area_light_atlas, SAMPLER_LINEAR_WITH_MIPMAPS_CLAMP, backface_ltc_diffuse, backface_ltc_tex_color_discard);
+		}
 		half NdotL = half((ltc_diffuse - backface_ltc_diffuse) / (max(solid_angle, 0.001) / M_PI));
 		half diffuse_brdf_NL = smoothstep(-roughness, max(roughness, half(0.01)), NdotL) * half(1.0 / M_PI);
 		diffuse_light += diffuse_brdf_NL * isotropic_light_color * color * area * light_attenuation * cc_attenuation;
@@ -1361,8 +1360,10 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 #endif // DIFFUSE_TOON
 
 #if defined(LIGHT_BACKLIGHT_USED)
-		// backlight can't use ltc_diffuse_tex_color, because for backface pixels texture would have to sampled for opposite normal direction.
-		diffuse_light += color * max(half(solid_angle / M_PI) - half(ltc_diffuse), half(0.0)) * backlight * isotropic_light_color * light_attenuation_ltc;
+		if (!line_mode) {
+			// backlight can't use ltc_diffuse_tex_color, because for backface pixels texture would have to sampled for opposite normal direction.
+			diffuse_light += color * max(half(solid_angle / M_PI) - half(ltc_diffuse), half(0.0)) * backlight * isotropic_light_color * light_attenuation_ltc;
+		}
 #endif
 	}
 

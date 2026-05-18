@@ -216,28 +216,47 @@ float ltc_integrate_clipped_quad(vec3 L[5], vec3 L_proj[5], int vertices_above_h
 	return abs(I);
 }
 
-void ltc_evaluate(vec3 normal, vec3 eye_vec, mat3 M_inv, vec3 points[4], vec4 texture_rect, float max_mipmap, texture2D area_light_atlas, sampler texture_sampler, out float integral, out vec3 tex_color) {
-	// default is white
-	tex_color = vec3(1.0);
-	// construct the orthonormal basis around the normal vector
-	vec3 x, z;
-	z = -normalize(eye_vec - normal * dot(eye_vec, normal)); // expanding the angle between view and normal vector to 90 degrees, this gives a normal vector
-	x = cross(normal, z);
+mat3 ltc_get_matrix(vec3 normal, vec3 eye_vec, mat3 M_inv) {
+	vec3 z = eye_vec - normal * dot(eye_vec, normal);
+	if (dot(z, z) < 1e-10) {
+		z = abs(normal.z) < 0.999 ? cross(normal, vec3(0.0, 0.0, 1.0)) : cross(normal, vec3(0.0, 1.0, 0.0));
+	}
+	z = -normalize(z);
+	return M_inv * transpose(mat3(cross(normal, z), normal, z));
+}
 
-	// rotate area light in (T1, normal, T2) basis
-	M_inv = M_inv * transpose(mat3(x, normal, z));
+void ltc_build_line_rect(vec3 line_points[2], float half_width, mat3 M, out vec3 rect_points[4]) {
+	vec3 line_start = M * line_points[0];
+	vec3 line_end = M * line_points[1];
+	vec3 line_dir = normalize(line_end - line_start);
+
+	vec3 width_dir = vec3(0.0, 1.0, 0.0);
+	width_dir -= line_dir * dot(width_dir, line_dir);
+	if (dot(width_dir, width_dir) < 1e-10) {
+		width_dir = abs(line_dir.x) < 0.999 ? cross(vec3(1.0, 0.0, 0.0), line_dir) : cross(vec3(0.0, 0.0, 1.0), line_dir);
+	}
+	width_dir = normalize(width_dir) * half_width;
+
+	rect_points[0] = line_start - width_dir;
+	rect_points[1] = line_end - width_dir;
+	rect_points[2] = line_end + width_dir;
+	rect_points[3] = line_start + width_dir;
+}
+
+void ltc_evaluate_pretransformed(vec3 transformed_points[4], vec4 texture_rect, float max_mipmap, texture2D area_light_atlas, sampler texture_sampler, out float integral, out vec3 tex_color) {
+	tex_color = vec3(1.0);
 
 	vec3 L[5];
-	L[0] = M_inv * points[0];
-	L[1] = M_inv * points[1];
-	L[2] = M_inv * points[2];
-	L[3] = M_inv * points[3];
+	L[0] = transformed_points[0];
+	L[1] = transformed_points[1];
+	L[2] = transformed_points[2];
+	L[3] = transformed_points[3];
 
 	vec3 L_unclipped[4];
-	L_unclipped[0] = L[0];
-	L_unclipped[1] = L[1];
-	L_unclipped[2] = L[2];
-	L_unclipped[3] = L[3];
+	L_unclipped[0] = transformed_points[0];
+	L_unclipped[1] = transformed_points[1];
+	L_unclipped[2] = transformed_points[2];
+	L_unclipped[3] = transformed_points[3];
 
 	int n;
 	clip_quad_to_horizon(L, n);
@@ -246,7 +265,6 @@ void ltc_evaluate(vec3 normal, vec3 eye_vec, mat3 M_inv, vec3 points[4], vec4 te
 		return;
 	}
 
-	// project onto unit sphere
 	vec3 L_proj[5];
 	L_proj[0] = normalize(L[0]);
 	L_proj[1] = normalize(L[1]);
@@ -258,16 +276,13 @@ void ltc_evaluate(vec3 normal, vec3 eye_vec, mat3 M_inv, vec3 points[4], vec4 te
 		tex_color = vec3(fetch_ltc_filtered_texture_with_form_factor(texture_rect, L_unclipped, max_mipmap, area_light_atlas, texture_sampler));
 	}
 
-	// Prevent abnormal values when the light goes through (or close to) the fragment
 	vec3 pnorm = normalize(cross(L_proj[0] - L_proj[1], L_proj[2] - L_proj[1]));
 	if (abs(dot(pnorm, L_proj[0])) < 1e-10) {
-		// we could just return black, but that would lead to some black pixels in front of the light.
-		// Better, we check if the fragment is on the light, and return white if so.
-		vec3 r10 = points[0] - points[1];
-		vec3 r12 = points[2] - points[1];
-		float alpha = -dot(points[1], r10) / dot(r10, r10);
-		float beta = -dot(points[1], r12) / dot(r12, r12);
-		if (0.0 < alpha && alpha < 1.0 && 0.0 < beta && beta < 1.0) { // fragment is on light {
+		vec3 r10 = transformed_points[0] - transformed_points[1];
+		vec3 r12 = transformed_points[2] - transformed_points[1];
+		float alpha = -dot(transformed_points[1], r10) / dot(r10, r10);
+		float beta = -dot(transformed_points[1], r12) / dot(r12, r12);
+		if (0.0 < alpha && alpha < 1.0 && 0.0 < beta && beta < 1.0) {
 			integral = 1.0;
 			return;
 		} else {
@@ -278,6 +293,23 @@ void ltc_evaluate(vec3 normal, vec3 eye_vec, mat3 M_inv, vec3 points[4], vec4 te
 
 	float I = ltc_integrate_clipped_quad(L, L_proj, n);
 	integral = I / (2.0 * M_PI);
+}
+
+void ltc_evaluate(vec3 normal, vec3 eye_vec, mat3 M_inv, vec3 points[4], vec4 texture_rect, float max_mipmap, texture2D area_light_atlas, sampler texture_sampler, out float integral, out vec3 tex_color) {
+	mat3 M = ltc_get_matrix(normal, eye_vec, M_inv);
+	vec3 transformed_points[4];
+	transformed_points[0] = M * points[0];
+	transformed_points[1] = M * points[1];
+	transformed_points[2] = M * points[2];
+	transformed_points[3] = M * points[3];
+	ltc_evaluate_pretransformed(transformed_points, texture_rect, max_mipmap, area_light_atlas, texture_sampler, integral, tex_color);
+}
+
+void ltc_evaluate_line(vec3 normal, vec3 eye_vec, mat3 M_inv, vec3 line_points[2], float half_width, vec4 texture_rect, float max_mipmap, texture2D area_light_atlas, sampler texture_sampler, out float integral, out vec3 tex_color) {
+	mat3 M = ltc_get_matrix(normal, eye_vec, M_inv);
+	vec3 transformed_points[4];
+	ltc_build_line_rect(line_points, half_width, M, transformed_points);
+	ltc_evaluate_pretransformed(transformed_points, texture_rect, max_mipmap, area_light_atlas, texture_sampler, integral, tex_color);
 }
 
 void ltc_evaluate_specular(vec3 normal, vec3 eye_vec, float roughness, vec3 points[4], vec4 texture_rect, float max_mipmap, texture2D area_light_atlas, sampler texture_sampler, sampler2D ltc_lut1, sampler2D ltc_lut2, out float ltc_specular, out vec2 fresnel, out vec3 ltc_specular_tex_color) {
@@ -295,6 +327,24 @@ void ltc_evaluate_specular(vec3 normal, vec3 eye_vec, float roughness, vec3 poin
 			vec3(-M_brdf_e_mag_fres.x * scale, M_brdf_abcd.y * scale, 0));
 
 	ltc_evaluate(normal, eye_vec, M_inv, points, texture_rect, max_mipmap, area_light_atlas, texture_sampler, ltc_specular, ltc_specular_tex_color);
+	fresnel = vec2(M_brdf_e_mag_fres.yz);
+}
+
+void ltc_evaluate_specular_line(vec3 normal, vec3 eye_vec, float roughness, vec3 line_points[2], float half_width, vec4 texture_rect, float max_mipmap, texture2D area_light_atlas, sampler texture_sampler, sampler2D ltc_lut1, sampler2D ltc_lut2, out float ltc_specular, out vec2 fresnel, out vec3 ltc_specular_tex_color) {
+	float theta = acos_approx(dot(normal, eye_vec));
+	const float LTC_LUT_SIZE = float(64.0);
+	vec2 lut_pos = vec2(max(roughness, float(0.02)), theta / float(0.5 * M_PI));
+	vec2 lut_uv = vec2(lut_pos * (float(63.0) / LTC_LUT_SIZE) + vec2(float(0.5) / LTC_LUT_SIZE));
+	vec4 M_brdf_abcd = texture(ltc_lut1, lut_uv);
+	vec3 M_brdf_e_mag_fres = texture(ltc_lut2, lut_uv).xyz;
+	float scale = 1.0 / (M_brdf_abcd.x * M_brdf_e_mag_fres.x - M_brdf_abcd.y * M_brdf_abcd.w);
+
+	mat3 M_inv = mat3(
+			vec3(0, 0, 1.0 / M_brdf_abcd.z),
+			vec3(-M_brdf_abcd.w * scale, M_brdf_abcd.x * scale, 0),
+			vec3(-M_brdf_e_mag_fres.x * scale, M_brdf_abcd.y * scale, 0));
+
+	ltc_evaluate_line(normal, eye_vec, M_inv, line_points, half_width, texture_rect, max_mipmap, area_light_atlas, texture_sampler, ltc_specular, ltc_specular_tex_color);
 	fresnel = vec2(M_brdf_e_mag_fres.yz);
 }
 

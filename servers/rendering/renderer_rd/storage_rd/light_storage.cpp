@@ -549,7 +549,9 @@ AABB LightStorage::light_get_aabb(RID p_light) const {
 		case RSE::LIGHT_AREA: {
 			float len = light->param[RSE::LIGHT_PARAM_RANGE];
 			if (light->area_line_mode) {
-				Vector3 half_extents = light->area_size.x >= light->area_size.y ? Vector3(light->area_size.x * 0.5f + len, len, len) : Vector3(len, light->area_size.y * 0.5f + len, len);
+				float half_major = MAX(light->area_size.x, light->area_size.y) * 0.5f;
+				float half_minor = MIN(light->area_size.x, light->area_size.y) * 0.5f;
+				Vector3 half_extents = light->area_size.x >= light->area_size.y ? Vector3(half_major + len, half_minor + len, half_minor + len) : Vector3(half_minor + len, half_major + len, half_minor + len);
 				return AABB(-half_extents, half_extents * 2.0f);
 			}
 			float width = light->area_size.x / 2.0 + len;

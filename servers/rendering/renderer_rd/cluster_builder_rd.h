@@ -335,7 +335,9 @@ public:
 		} else { /* LIGHT_TYPE_AREA */
 			Vector3 scale;
 			if (p_area_line_mode) {
-				scale = p_area_size.x >= p_area_size.y ? Vector3(p_area_size.x / 2.0 + radius, radius, radius) : Vector3(radius, p_area_size.y / 2.0 + radius, radius);
+				float half_major = MAX(p_area_size.x, p_area_size.y) * 0.5f;
+				float half_minor = MIN(p_area_size.x, p_area_size.y) * 0.5f;
+				scale = p_area_size.x >= p_area_size.y ? Vector3(half_major + radius, half_minor + radius, half_minor + radius) : Vector3(half_minor + radius, half_major + radius, half_minor + radius);
 			} else {
 				scale = Vector3(p_area_size.x / 2.0 + radius, p_area_size.y / 2.0 + radius, radius / 2.0);
 			}
