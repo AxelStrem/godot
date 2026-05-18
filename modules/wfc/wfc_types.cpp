@@ -29,16 +29,11 @@ static void _normalize_packed_scene_ownership(Node *p_node, Node *p_root) {
 
 static Ref<PackedScene> _pack_wfc_variant(Node *p_node) {
 	ERR_FAIL_NULL_V(p_node, Ref<PackedScene>());
-
-	Node *duplicate = p_node->duplicate(Node::DUPLICATE_DEFAULT | Node::DUPLICATE_INTERNAL_STATE);
-	ERR_FAIL_NULL_V(duplicate, Ref<PackedScene>());
-
-	_normalize_packed_scene_ownership(duplicate, duplicate);
+	_normalize_packed_scene_ownership(p_node, p_node);
 
 	Ref<PackedScene> packed_scene;
 	packed_scene.instantiate();
-	Error err = packed_scene->pack(duplicate);
-	memdelete(duplicate);
+	Error err = packed_scene->pack(p_node);
 
 	if (err != OK) {
 		packed_scene.unref();
@@ -293,7 +288,7 @@ void WFCElement::_bind_methods() {
 }
 
 void WFCElement::_notification(int p_what) {
-	if (p_what == NOTIFICATION_SCENE_INSTANTIATED) {
+	if (p_what == NOTIFICATION_READY) {
 		if (Engine::get_singleton()->is_editor_hint()) {
 			return;
 		}

@@ -128,6 +128,7 @@ struct ConnectionBuild {
 struct CompiledCatalog {
 	struct SideData {
 		StringName name;
+		BitMask none_options;
 		Vector<BitMask> connection_to_options;
 		Vector<BitMask> option_to_connections;
 	};
@@ -191,6 +192,19 @@ struct SpatialKey {
 		return x == p_other.x && y == p_other.y && z == p_other.z;
 	}
 };
+
+static bool _variant_to_string_name(const Variant &p_value, StringName &r_name) {
+	if (p_value.get_type() == Variant::STRING_NAME || p_value.get_type() == Variant::STRING) {
+		r_name = StringName(String(p_value));
+		return true;
+	}
+	return false;
+}
+
+static bool _variant_is_none_connection(const Variant &p_value) {
+	String text = String(p_value).strip_edges();
+	return text == "none" || text == "&\"none\"";
+}
 
 static Vector3 _object_angle(const Transform3D &p_a, const Transform3D &p_b) {
 	Quaternion quat_a = p_a.basis.get_rotation_quaternion();
@@ -296,20 +310,20 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 	Array type_keys = p_rules.keys();
 	for (int type_index = 0; type_index < type_keys.size(); type_index++) {
 		Variant type_variant = type_keys[type_index];
-		if (type_variant.get_type() != Variant::STRING_NAME && type_variant.get_type() != Variant::STRING) {
+		StringName type_name;
+		if (!_variant_to_string_name(type_variant, type_name)) {
 			continue;
 		}
-		StringName type_name = type_variant;
 		CompiledCatalog::TypeData type_data;
 		type_data.name = type_name;
 		Dictionary type_rules = p_rules[type_name];
 		Array side_keys = type_rules.keys();
 		for (int side_index = 0; side_index < side_keys.size(); side_index++) {
 			Variant side_variant = side_keys[side_index];
-			if (side_variant.get_type() != Variant::STRING_NAME && side_variant.get_type() != Variant::STRING) {
+			StringName side_name;
+			if (!_variant_to_string_name(side_variant, side_name)) {
 				continue;
 			}
-			StringName side_name = side_variant;
 			int new_side_index = type_data.sides.size();
 			type_data.side_ids.insert(side_name, new_side_index);
 			type_data.sides.push_back(CompiledCatalog::SideData());
@@ -324,7 +338,10 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 				if (entry.size() < 2) {
 					continue;
 				}
-				StringName option_name = entry[0];
+				StringName option_name;
+				if (!_variant_to_string_name(entry[0], option_name)) {
+					continue;
+				}
 				if (!type_data.option_ids.has(option_name)) {
 					type_data.option_ids.insert(option_name, type_data.option_names.size());
 					type_data.option_names.push_back(option_name);
@@ -338,7 +355,13 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 				}
 
 				for (int connection_index = 0; connection_index < connection_values.size(); connection_index++) {
-					StringName connection_name = connection_values[connection_index];
+					if (_variant_is_none_connection(connection_values[connection_index])) {
+						continue;
+					}
+					StringName connection_name;
+					if (!_variant_to_string_name(connection_values[connection_index], connection_name)) {
+						continue;
+					}
 					if (!r_catalog.connection_ids.has(connection_name)) {
 						r_catalog.connection_ids.insert(connection_name, r_catalog.connection_names.size());
 						r_catalog.connection_names.push_back(connection_name);
@@ -358,6 +381,7 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 		CompiledCatalog::TypeData &type_data = r_catalog.types.write[type_index];
 		for (int side_index = 0; side_index < type_data.sides.size(); side_index++) {
 			CompiledCatalog::SideData &side_data = type_data.sides.write[side_index];
+			side_data.none_options.resize(type_data.option_word_count);
 			side_data.connection_to_options.resize(r_catalog.connection_names.size());
 			for (int connection_index = 0; connection_index < side_data.connection_to_options.size(); connection_index++) {
 				side_data.connection_to_options.write[connection_index].resize(type_data.option_word_count);
@@ -370,7 +394,10 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 	}
 
 	for (int type_index = 0; type_index < type_keys.size(); type_index++) {
-		StringName type_name = type_keys[type_index];
+		StringName type_name;
+		if (!_variant_to_string_name(type_keys[type_index], type_name)) {
+			continue;
+		}
 		if (!r_catalog.type_ids.has(type_name)) {
 			continue;
 		}
@@ -378,7 +405,10 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 		Dictionary type_rules = p_rules[type_name];
 		Array side_keys = type_rules.keys();
 		for (int side_index = 0; side_index < side_keys.size(); side_index++) {
-			StringName side_name = side_keys[side_index];
+			StringName side_name;
+			if (!_variant_to_string_name(side_keys[side_index], side_name)) {
+				continue;
+			}
 			if (!type_data.side_ids.has(side_name)) {
 				continue;
 			}
@@ -392,7 +422,10 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 				if (entry.size() < 2) {
 					continue;
 				}
-				StringName option_name = entry[0];
+				StringName option_name;
+				if (!_variant_to_string_name(entry[0], option_name)) {
+					continue;
+				}
 				if (!type_data.option_ids.has(option_name)) {
 					continue;
 				}
@@ -406,7 +439,14 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 				}
 
 				for (int connection_index = 0; connection_index < connection_values.size(); connection_index++) {
-					StringName connection_name = connection_values[connection_index];
+					if (_variant_is_none_connection(connection_values[connection_index])) {
+						side_data.none_options.set_bit(option_id);
+						continue;
+					}
+					StringName connection_name;
+					if (!_variant_to_string_name(connection_values[connection_index], connection_name)) {
+						continue;
+					}
 					if (!r_catalog.connection_ids.has(connection_name)) {
 						continue;
 					}
@@ -654,21 +694,29 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, Vector<C
 					BitMask my_connections = _possible_connections(type_data, side.side_id, element.options, context.catalog.connection_word_count);
 					BitMask other_connections = _possible_connections(other_type, side.other_side_id, other.options, context.catalog.connection_word_count);
 					connection_mask = my_connections.intersected(other_connections);
-				} else {
-					connection_mask.resize(context.catalog.connection_word_count);
-					connection_mask.set_bit(context.catalog.none_connection_id);
-				}
-
-				BitMask allowed = _allowed_options(type_data, side.side_id, connection_mask);
-				bool changed = element.options.bit_and_in_place(allowed);
-				if (changed) {
-					element.remaining = element.options.count_bits();
-					if (element.remaining == 0) {
-						result.error = vformat("Contradiction while solving WFC element of type '%s'.", String(type_data.name));
-						return result;
+					BitMask allowed = _allowed_options(type_data, side.side_id, connection_mask);
+					bool changed = element.options.bit_and_in_place(allowed);
+					if (changed) {
+						element.remaining = element.options.count_bits();
+						if (element.remaining == 0) {
+							result.error = vformat("Contradiction while solving WFC element of type '%s'.", String(type_data.name));
+							return result;
+						}
+						for (int neighbor_index = 0; neighbor_index < element.connected_elements.size(); neighbor_index++) {
+							enqueue(element.connected_elements[neighbor_index]);
+						}
 					}
-					for (int neighbor_index = 0; neighbor_index < element.connected_elements.size(); neighbor_index++) {
-						enqueue(element.connected_elements[neighbor_index]);
+				} else {
+					bool changed = element.options.bit_and_in_place(type_data.sides[side.side_id].none_options);
+					if (changed) {
+						element.remaining = element.options.count_bits();
+						if (element.remaining == 0) {
+							result.error = vformat("Contradiction while solving WFC element of type '%s'.", String(type_data.name));
+							return result;
+						}
+						for (int neighbor_index = 0; neighbor_index < element.connected_elements.size(); neighbor_index++) {
+							enqueue(element.connected_elements[neighbor_index]);
+						}
 					}
 				}
 			}
@@ -695,6 +743,7 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, Vector<C
 
 		int selected_element_index = choices[rng.rand(choices.size())];
 		SolvedElement &selected_element = context.elements.write[selected_element_index];
+		const CompiledCatalog::TypeData &selected_type = context.catalog.types[selected_element.type_id];
 		int selected_option = _pick_weighted_option(selected_element, rng);
 		if (selected_option < 0) {
 			result.error = "Failed to select a weighted WFC option.";
