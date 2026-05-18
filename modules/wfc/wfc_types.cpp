@@ -10,10 +10,20 @@
 
 #include "core/config/engine.h"
 #include "core/object/class_db.h"
+#include "core/os/os.h"
+#include "core/string/print_string.h"
 
 HashMap<String, Ref<PackedScene>> WFCElement::nested_scene_cache;
 
 namespace {
+
+static bool _variant_to_string_name(const Variant &p_value, StringName &r_name) {
+	if (p_value.get_type() == Variant::STRING_NAME || p_value.get_type() == Variant::STRING) {
+		r_name = StringName(String(p_value));
+		return true;
+	}
+	return false;
+}
 
 static void _normalize_packed_scene_ownership(Node *p_node, Node *p_root) {
 	if (p_node == p_root) {
@@ -292,12 +302,16 @@ void WFCElement::_notification(int p_what) {
 		if (Engine::get_singleton()->is_editor_hint()) {
 			return;
 		}
-		_capture_nested_scenes();
+		if (nested_scenes.is_empty()) {
+			_capture_nested_scenes();
+		}
 	}
 }
 
 void WFCElement::_capture_nested_scenes() {
+	uint64_t capture_begin = OS::get_singleton()->get_ticks_usec();
 	Vector<Node *> nodes_to_remove;
+	int newly_packed = 0;
 	for (int i = 0; i < get_child_count(); i++) {
 		Node *child = get_child(i);
 		if (child == nullptr || !child->has_meta("wfc")) {
@@ -318,6 +332,7 @@ void WFCElement::_capture_nested_scenes() {
 			packed_scene = _pack_wfc_variant(child);
 			if (packed_scene.is_valid()) {
 				nested_scene_cache.insert(cache_key, packed_scene);
+				newly_packed++;
 			}
 		}
 		if (packed_scene.is_valid()) {
@@ -330,6 +345,11 @@ void WFCElement::_capture_nested_scenes() {
 		Node *node = nodes_to_remove[i];
 		remove_child(node);
 		node->queue_free();
+	}
+
+	if (newly_packed > 0) {
+		uint64_t elapsed_usec = OS::get_singleton()->get_ticks_usec() - capture_begin;
+		print_line(vformat("WFC fallback capture: type=%s, variants=%d, time=%.2f ms", String(type), newly_packed, double(elapsed_usec) / 1000.0));
 	}
 }
 
@@ -441,11 +461,13 @@ void WFCElement::clear_materialized() {
 
 void WFCElement::materialize() {
 	clear_materialized();
-	for (int i = 0; i < get_child_count(); i++) {
-		Node *child = get_child(i);
-		if (child != nullptr && child->has_meta("wfc")) {
-			_capture_nested_scenes();
-			break;
+	if (nested_scenes.is_empty()) {
+		for (int i = 0; i < get_child_count(); i++) {
+			Node *child = get_child(i);
+			if (child != nullptr && child->has_meta("wfc")) {
+				_capture_nested_scenes();
+				break;
+			}
 		}
 	}
 	if (selected_option.is_empty()) {

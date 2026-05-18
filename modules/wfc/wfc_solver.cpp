@@ -11,12 +11,18 @@
 #include "core/math/math_funcs.h"
 #include "core/math/random_pcg.h"
 #include "core/object/class_db.h"
+#include "core/os/os.h"
+#include "core/string/print_string.h"
 #include "core/templates/hash_map.h"
 
 namespace {
 
 static const StringName WFC_NONE_CONNECTION = SNAME("none");
 static constexpr int WFC_LOOKUP_RANGE = 3;
+
+static double _usec_to_msec(uint64_t p_usec) {
+	return double(p_usec) / 1000.0;
+}
 
 static int _count_bits_u64(uint64_t p_value) {
 	int count = 0;
@@ -1026,6 +1032,7 @@ int WFCSolver::connect_neighbors() {
 }
 
 bool WFCSolver::resolve() {
+	uint64_t resolve_begin = OS::get_singleton()->get_ticks_usec();
 	if (async_job != nullptr) {
 		last_error = "WFCSolver is already solving asynchronously.";
 		return false;
@@ -1041,13 +1048,17 @@ bool WFCSolver::resolve() {
 		emit_signal(SNAME("solve_completed"), false, last_error);
 		return false;
 	}
+	uint64_t snapshot_end = OS::get_singleton()->get_ticks_usec();
 	Vector<ConnectionBuild> preview_connections;
 
 	emit_signal(SNAME("solve_started"));
 	SolveResult result = _solve_snapshot(snapshot, &preview_connections);
+	uint64_t solve_end = OS::get_singleton()->get_ticks_usec();
 	_apply_preview_connections(snapshot, preview_connections);
+	uint64_t preview_end = OS::get_singleton()->get_ticks_usec();
 	last_error = result.error;
 	if (!result.success) {
+		print_line(vformat("WFC resolve: elements=%d, connections=%d, snapshot=%.2f ms, solve=%.2f ms, preview=%.2f ms, total=%.2f ms, success=false, error=%s", snapshot.elements.size(), preview_connections.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(solve_end - snapshot_end), _usec_to_msec(preview_end - solve_end), _usec_to_msec(preview_end - resolve_begin), result.error));
 		emit_signal(SNAME("solve_completed"), false, last_error);
 		return false;
 	}
@@ -1058,9 +1069,12 @@ bool WFCSolver::resolve() {
 			element->set_selected_option(result.selected_options[i]);
 		}
 	}
+	uint64_t apply_end = OS::get_singleton()->get_ticks_usec();
 	if (auto_materialize) {
 		materialize();
 	}
+	uint64_t resolve_end = OS::get_singleton()->get_ticks_usec();
+	print_line(vformat("WFC resolve: elements=%d, connections=%d, snapshot=%.2f ms, solve=%.2f ms, preview=%.2f ms, apply=%.2f ms, total=%.2f ms, success=true", snapshot.elements.size(), preview_connections.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(solve_end - snapshot_end), _usec_to_msec(preview_end - solve_end), _usec_to_msec(apply_end - preview_end), _usec_to_msec(resolve_end - resolve_begin)));
 	last_error = String();
 	emit_signal(SNAME("solve_completed"), true, String());
 	return true;
@@ -1094,6 +1108,7 @@ Error WFCSolver::resolve_async() {
 }
 
 void WFCSolver::materialize() {
+	uint64_t materialize_begin = OS::get_singleton()->get_ticks_usec();
 	if (async_job != nullptr) {
 		last_error = "WFCSolver cannot materialize while an async solve is still in progress.";
 		ERR_PRINT(last_error);
@@ -1110,12 +1125,15 @@ void WFCSolver::materialize() {
 	for (int i = 0; i < elements.size(); i++) {
 		elements[i]->materialize();
 	}
+	uint64_t instantiate_end = OS::get_singleton()->get_ticks_usec();
 	for (int i = 0; i < elements.size(); i++) {
 		if (elements[i]->get_selected_option().is_empty()) {
 			continue;
 		}
 		elements[i]->post_materialize();
 	}
+	uint64_t materialize_end = OS::get_singleton()->get_ticks_usec();
+	print_line(vformat("WFC materialize: elements=%d, instantiate=%.2f ms, post=%.2f ms, total=%.2f ms", elements.size(), _usec_to_msec(instantiate_end - materialize_begin), _usec_to_msec(materialize_end - instantiate_end), _usec_to_msec(materialize_end - materialize_begin)));
 }
 
 WFCSolver::~WFCSolver() {
