@@ -1026,17 +1026,22 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 
 		float line_coord = clamp(dot(-line_start_cosine, line_dir_cosine), 0.0, float(a_len));
 		vec3 closest_line_point_cosine = line_start_cosine + line_dir_cosine * line_coord;
-		vec3 billboard_dir_cosine = vec3(0.0, 1.0, 0.0);
-		billboard_dir_cosine -= line_dir_cosine * dot(billboard_dir_cosine, line_dir_cosine);
-		if (dot(billboard_dir_cosine, billboard_dir_cosine) < 1e-8) {
-			billboard_dir_cosine = abs(line_dir_cosine.x) < 0.999 ? cross(vec3(1.0, 0.0, 0.0), line_dir_cosine) : cross(vec3(0.0, 0.0, 1.0), line_dir_cosine);
+		vec3 plane_normal_cosine = -closest_line_point_cosine;
+		plane_normal_cosine -= line_dir_cosine * dot(plane_normal_cosine, line_dir_cosine);
+		if (dot(plane_normal_cosine, plane_normal_cosine) < 1e-8) {
+			plane_normal_cosine = vec3(0.0, 1.0, 0.0);
+			plane_normal_cosine -= line_dir_cosine * dot(plane_normal_cosine, line_dir_cosine);
 		}
-		billboard_dir_cosine = normalize(billboard_dir_cosine);
-		area_b_dir = hvec3(cosine_basis_inv * billboard_dir_cosine);
+		if (dot(plane_normal_cosine, plane_normal_cosine) < 1e-8) {
+			plane_normal_cosine = abs(line_dir_cosine.x) < 0.999 ? cross(vec3(1.0, 0.0, 0.0), line_dir_cosine) : cross(vec3(0.0, 0.0, 1.0), line_dir_cosine);
+		}
+		plane_normal_cosine = normalize(plane_normal_cosine);
+		vec3 width_dir_cosine = normalize(cross(plane_normal_cosine, line_dir_cosine));
+		area_b_dir = hvec3(cosine_basis_inv * width_dir_cosine);
 
-		float width_coord = clamp(dot(-closest_line_point_cosine, billboard_dir_cosine), -float(b_half_len), float(b_half_len));
-		vec3 width_offset_cosine = billboard_dir_cosine * float(b_half_len);
-		vec3 closest_rect_point_cosine = closest_line_point_cosine + billboard_dir_cosine * width_coord;
+		float width_coord = clamp(dot(-closest_line_point_cosine, width_dir_cosine), -float(b_half_len), float(b_half_len));
+		vec3 width_offset_cosine = width_dir_cosine * float(b_half_len);
+		vec3 closest_rect_point_cosine = closest_line_point_cosine + width_dir_cosine * width_coord;
 
 		points[0] = cosine_basis_inv * (line_start_cosine - width_offset_cosine);
 		points[1] = cosine_basis_inv * (line_end_cosine - width_offset_cosine);

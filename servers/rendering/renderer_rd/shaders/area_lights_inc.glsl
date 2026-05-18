@@ -229,13 +229,20 @@ void ltc_build_line_rect(vec3 line_points[2], float half_width, mat3 M, out vec3
 	vec3 line_start = M * line_points[0];
 	vec3 line_end = M * line_points[1];
 	vec3 line_dir = normalize(line_end - line_start);
+	float line_coord = clamp(dot(-line_start, line_dir), 0.0, length(line_end - line_start));
+	vec3 closest_line_point = line_start + line_dir * line_coord;
 
-	vec3 width_dir = vec3(0.0, 1.0, 0.0);
-	width_dir -= line_dir * dot(width_dir, line_dir);
-	if (dot(width_dir, width_dir) < 1e-10) {
-		width_dir = abs(line_dir.x) < 0.999 ? cross(vec3(1.0, 0.0, 0.0), line_dir) : cross(vec3(0.0, 0.0, 1.0), line_dir);
+	vec3 plane_normal = -closest_line_point;
+	plane_normal -= line_dir * dot(plane_normal, line_dir);
+	if (dot(plane_normal, plane_normal) < 1e-10) {
+		plane_normal = vec3(0.0, 1.0, 0.0);
+		plane_normal -= line_dir * dot(plane_normal, line_dir);
 	}
-	width_dir = normalize(width_dir) * half_width;
+	if (dot(plane_normal, plane_normal) < 1e-10) {
+		plane_normal = abs(line_dir.x) < 0.999 ? cross(vec3(1.0, 0.0, 0.0), line_dir) : cross(vec3(0.0, 0.0, 1.0), line_dir);
+	}
+	plane_normal = normalize(plane_normal);
+	vec3 width_dir = normalize(cross(plane_normal, line_dir)) * half_width;
 
 	rect_points[0] = line_start - width_dir;
 	rect_points[1] = line_end - width_dir;
