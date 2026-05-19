@@ -549,9 +549,9 @@ AABB LightStorage::light_get_aabb(RID p_light) const {
 		case RSE::LIGHT_AREA: {
 			float len = light->param[RSE::LIGHT_PARAM_RANGE];
 			if (light->area_line_mode) {
-				float half_major = MAX(light->area_size.x, light->area_size.y) * 0.5f;
-				float half_minor = MIN(light->area_size.x, light->area_size.y) * 0.5f;
-				Vector3 half_extents = light->area_size.x >= light->area_size.y ? Vector3(half_major + len, half_minor + len, half_minor + len) : Vector3(half_minor + len, half_major + len, half_minor + len);
+				float half_length = light->area_size.x * 0.5f;
+				float half_width = light->area_size.y * 0.5f;
+				Vector3 half_extents = Vector3(half_length + len, half_width + len, half_width + len);
 				return AABB(-half_extents, half_extents * 2.0f);
 			}
 			float width = light->area_size.x / 2.0 + len;
@@ -1124,10 +1124,9 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 				// normalization to make larger lights output same amount of light as smaller lights with same energy
 				float surface_area = area_size.x * area_size.y;
 				if (light->area_line_mode) {
-					float major_len = MAX(area_size.x, area_size.y);
-					float minor_len = MIN(area_size.x, area_size.y);
-					float effective_minor_len = MAX(minor_len, MAX(major_len * 0.0005f, 0.001f));
-					surface_area = major_len * effective_minor_len;
+					float line_length = area_size.x;
+					float effective_width = MAX(area_size.y, MAX(line_length * 0.0005f, 0.001f));
+					surface_area = line_length * effective_width;
 				}
 				surface_area = MAX(surface_area, 0.00001f);
 				light_data.color[0] /= surface_area;

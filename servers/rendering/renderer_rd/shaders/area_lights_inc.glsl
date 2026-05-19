@@ -225,29 +225,53 @@ mat3 ltc_get_matrix(vec3 normal, vec3 eye_vec, mat3 M_inv) {
 	return M_inv * transpose(mat3(cross(normal, z), normal, z));
 }
 
-void ltc_build_line_rect(vec3 line_points[2], float half_width, mat3 M, out vec3 rect_points[4]) {
-	vec3 line_start = M * line_points[0];
-	vec3 line_end = M * line_points[1];
-	vec3 line_dir = normalize(line_end - line_start);
-	float line_coord = clamp(dot(-line_start, line_dir), 0.0, length(line_end - line_start));
-	vec3 closest_line_point = line_start + line_dir * line_coord;
-
-	vec3 plane_normal = -closest_line_point;
-	plane_normal -= line_dir * dot(plane_normal, line_dir);
-	if (dot(plane_normal, plane_normal) < 1e-10) {
-		plane_normal = vec3(0.0, 1.0, 0.0);
-		plane_normal -= line_dir * dot(plane_normal, line_dir);
-	}
-	if (dot(plane_normal, plane_normal) < 1e-10) {
-		plane_normal = abs(line_dir.x) < 0.999 ? cross(vec3(1.0, 0.0, 0.0), line_dir) : cross(vec3(0.0, 0.0, 1.0), line_dir);
-	}
-	plane_normal = normalize(plane_normal);
-	vec3 width_dir = normalize(cross(plane_normal, line_dir)) * half_width;
-
+void ltc_build_line_rect_with_width_dir(vec3 line_start, vec3 line_end, vec3 width_dir, out vec3 rect_points[4]) {
 	rect_points[0] = line_start - width_dir;
 	rect_points[1] = line_end - width_dir;
 	rect_points[2] = line_end + width_dir;
 	rect_points[3] = line_start + width_dir;
+}
+
+void ltc_get_line_frame(vec3 line_points[2], mat3 M, out vec3 line_start, out vec3 line_end, out vec3 basis_a, out vec3 basis_b) {
+	line_start = M * line_points[0];
+	line_end = M * line_points[1];
+	vec3 line_dir = normalize(line_end - line_start);
+	basis_a = vec3(0.0, 1.0, 0.0);
+	basis_a -= line_dir * dot(basis_a, line_dir);
+	if (dot(basis_a, basis_a) < 1e-10) {
+		basis_a = vec3(1.0, 0.0, 0.0);
+		basis_a -= line_dir * dot(basis_a, line_dir);
+	}
+	if (dot(basis_a, basis_a) < 1e-10) {
+		basis_a = abs(line_dir.x) < 0.999 ? cross(vec3(1.0, 0.0, 0.0), line_dir) : cross(vec3(0.0, 0.0, 1.0), line_dir);
+	}
+	basis_a = normalize(basis_a);
+	basis_b = normalize(cross(line_dir, basis_a));
+}
+
+void ltc_build_line_rect(vec3 line_points[2], float half_width, mat3 M, out vec3 rect_points[4]) {
+	vec3 line_start;
+	vec3 line_end;
+	vec3 basis_a;
+	vec3 basis_b;
+	ltc_get_line_frame(line_points, M, line_start, line_end, basis_a, basis_b);
+	ltc_build_line_rect_with_width_dir(line_start, line_end, basis_a * half_width, rect_points);
+}
+
+void ltc_build_line_cross_rects(vec3 line_points[2], float half_width, mat3 M, out vec3 rect_points_a[4], out vec3 rect_points_b[4], out vec3 rect_points_c[4], out vec3 rect_points_d[4]) {
+	vec3 line_start;
+	vec3 line_end;
+	vec3 basis_a;
+	vec3 basis_b;
+	ltc_get_line_frame(line_points, M, line_start, line_end, basis_a, basis_b);
+
+	vec3 diagonal_dir_a = normalize(basis_a + basis_b);
+	vec3 diagonal_dir_b = normalize(basis_a - basis_b);
+
+	ltc_build_line_rect_with_width_dir(line_start, line_end, basis_a * half_width, rect_points_a);
+	ltc_build_line_rect_with_width_dir(line_start, line_end, diagonal_dir_a * half_width, rect_points_b);
+	ltc_build_line_rect_with_width_dir(line_start, line_end, basis_b * half_width, rect_points_c);
+	ltc_build_line_rect_with_width_dir(line_start, line_end, diagonal_dir_b * half_width, rect_points_d);
 }
 
 void ltc_evaluate_pretransformed(vec3 transformed_points[4], vec4 texture_rect, float max_mipmap, texture2D area_light_atlas, sampler texture_sampler, out float integral, out vec3 tex_color) {
@@ -293,7 +317,26 @@ void ltc_evaluate_pretransformed(vec3 transformed_points[4], vec4 texture_rect, 
 			integral = 1.0;
 			return;
 		} else {
-			integral = 0.0;
+			vec3 edge_u = transformed_points[1] - transformed_points[0];
+			vec3 edge_v = transformed_points[3] - transformed_points[0];
+			float uu = dot(edge_u, edge_u);
+			float uv = dot(edge_u, edge_v);
+			float vv = dot(edge_v, edge_v);
+			float det = uu * vv - uv * uv;
+			if (det <= 1e-10) {
+				integral = 0.0;
+				return;
+			}
+
+			vec3 to_origin = -transformed_points[0];
+			float rhs_u = dot(to_origin, edge_u);
+			float rhs_v = dot(to_origin, edge_v);
+			float u = clamp((rhs_u * vv - rhs_v * uv) / det, 0.0, 1.0);
+			float v = clamp((rhs_v * uu - rhs_u * uv) / det, 0.0, 1.0);
+			vec3 closest = transformed_points[0] + edge_u * u + edge_v * v;
+			float min_span = max(min(sqrt(uu), sqrt(vv)), 1e-4);
+			float dist2 = dot(closest, closest);
+			integral = exp(-dist2 / (min_span * min_span));
 			return;
 		}
 	}
@@ -314,9 +357,32 @@ void ltc_evaluate(vec3 normal, vec3 eye_vec, mat3 M_inv, vec3 points[4], vec4 te
 
 void ltc_evaluate_line(vec3 normal, vec3 eye_vec, mat3 M_inv, vec3 line_points[2], float half_width, vec4 texture_rect, float max_mipmap, texture2D area_light_atlas, sampler texture_sampler, out float integral, out vec3 tex_color) {
 	mat3 M = ltc_get_matrix(normal, eye_vec, M_inv);
-	vec3 transformed_points[4];
-	ltc_build_line_rect(line_points, half_width, M, transformed_points);
-	ltc_evaluate_pretransformed(transformed_points, texture_rect, max_mipmap, area_light_atlas, texture_sampler, integral, tex_color);
+	vec3 transformed_points_a[4];
+	vec3 transformed_points_b[4];
+	vec3 transformed_points_c[4];
+	vec3 transformed_points_d[4];
+	ltc_build_line_cross_rects(line_points, half_width, M, transformed_points_a, transformed_points_b, transformed_points_c, transformed_points_d);
+
+	float integral_a;
+	float integral_b;
+	float integral_c;
+	float integral_d;
+	vec3 tex_color_a;
+	vec3 tex_color_b;
+	vec3 tex_color_c;
+	vec3 tex_color_d;
+	ltc_evaluate_pretransformed(transformed_points_a, texture_rect, max_mipmap, area_light_atlas, texture_sampler, integral_a, tex_color_a);
+	ltc_evaluate_pretransformed(transformed_points_b, texture_rect, max_mipmap, area_light_atlas, texture_sampler, integral_b, tex_color_b);
+	ltc_evaluate_pretransformed(transformed_points_c, texture_rect, max_mipmap, area_light_atlas, texture_sampler, integral_c, tex_color_c);
+	ltc_evaluate_pretransformed(transformed_points_d, texture_rect, max_mipmap, area_light_atlas, texture_sampler, integral_d, tex_color_d);
+
+	integral = (integral_a + integral_b + integral_c + integral_d) * 0.25;
+	float tex_weight = integral_a + integral_b + integral_c + integral_d;
+	if (tex_weight > 1e-7) {
+		tex_color = (tex_color_a * integral_a + tex_color_b * integral_b + tex_color_c * integral_c + tex_color_d * integral_d) / tex_weight;
+	} else {
+		tex_color = (tex_color_a + tex_color_b + tex_color_c + tex_color_d) * 0.25;
+	}
 }
 
 void ltc_evaluate_specular(vec3 normal, vec3 eye_vec, float roughness, vec3 points[4], vec4 texture_rect, float max_mipmap, texture2D area_light_atlas, sampler texture_sampler, sampler2D ltc_lut1, sampler2D ltc_lut2, out float ltc_specular, out vec2 fresnel, out vec3 ltc_specular_tex_color) {
