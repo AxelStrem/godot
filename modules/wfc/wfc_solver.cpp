@@ -18,6 +18,7 @@
 namespace {
 
 static const StringName WFC_NONE_CONNECTION = SNAME("none");
+static const StringName WFC_WALL_PANEL_TYPE = SNAME("wall_panel");
 static constexpr int WFC_LOOKUP_RANGE = 3;
 
 static double _usec_to_msec(uint64_t p_usec) {
@@ -230,6 +231,8 @@ static SpatialKey _make_spatial_key(const Vector3 &p_position, float p_cell_size
 
 static int _build_connections(const AuthoringSnapshot &p_snapshot, Vector<ConnectionBuild> &r_connections) {
 	HashMap<SpatialKey, Vector<int>, SpatialKey> lookup;
+	int ambiguous_wall_panel_matches = 0;
+	int divergent_wall_panel_matches = 0;
 	for (int i = 0; i < p_snapshot.elements.size(); i++) {
 		const AuthoringElement &element = p_snapshot.elements[i];
 		SpatialKey key = _make_spatial_key(element.global_transform.origin, p_snapshot.cell_size);
@@ -246,7 +249,9 @@ static int _build_connections(const AuthoringSnapshot &p_snapshot, Vector<Connec
 				continue;
 			}
 
-			int best_match = -1;
+			int nearest_match = -1;
+			int last_match = -1;
+			int match_count = 0;
 			float best_distance = FLT_MAX;
 
 			for (int x = element_key.x - WFC_LOOKUP_RANGE; x <= element_key.x + WFC_LOOKUP_RANGE; x++) {
@@ -282,24 +287,37 @@ static int _build_connections(const AuthoringSnapshot &p_snapshot, Vector<Connec
 								continue;
 							}
 
+							match_count++;
+							last_match = candidate_index;
 							if (distance < best_distance) {
 								best_distance = distance;
-								best_match = candidate_index;
+								nearest_match = candidate_index;
 							}
 						}
 					}
 				}
 			}
 
-			if (best_match != -1) {
+			if (match_count > 1 && element.type == WFC_WALL_PANEL_TYPE) {
+				ambiguous_wall_panel_matches++;
+				if (nearest_match != last_match) {
+					divergent_wall_panel_matches++;
+				}
+			}
+
+			if (last_match != -1) {
 				ConnectionBuild connection;
 				connection.from_index = element_index;
-				connection.to_index = best_match;
+				connection.to_index = last_match;
 				connection.from_side = neighbor.name;
 				connection.to_side = neighbor.inv_name;
 				r_connections.push_back(connection);
 			}
 		}
+	}
+
+	if (ambiguous_wall_panel_matches > 0) {
+		print_line(vformat("WFC connection ambiguity: wall_panel_sides=%d, nearest_vs_legacy_different=%d", ambiguous_wall_panel_matches, divergent_wall_panel_matches));
 	}
 
 	return r_connections.size();
