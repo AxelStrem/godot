@@ -116,6 +116,8 @@ struct AuthoringElement {
 	ObjectID node_id;
 	StringName type;
 	Transform3D global_transform;
+	int resolve_priority = 0;
+	bool defer_collapse = false;
 	Vector<AuthoringOption> options;
 	Vector<AuthoringNeighbor> neighbors;
 };
@@ -168,6 +170,8 @@ struct SolvedSide {
 struct SolvedElement {
 	ObjectID node_id;
 	int type_id = -1;
+	int resolve_priority = 0;
+	bool defer_collapse = false;
 	BitMask options;
 	Vector<float> weights;
 	int remaining = 0;
@@ -185,6 +189,9 @@ struct SolveResult {
 	String error;
 	Vector<ObjectID> node_ids;
 	Vector<StringName> selected_options;
+	Vector<PackedStringArray> remaining_options;
+	Vector<bool> persist_remaining_options;
+	Vector<Dictionary> resolved_data;
 	int connection_count = 0;
 };
 
@@ -512,6 +519,146 @@ static BitMask _allowed_options(const CompiledCatalog::TypeData &p_type, int p_s
 	return result;
 }
 
+static PackedStringArray _export_allowed_options(const SolvedElement &p_element, const CompiledCatalog::TypeData &p_type_data) {
+	PackedStringArray allowed_options;
+	for (int option_index = 0; option_index < p_type_data.option_names.size(); option_index++) {
+		if (p_element.options.has_bit(option_index)) {
+			allowed_options.push_back(String(p_type_data.option_names[option_index]));
+		}
+	}
+	return allowed_options;
+}
+
+static bool _build_graph_snapshot(const AuthoringSnapshot &p_snapshot, const Vector<ConnectionBuild> &p_connections, Ref<WFCGraph> &r_graph, String &r_error) {
+	r_graph.instantiate();
+	r_graph->set_seed(p_snapshot.seed);
+
+	for (int element_index = 0; element_index < p_snapshot.elements.size(); element_index++) {
+		const AuthoringElement &authoring = p_snapshot.elements[element_index];
+		Ref<WFCGraphElement> graph_element = memnew(WFCGraphElement);
+		graph_element->set_id(int64_t(authoring.node_id));
+		graph_element->set_type(authoring.type);
+		graph_element->set_global_transform(authoring.global_transform);
+		graph_element->set_resolve_priority(authoring.resolve_priority);
+		graph_element->set_defer_collapse(authoring.defer_collapse);
+
+		PackedStringArray allowed_options;
+		for (int option_index = 0; option_index < authoring.options.size(); option_index++) {
+			const AuthoringOption &option = authoring.options[option_index];
+			if (option.enabled) {
+				allowed_options.push_back(String(option.option));
+			}
+		}
+		graph_element->set_allowed_options(allowed_options);
+		r_graph->add_element(graph_element);
+	}
+
+	for (int connection_index = 0; connection_index < p_connections.size(); connection_index++) {
+		const ConnectionBuild &connection = p_connections[connection_index];
+		Ref<WFCGraphElement> from_element = r_graph->get_element(int64_t(p_snapshot.elements[connection.from_index].node_id));
+		Ref<WFCGraphElement> to_element = r_graph->get_element(int64_t(p_snapshot.elements[connection.to_index].node_id));
+		if (from_element.is_null() || to_element.is_null()) {
+			r_error = "WFC graph snapshot lost a connection mapping.";
+			return false;
+		}
+		from_element->set_neighbor_id(connection.from_side, int64_t(p_snapshot.elements[connection.to_index].node_id));
+		to_element->set_neighbor_id(connection.to_side, int64_t(p_snapshot.elements[connection.from_index].node_id));
+	}
+
+	return true;
+}
+
+static bool _apply_graph_to_snapshot(const Ref<WFCGraph> &p_graph, AuthoringSnapshot &r_snapshot, String &r_error) {
+	for (int element_index = 0; element_index < r_snapshot.elements.size(); element_index++) {
+		AuthoringElement &authoring = r_snapshot.elements.write[element_index];
+		Ref<WFCGraphElement> graph_element = p_graph->get_element(int64_t(authoring.node_id));
+		if (graph_element.is_null()) {
+			r_error = "WFC graph processor lost an element mapping.";
+			return false;
+		}
+
+		PackedStringArray allowed_options = graph_element->get_allowed_options();
+		HashSet<StringName> unmatched_options;
+		for (int option_index = 0; option_index < allowed_options.size(); option_index++) {
+			unmatched_options.insert(StringName(allowed_options[option_index]));
+		}
+
+		for (int option_index = 0; option_index < authoring.options.size(); option_index++) {
+			AuthoringOption &option = authoring.options.write[option_index];
+			bool enabled = unmatched_options.has(option.option);
+			option.enabled = enabled;
+			if (enabled) {
+				unmatched_options.erase(option.option);
+			}
+		}
+
+		if (!unmatched_options.is_empty()) {
+			r_error = vformat("WFC graph processor selected unknown options for element type '%s'.", String(authoring.type));
+			return false;
+		}
+
+		authoring.resolve_priority = graph_element->get_resolve_priority();
+		authoring.defer_collapse = graph_element->is_defer_collapse_enabled();
+	}
+
+	return true;
+}
+
+static void _apply_context_to_graph(const SolveContext &p_context, const Ref<WFCGraph> &p_graph) {
+	for (int element_index = 0; element_index < p_context.elements.size(); element_index++) {
+		const SolvedElement &element = p_context.elements[element_index];
+		const CompiledCatalog::TypeData &type_data = p_context.catalog.types[element.type_id];
+		Ref<WFCGraphElement> graph_element = p_graph->get_element(int64_t(element.node_id));
+		if (graph_element.is_null()) {
+			continue;
+		}
+
+		graph_element->set_allowed_options(_export_allowed_options(element, type_data));
+		if (!element.defer_collapse && element.remaining == 1) {
+			graph_element->set_selected_option(StringName(graph_element->get_allowed_options()[0]));
+		} else {
+			graph_element->set_selected_option(StringName());
+		}
+	}
+}
+
+static bool _populate_solve_result(const SolveContext &p_context, const Ref<WFCGraph> &p_graph, SolveResult &r_result, String &r_error) {
+	r_result.success = true;
+	r_result.node_ids.resize(p_context.elements.size());
+	r_result.selected_options.resize(p_context.elements.size());
+	r_result.remaining_options.resize(p_context.elements.size());
+	r_result.persist_remaining_options.resize(p_context.elements.size());
+	r_result.resolved_data.resize(p_context.elements.size());
+
+	for (int element_index = 0; element_index < p_context.elements.size(); element_index++) {
+		const SolvedElement &element = p_context.elements[element_index];
+		const CompiledCatalog::TypeData &type_data = p_context.catalog.types[element.type_id];
+		PackedStringArray allowed_options = _export_allowed_options(element, type_data);
+
+		r_result.node_ids.write[element_index] = element.node_id;
+		r_result.remaining_options.write[element_index] = allowed_options;
+		r_result.persist_remaining_options.write[element_index] = element.defer_collapse;
+
+		if (!element.defer_collapse) {
+			if (allowed_options.size() != 1) {
+				r_result.success = false;
+				r_error = vformat("WFC solver failed to collapse element type '%s' to a single option.", String(type_data.name));
+				return false;
+			}
+			r_result.selected_options.write[element_index] = StringName(allowed_options[0]);
+		}
+
+		if (p_graph.is_valid()) {
+			Ref<WFCGraphElement> graph_element = p_graph->get_element(int64_t(element.node_id));
+			if (graph_element.is_valid()) {
+				r_result.resolved_data.write[element_index] = graph_element->get_resolved_data();
+			}
+		}
+	}
+
+	return true;
+}
+
 static bool _build_solve_context(const AuthoringSnapshot &p_snapshot, SolveContext &r_context, Vector<ConnectionBuild> *r_connection_preview, String &r_error) {
 	if (!_compile_catalog(p_snapshot.merged_rules, r_context.catalog, r_error)) {
 		return false;
@@ -536,6 +683,8 @@ static bool _build_solve_context(const AuthoringSnapshot &p_snapshot, SolveConte
 		SolvedElement &element = r_context.elements.write[element_index];
 		element.node_id = authoring.node_id;
 		element.type_id = type_id;
+		element.resolve_priority = authoring.resolve_priority;
+		element.defer_collapse = authoring.defer_collapse;
 		element.options.resize(type_data.option_word_count);
 		element.weights.resize(type_data.option_names.size());
 		for (int weight_index = 0; weight_index < element.weights.size(); weight_index++) {
@@ -668,18 +817,40 @@ static int _pick_weighted_option(const SolvedElement &p_element, RandomPCG &p_rn
 	return enabled_options[enabled_options.size() - 1];
 }
 
-static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, Vector<ConnectionBuild> *r_connection_preview = nullptr) {
+static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, const Ref<WFCGraphProcessor> &p_graph_processor, Vector<ConnectionBuild> *r_connection_preview = nullptr) {
 	SolveResult result;
+	AuthoringSnapshot working_snapshot = p_snapshot;
+	Ref<WFCGraph> graph;
+	if (p_graph_processor.is_valid() || r_connection_preview != nullptr) {
+		Vector<ConnectionBuild> preview_connections;
+		_build_connections(working_snapshot, preview_connections);
+		if (r_connection_preview != nullptr) {
+			*r_connection_preview = preview_connections;
+		}
+		if (p_graph_processor.is_valid()) {
+			String graph_error;
+			if (!_build_graph_snapshot(working_snapshot, preview_connections, graph, graph_error)) {
+				result.error = graph_error;
+				return result;
+			}
+			p_graph_processor->pre_resolve(graph);
+			if (!_apply_graph_to_snapshot(graph, working_snapshot, graph_error)) {
+				result.error = graph_error;
+				return result;
+			}
+		}
+	}
+
 	SolveContext context;
 	String error;
-	if (!_build_solve_context(p_snapshot, context, r_connection_preview, error)) {
+	if (!_build_solve_context(working_snapshot, context, nullptr, error)) {
 		result.error = error;
 		return result;
 	}
 
 	RandomPCG rng;
-	if (p_snapshot.seed != 0) {
-		rng.seed(p_snapshot.seed);
+	if (working_snapshot.seed != 0) {
+		rng.seed(working_snapshot.seed);
 	} else {
 		rng.randomize();
 	}
@@ -699,7 +870,7 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, Vector<C
 		}
 	};
 
-	while (true) {
+	auto process_queue = [&]() -> bool {
 		while (!queue.is_empty()) {
 			int element_index = queue[queue.size() - 1];
 			queue.resize(queue.size() - 1);
@@ -709,20 +880,19 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, Vector<C
 
 			for (int side_index = 0; side_index < element.sides.size(); side_index++) {
 				const SolvedSide &side = element.sides[side_index];
-				BitMask connection_mask;
 				if (side.other_index >= 0) {
 					const SolvedElement &other = context.elements[side.other_index];
 					const CompiledCatalog::TypeData &other_type = context.catalog.types[other.type_id];
 					BitMask my_connections = _possible_connections(type_data, side.side_id, element.options, context.catalog.connection_word_count);
 					BitMask other_connections = _possible_connections(other_type, side.other_side_id, other.options, context.catalog.connection_word_count);
-					connection_mask = my_connections.intersected(other_connections);
+					BitMask connection_mask = my_connections.intersected(other_connections);
 					BitMask allowed = _allowed_options(type_data, side.side_id, connection_mask);
 					bool changed = element.options.bit_and_in_place(allowed);
 					if (changed) {
 						element.remaining = element.options.count_bits();
 						if (element.remaining == 0) {
 							result.error = vformat("Contradiction while solving WFC element of type '%s'.", String(type_data.name));
-							return result;
+							return false;
 						}
 						for (int neighbor_index = 0; neighbor_index < element.connected_elements.size(); neighbor_index++) {
 							enqueue(element.connected_elements[neighbor_index]);
@@ -734,7 +904,7 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, Vector<C
 						element.remaining = element.options.count_bits();
 						if (element.remaining == 0) {
 							result.error = vformat("Contradiction while solving WFC element of type '%s'.", String(type_data.name));
-							return result;
+							return false;
 						}
 						for (int neighbor_index = 0; neighbor_index < element.connected_elements.size(); neighbor_index++) {
 							enqueue(element.connected_elements[neighbor_index]);
@@ -743,12 +913,38 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, Vector<C
 				}
 			}
 		}
+		return true;
+	};
 
-		int min_remaining = INT32_MAX;
-		Vector<int> choices;
-		for (int element_index = 0; element_index < context.elements.size(); element_index++) {
-			const SolvedElement &element = context.elements[element_index];
-			if (element.remaining > 1) {
+	if (!process_queue()) {
+		return result;
+	}
+
+	HashSet<int> priority_set;
+	Vector<int> priorities;
+	for (int element_index = 0; element_index < context.elements.size(); element_index++) {
+		const SolvedElement &element = context.elements[element_index];
+		if (element.defer_collapse || priority_set.has(element.resolve_priority)) {
+			continue;
+		}
+		priority_set.insert(element.resolve_priority);
+		priorities.push_back(element.resolve_priority);
+	}
+	if (priorities.size() > 1) {
+		SortArray<int> sorter;
+		sorter.sort(priorities.ptrw(), priorities.size());
+	}
+
+	for (int priority_index = priorities.size() - 1; priority_index >= 0; priority_index--) {
+		int current_priority = priorities[priority_index];
+		while (true) {
+			int min_remaining = INT32_MAX;
+			Vector<int> choices;
+			for (int element_index = 0; element_index < context.elements.size(); element_index++) {
+				const SolvedElement &element = context.elements[element_index];
+				if (element.defer_collapse || element.resolve_priority != current_priority || element.remaining <= 1) {
+					continue;
+				}
 				if (element.remaining < min_remaining) {
 					min_remaining = element.remaining;
 					choices.clear();
@@ -757,49 +953,42 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, Vector<C
 					choices.push_back(element_index);
 				}
 			}
-		}
 
-		if (choices.is_empty()) {
-			break;
-		}
+			if (choices.is_empty()) {
+				break;
+			}
 
-		int selected_element_index = choices[rng.rand(choices.size())];
-		SolvedElement &selected_element = context.elements.write[selected_element_index];
-		const CompiledCatalog::TypeData &selected_type = context.catalog.types[selected_element.type_id];
-		int selected_option = _pick_weighted_option(selected_element, rng);
-		if (selected_option < 0) {
-			result.error = "Failed to select a weighted WFC option.";
-			return result;
-		}
+			int selected_element_index = choices[rng.rand(choices.size())];
+			SolvedElement &selected_element = context.elements.write[selected_element_index];
+			int selected_option = _pick_weighted_option(selected_element, rng);
+			if (selected_option < 0) {
+				result.error = "Failed to select a weighted WFC option.";
+				return result;
+			}
 
-		BitMask collapsed;
-		collapsed.resize(selected_element.options.words.size());
-		collapsed.set_bit(selected_option);
-		selected_element.options = collapsed;
-		selected_element.remaining = 1;
-		for (int neighbor_index = 0; neighbor_index < selected_element.connected_elements.size(); neighbor_index++) {
-			enqueue(selected_element.connected_elements[neighbor_index]);
+			BitMask collapsed;
+			collapsed.resize(selected_element.options.words.size());
+			collapsed.set_bit(selected_option);
+			selected_element.options = collapsed;
+			selected_element.remaining = 1;
+			for (int neighbor_index = 0; neighbor_index < selected_element.connected_elements.size(); neighbor_index++) {
+				enqueue(selected_element.connected_elements[neighbor_index]);
+			}
+
+			if (!process_queue()) {
+				return result;
+			}
 		}
 	}
 
-	result.success = true;
-	result.node_ids.resize(context.elements.size());
-	result.selected_options.resize(context.elements.size());
-	for (int element_index = 0; element_index < context.elements.size(); element_index++) {
-		const SolvedElement &element = context.elements[element_index];
-		const CompiledCatalog::TypeData &type_data = context.catalog.types[element.type_id];
-		result.node_ids.write[element_index] = element.node_id;
-		for (int option_index = 0; option_index < type_data.option_names.size(); option_index++) {
-			if (element.options.has_bit(option_index)) {
-				result.selected_options.write[element_index] = type_data.option_names[option_index];
-				break;
-			}
-		}
-		if (result.selected_options[element_index].is_empty()) {
-			result.success = false;
-			result.error = vformat("WFC solver failed to export a selected option for element type '%s'.", String(type_data.name));
-			return result;
-		}
+	if (graph.is_valid()) {
+		_apply_context_to_graph(context, graph);
+		p_graph_processor->post_resolve(graph);
+	}
+
+	if (!_populate_solve_result(context, graph, result, error)) {
+		result.error = error;
+		return result;
 	}
 	return result;
 }
@@ -808,18 +997,21 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, Vector<C
 
 struct WFCSolver::AsyncJob {
 	AuthoringSnapshot snapshot;
+	Ref<WFCGraphProcessor> graph_processor;
 	SolveResult result;
 	bool wait_called = false;
 };
 
 void WFCSolver::_solve_async_task(void *p_userdata) {
 	AsyncJob *job = static_cast<AsyncJob *>(p_userdata);
-	job->result = _solve_snapshot(job->snapshot);
+	job->result = _solve_snapshot(job->snapshot, job->graph_processor);
 }
 
 void WFCSolver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_catalog_set", "catalog_set"), &WFCSolver::set_catalog_set);
 	ClassDB::bind_method(D_METHOD("get_catalog_set"), &WFCSolver::get_catalog_set);
+	ClassDB::bind_method(D_METHOD("set_graph_processor", "graph_processor"), &WFCSolver::set_graph_processor);
+	ClassDB::bind_method(D_METHOD("get_graph_processor"), &WFCSolver::get_graph_processor);
 	ClassDB::bind_method(D_METHOD("set_cell_size", "cell_size"), &WFCSolver::set_cell_size);
 	ClassDB::bind_method(D_METHOD("get_cell_size"), &WFCSolver::get_cell_size);
 	ClassDB::bind_method(D_METHOD("set_seed", "seed"), &WFCSolver::set_seed);
@@ -838,6 +1030,7 @@ void WFCSolver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("materialize"), &WFCSolver::materialize);
 
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "catalog_set", PROPERTY_HINT_RESOURCE_TYPE, "WFCCatalogSet"), "set_catalog_set", "get_catalog_set");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "graph_processor", PROPERTY_HINT_RESOURCE_TYPE, "WFCGraphProcessor"), "set_graph_processor", "get_graph_processor");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "cell_size", PROPERTY_HINT_RANGE, "0.001,1024,0.001,or_greater"), "set_cell_size", "get_cell_size");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "seed", PROPERTY_HINT_RANGE, "0,18446744073709551615,1,or_greater"), "set_seed", "get_seed");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_materialize"), "set_auto_materialize", "is_auto_materialize_enabled");
@@ -895,6 +1088,8 @@ static bool _build_authoring_snapshot(HashSet<ObjectID> &p_tracked_elements, con
 		snapshot_element.node_id = element->get_instance_id();
 		snapshot_element.type = element->get_type();
 		snapshot_element.global_transform = element->get_global_transform();
+		snapshot_element.resolve_priority = element->get_resolve_priority();
+		snapshot_element.defer_collapse = element->is_defer_collapse_enabled();
 
 		TypedArray<WFCParam> options = element->get_options();
 		for (int i = 0; i < options.size(); i++) {
@@ -941,6 +1136,22 @@ static bool _build_authoring_snapshot(HashSet<ObjectID> &p_tracked_elements, con
 	return true;
 }
 
+static void _apply_solve_result_to_live_elements(const SolveResult &p_result) {
+	for (int i = 0; i < p_result.node_ids.size(); i++) {
+		WFCElement *element = Object::cast_to<WFCElement>(ObjectDB::get_instance(p_result.node_ids[i]));
+		if (element == nullptr) {
+			continue;
+		}
+		element->set_resolved_data(p_result.resolved_data[i]);
+		if (p_result.persist_remaining_options[i]) {
+			element->set_selected_option(StringName());
+			element->set_enabled_options(p_result.remaining_options[i]);
+		} else {
+			element->set_selected_option(p_result.selected_options[i]);
+		}
+	}
+}
+
 void WFCSolver::_finish_async_job() {
 	if (async_job == nullptr) {
 		return;
@@ -952,12 +1163,7 @@ void WFCSolver::_finish_async_job() {
 
 	last_error = async_job->result.error;
 	if (async_job->result.success) {
-		for (int i = 0; i < async_job->result.node_ids.size(); i++) {
-			WFCElement *element = Object::cast_to<WFCElement>(ObjectDB::get_instance(async_job->result.node_ids[i]));
-			if (element != nullptr) {
-				element->set_selected_option(async_job->result.selected_options[i]);
-			}
-		}
+		_apply_solve_result_to_live_elements(async_job->result);
 		if (auto_materialize) {
 			materialize();
 		}
@@ -986,6 +1192,14 @@ void WFCSolver::set_catalog_set(const Ref<WFCCatalogSet> &p_catalog_set) {
 
 Ref<WFCCatalogSet> WFCSolver::get_catalog_set() const {
 	return catalog_set;
+}
+
+void WFCSolver::set_graph_processor(const Ref<WFCGraphProcessor> &p_graph_processor) {
+	graph_processor = p_graph_processor;
+}
+
+Ref<WFCGraphProcessor> WFCSolver::get_graph_processor() const {
+	return graph_processor;
 }
 
 void WFCSolver::set_cell_size(float p_cell_size) {
@@ -1082,7 +1296,7 @@ bool WFCSolver::resolve() {
 	Vector<ConnectionBuild> preview_connections;
 
 	emit_signal(SNAME("solve_started"));
-	SolveResult result = _solve_snapshot(snapshot, &preview_connections);
+	SolveResult result = _solve_snapshot(snapshot, graph_processor, &preview_connections);
 	uint64_t solve_end = OS::get_singleton()->get_ticks_usec();
 	_apply_preview_connections(snapshot, preview_connections);
 	uint64_t preview_end = OS::get_singleton()->get_ticks_usec();
@@ -1093,12 +1307,7 @@ bool WFCSolver::resolve() {
 		return false;
 	}
 
-	for (int i = 0; i < result.node_ids.size(); i++) {
-		WFCElement *element = Object::cast_to<WFCElement>(ObjectDB::get_instance(result.node_ids[i]));
-		if (element != nullptr) {
-			element->set_selected_option(result.selected_options[i]);
-		}
-	}
+	_apply_solve_result_to_live_elements(result);
 	uint64_t apply_end = OS::get_singleton()->get_ticks_usec();
 	if (auto_materialize) {
 		materialize();
@@ -1131,6 +1340,7 @@ Error WFCSolver::resolve_async() {
 
 	async_job = memnew(AsyncJob);
 	async_job->snapshot = snapshot;
+	async_job->graph_processor = graph_processor;
 	async_task_id = WorkerThreadPool::get_singleton()->add_native_task(&WFCSolver::_solve_async_task, async_job, true, SNAME("WFCSolver"));
 	set_process(true);
 	emit_signal(SNAME("solve_started"));

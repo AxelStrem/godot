@@ -120,6 +120,9 @@ class WFCElement : public Node3D {
 	TypedArray<WFCParam> options;
 	TypedArray<WFCNeighbor> neighbor_points;
 	StringName selected_option;
+	int resolve_priority = 0;
+	bool defer_collapse = false;
+	Dictionary resolved_data;
 	HashMap<StringName, Ref<PackedScene>> nested_scenes;
 	HashMap<StringName, ObjectID> connected_neighbors;
 	static HashMap<String, Ref<PackedScene>> nested_scene_cache;
@@ -144,8 +147,15 @@ public:
 
 	void set_selected_option(const StringName &p_selected_option);
 	StringName get_selected_option() const;
+	void set_resolve_priority(int p_resolve_priority);
+	int get_resolve_priority() const;
+	void set_defer_collapse(bool p_defer_collapse);
+	bool is_defer_collapse_enabled() const;
+	void set_resolved_data(const Dictionary &p_resolved_data);
+	Dictionary get_resolved_data() const;
 
 	PackedStringArray get_enabled_options() const;
+	void set_enabled_options(const PackedStringArray &p_enabled_options);
 	void clear_connected_neighbors();
 	void set_connected_neighbor(const StringName &p_side_name, WFCElement *p_element);
 	bool has_connected_neighbor(const StringName &p_side_name) const;

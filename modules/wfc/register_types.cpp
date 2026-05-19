@@ -8,6 +8,7 @@
 
 #include "register_types.h"
 
+#include "wfc_graph.h"
 #include "wfc_solver.h"
 #include "wfc_types.h"
 
@@ -22,6 +23,9 @@ void initialize_wfc_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(WFCCatalogSet);
 	GDREGISTER_CLASS(WFCParam);
 	GDREGISTER_CLASS(WFCNeighbor);
+	GDREGISTER_CLASS(WFCGraphElement);
+	GDREGISTER_CLASS(WFCGraph);
+	GDREGISTER_CLASS(WFCGraphProcessor);
 	GDREGISTER_CLASS(WFCElement);
 	GDREGISTER_CLASS(WFCSolver);
 }

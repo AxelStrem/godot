@@ -12,6 +12,7 @@
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/string/print_string.h"
+#include "core/templates/hash_set.h"
 
 HashMap<String, Ref<PackedScene>> WFCElement::nested_scene_cache;
 
@@ -282,7 +283,14 @@ void WFCElement::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_neighbor_points"), &WFCElement::get_neighbor_points);
 	ClassDB::bind_method(D_METHOD("set_selected_option", "selected_option"), &WFCElement::set_selected_option);
 	ClassDB::bind_method(D_METHOD("get_selected_option"), &WFCElement::get_selected_option);
+	ClassDB::bind_method(D_METHOD("set_resolve_priority", "resolve_priority"), &WFCElement::set_resolve_priority);
+	ClassDB::bind_method(D_METHOD("get_resolve_priority"), &WFCElement::get_resolve_priority);
+	ClassDB::bind_method(D_METHOD("set_defer_collapse", "defer_collapse"), &WFCElement::set_defer_collapse);
+	ClassDB::bind_method(D_METHOD("is_defer_collapse_enabled"), &WFCElement::is_defer_collapse_enabled);
+	ClassDB::bind_method(D_METHOD("set_resolved_data", "resolved_data"), &WFCElement::set_resolved_data);
+	ClassDB::bind_method(D_METHOD("get_resolved_data"), &WFCElement::get_resolved_data);
 	ClassDB::bind_method(D_METHOD("get_enabled_options"), &WFCElement::get_enabled_options);
+	ClassDB::bind_method(D_METHOD("set_enabled_options", "enabled_options"), &WFCElement::set_enabled_options);
 	ClassDB::bind_method(D_METHOD("has_connected_neighbor", "side_name"), &WFCElement::has_connected_neighbor);
 	ClassDB::bind_method(D_METHOD("get_connected_neighbor", "side_name"), &WFCElement::get_connected_neighbor);
 	ClassDB::bind_method(D_METHOD("apply_selected_option", "option"), &WFCElement::apply_selected_option);
@@ -294,7 +302,10 @@ void WFCElement::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "type"), "set_type", "get_type");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "options", PROPERTY_HINT_ARRAY_TYPE, MAKE_RESOURCE_TYPE_HINT("WFCParam")), "set_options", "get_options");
 	ADD_PROPERTY(PropertyInfo(Variant::ARRAY, "neighbor_points", PROPERTY_HINT_ARRAY_TYPE, MAKE_RESOURCE_TYPE_HINT("WFCNeighbor")), "set_neighbor_points", "get_neighbor_points");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "resolve_priority", PROPERTY_HINT_RANGE, "-1024,1024,1,or_greater,or_less"), "set_resolve_priority", "get_resolve_priority");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "defer_collapse"), "set_defer_collapse", "is_defer_collapse_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "selected_option", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_INTERNAL), "set_selected_option", "get_selected_option");
+	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "resolved_data", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_INTERNAL), "set_resolved_data", "get_resolved_data");
 }
 
 void WFCElement::_notification(int p_what) {
@@ -397,6 +408,30 @@ StringName WFCElement::get_selected_option() const {
 	return selected_option;
 }
 
+void WFCElement::set_resolve_priority(int p_resolve_priority) {
+	resolve_priority = p_resolve_priority;
+}
+
+int WFCElement::get_resolve_priority() const {
+	return resolve_priority;
+}
+
+void WFCElement::set_defer_collapse(bool p_defer_collapse) {
+	defer_collapse = p_defer_collapse;
+}
+
+bool WFCElement::is_defer_collapse_enabled() const {
+	return defer_collapse;
+}
+
+void WFCElement::set_resolved_data(const Dictionary &p_resolved_data) {
+	resolved_data = p_resolved_data;
+}
+
+Dictionary WFCElement::get_resolved_data() const {
+	return resolved_data;
+}
+
 PackedStringArray WFCElement::get_enabled_options() const {
 	PackedStringArray enabled_options;
 	for (int i = 0; i < options.size(); i++) {
@@ -406,6 +441,28 @@ PackedStringArray WFCElement::get_enabled_options() const {
 		}
 	}
 	return enabled_options;
+}
+
+void WFCElement::set_enabled_options(const PackedStringArray &p_enabled_options) {
+	HashSet<StringName> enabled_set;
+	for (int i = 0; i < p_enabled_options.size(); i++) {
+		enabled_set.insert(StringName(p_enabled_options[i]));
+	}
+	bool selected_still_enabled = selected_option.is_empty();
+	for (int i = 0; i < options.size(); i++) {
+		Ref<WFCParam> option_data = options[i];
+		if (!option_data.is_valid()) {
+			continue;
+		}
+		bool enabled = enabled_set.has(option_data->get_option());
+		option_data->set_enabled(enabled);
+		if (enabled && option_data->get_option() == selected_option) {
+			selected_still_enabled = true;
+		}
+	}
+	if (!selected_still_enabled) {
+		selected_option = StringName();
+	}
 }
 
 void WFCElement::clear_connected_neighbors() {
