@@ -14,6 +14,7 @@
 #include "core/templates/hash_set.h"
 #include "scene/main/node.h"
 
+#include "wfc_graph.h"
 #include "wfc_types.h"
 
 class WFCSolver : public Node {
@@ -22,6 +23,7 @@ class WFCSolver : public Node {
 	struct AsyncJob;
 
 	Ref<WFCCatalogSet> catalog_set;
+	Ref<WFCGraphProcessor> graph_processor;
 	HashSet<ObjectID> tracked_elements;
 	float cell_size = 4.0f;
 	uint64_t seed = 0;
@@ -43,6 +45,8 @@ protected:
 public:
 	void set_catalog_set(const Ref<WFCCatalogSet> &p_catalog_set);
 	Ref<WFCCatalogSet> get_catalog_set() const;
+	void set_graph_processor(const Ref<WFCGraphProcessor> &p_graph_processor);
+	Ref<WFCGraphProcessor> get_graph_processor() const;
 
 	void set_cell_size(float p_cell_size);
 	float get_cell_size() const;
