@@ -14,6 +14,7 @@
 #include "core/os/os.h"
 #include "core/string/print_string.h"
 #include "core/templates/hash_map.h"
+#include "core/templates/sort_array.h"
 
 namespace {
 
@@ -872,15 +873,26 @@ static bool _build_authoring_snapshot(HashSet<ObjectID> &p_tracked_elements, con
 	r_snapshot.seed = p_seed;
 
 	Vector<ObjectID> stale_elements;
+	Vector<WFCElement *> ordered_elements;
 	for (const ObjectID &element_id : p_tracked_elements) {
 		WFCElement *element = Object::cast_to<WFCElement>(ObjectDB::get_instance(element_id));
 		if (element == nullptr) {
 			stale_elements.push_back(element_id);
 			continue;
 		}
+		ordered_elements.push_back(element);
+	}
+
+	if (ordered_elements.size() > 1) {
+		SortArray<WFCElement *, Node::Comparator> sorter;
+		sorter.sort(ordered_elements.ptrw(), ordered_elements.size());
+	}
+
+	for (int element_index = 0; element_index < ordered_elements.size(); element_index++) {
+		WFCElement *element = ordered_elements[element_index];
 
 		AuthoringElement snapshot_element;
-		snapshot_element.node_id = element_id;
+		snapshot_element.node_id = element->get_instance_id();
 		snapshot_element.type = element->get_type();
 		snapshot_element.global_transform = element->get_global_transform();
 
