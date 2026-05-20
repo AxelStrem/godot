@@ -338,9 +338,7 @@ struct LightData { // This structure needs to be as packed as possible.
 	mediump float specular_amount;
 	mediump float shadow_opacity;
 
-	mediump float spread_cos_angle;
-	mediump float spread_attenuation;
-	mediump float spread_bleed;
+	mediump vec3 pad;
 	lowp uint bake_mode;
 
 	mediump vec4 area_width;
@@ -1298,9 +1296,7 @@ struct LightData { // This structure needs to be as packed as possible.
 	mediump float specular_amount;
 	mediump float shadow_opacity;
 
-	mediump float spread_cos_angle;
-	mediump float spread_attenuation;
-	mediump float spread_bleed;
+	mediump vec3 pad;
 	lowp uint bake_mode;
 
 	mediump vec4 area_width;
@@ -1815,28 +1811,6 @@ void light_process_area(uint idx, vec3 vertex, vec3 eye_vec, vec3 normal, vec3 f
 	vec3 area_b_dir = normalize(area_height);
 	vec3 pos_local_to_light = vec3(dot(light_to_vert, area_a_dir), dot(light_to_vert, area_b_dir), dot(light_to_vert, -area_direction));
 
-	// Spread attenuation: frustum-shaped falloff beyond the rectangle's edge.
-	float spread_cos = area_lights[idx].spread_cos_angle;
-	float spread_bleed = area_lights[idx].spread_bleed;
-	float spread_atten = 1.0;
-	if (spread_cos > 1e-4) {
-		
-		float tan_spread = sqrt(2.0*spread_cos - spread_cos * spread_cos) / (1.0-spread_cos);
-		
-		vec2 r = vec2(a_half_len, b_half_len);
-
-		vec2 v1 = -pos_local_to_light.z/tan_spread + r;
-		vec2 v2 = abs(pos_local_to_light.xy);
-
-		vec2 proj = v2/v1;
-
-		float att = area_lights[idx].spread_attenuation;
-		vec2 d = (clamp(proj, 1.0, 1.0+att)-1.0)/att;
-		float falloff =  ((1.0 - d.x*d.x)*(1.0-d.y*d.y));
-
-		spread_atten = mix(spread_bleed, 1.0, pow(falloff, 1.0));
-	}
-
 	vec3 closest_point_local_to_light = vec3(clamp(pos_local_to_light.x, -a_half_len, a_half_len), clamp(pos_local_to_light.y, -b_half_len, b_half_len), 0);
 	float dist = length(closest_point_local_to_light - pos_local_to_light);
 
@@ -1859,7 +1833,6 @@ void light_process_area(uint idx, vec3 vertex, vec3 eye_vec, vec3 normal, vec3 f
 
 	float light_length = max(0.0, dist);
 	float light_attenuation_raw = get_omni_spot_attenuation(light_length, area_lights[idx].inv_radius, area_lights[idx].attenuation);
-	light_attenuation_raw *= spread_atten;
 	float light_attenuation_ltc = light_attenuation_raw * light_length * light_length; // solid angle already decreases by inverse square, so attenuation power is 2.0 by default -> subtract 2.0
 
 	vec3 light_color = area_lights[idx].color;

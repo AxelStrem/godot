@@ -100,16 +100,10 @@ public:
 	virtual Vector2 light_area_get_size(RID p_light) const override { return Vector2(); }
 	virtual void light_area_set_normalize_energy(RID p_light, bool p_enabled) override {}
 	virtual bool light_area_get_normalize_energy(RID p_light) const override { return true; }
-	virtual void light_area_set_use_node_scale(RID p_light, bool p_enabled) override {}
-	virtual bool light_area_get_use_node_scale(RID p_light) const override { return false; }
+	virtual void light_area_set_line_mode(RID p_light, bool p_enabled) override {}
+	virtual bool light_area_get_line_mode(RID p_light) const override { return false; }
 	virtual void light_area_set_texture(RID p_light, RID p_texture) override {}
 	virtual RID light_area_get_texture(RID p_light) const override { return RID(); }
-	virtual void light_area_set_spread_angle(RID p_light, float p_angle) override {}
-	virtual float light_area_get_spread_angle(RID p_light) const override { return 180.0f; }
-	virtual void light_area_set_spread_attenuation(RID p_light, float p_attenuation) override {}
-	virtual float light_area_get_spread_attenuation(RID p_light) const override { return 1.0f; }
-	virtual void light_area_set_spread_bleed(RID p_light, float p_bleed) override {}
-	virtual float light_area_get_spread_bleed(RID p_light) const override { return 0.0f; }
 
 	virtual bool light_has_shadow(RID p_light) const override { return false; }
 	virtual bool light_has_projector(RID p_light) const override { return false; }

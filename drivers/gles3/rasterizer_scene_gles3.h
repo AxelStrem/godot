@@ -197,9 +197,7 @@ private:
 		float specular_amount;
 		float shadow_opacity;
 
-		float spread_cos_angle;
-		float spread_attenuation;
-		float spread_bleed;
+		float pad[3];
 		uint32_t bake_mode;
 
 		float area_width[4]; // 4th is padding

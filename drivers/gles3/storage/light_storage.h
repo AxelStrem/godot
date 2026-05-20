@@ -68,11 +68,8 @@ struct Light {
 	RSE::LightDirectionalSkyMode directional_sky_mode = RSE::LIGHT_DIRECTIONAL_SKY_MODE_LIGHT_AND_SKY;
 	Vector2 area_size = Vector2(1, 1);
 	bool area_normalize_energy = true;
-	bool area_use_node_scale = false;
+	bool area_line_mode = false;
 	RID area_texture;
-	float area_spread_angle = 180.0f;
-	float area_spread_attenuation = 1.0f;
-	float area_spread_bleed = 0.0f;
 	uint64_t version = 0;
 
 	Dependency dependency;
@@ -353,16 +350,10 @@ public:
 
 	virtual void light_area_set_normalize_energy(RID p_light, bool p_enabled) override;
 	virtual bool light_area_get_normalize_energy(RID p_light) const override;
-	virtual void light_area_set_use_node_scale(RID p_light, bool p_enabled) override;
-	virtual bool light_area_get_use_node_scale(RID p_light) const override;
+	virtual void light_area_set_line_mode(RID p_light, bool p_enabled) override;
+	virtual bool light_area_get_line_mode(RID p_light) const override;
 	virtual void light_area_set_texture(RID p_light, RID p_texture) override;
 	virtual RID light_area_get_texture(RID p_light) const override;
-	virtual void light_area_set_spread_angle(RID p_light, float p_angle) override;
-	virtual float light_area_get_spread_angle(RID p_light) const override;
-	virtual void light_area_set_spread_attenuation(RID p_light, float p_attenuation) override;
-	virtual float light_area_get_spread_attenuation(RID p_light) const override;
-	virtual void light_area_set_spread_bleed(RID p_light, float p_bleed) override;
-	virtual float light_area_get_spread_bleed(RID p_light) const override;
 
 	virtual RSE::LightDirectionalShadowMode light_directional_get_shadow_mode(RID p_light) override;
 	virtual RSE::LightOmniShadowMode light_omni_get_shadow_mode(RID p_light) override;

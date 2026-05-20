@@ -362,21 +362,24 @@ bool LightStorage::light_area_get_normalize_energy(RID p_light) const {
 	return light->area_normalize_energy;
 }
 
-void LightStorage::light_area_set_use_node_scale(RID p_light, bool p_enabled) {
+void LightStorage::light_area_set_line_mode(RID p_light, bool p_enabled) {
 	Light *light = light_owner.get_or_null(p_light);
-	if (light->area_use_node_scale == p_enabled) {
+	ERR_FAIL_NULL(light);
+
+	if (light->area_line_mode == p_enabled) {
 		return;
 	}
 
-	light->area_use_node_scale = p_enabled;
-	// The range in which objects are illuminated change, so the z-range of the shadow map needs to adjust accordingly.
+	light->area_line_mode = p_enabled;
 	light->version++;
 	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
 }
 
-bool LightStorage::light_area_get_use_node_scale(RID p_light) const {
+bool LightStorage::light_area_get_line_mode(RID p_light) const {
 	const Light *light = light_owner.get_or_null(p_light);
-	return light->area_use_node_scale;
+	ERR_FAIL_NULL_V(light, false);
+
+	return light->area_line_mode;
 }
 
 void LightStorage::light_area_set_texture(RID p_light, RID p_texture) {
@@ -384,39 +387,6 @@ void LightStorage::light_area_set_texture(RID p_light, RID p_texture) {
 }
 RID LightStorage::light_area_get_texture(RID p_light) const {
 	return RID(); // not implemented
-}
-
-void LightStorage::light_area_set_spread_angle(RID p_light, float p_angle) {
-	Light *light = light_owner.get_or_null(p_light);
-	light->area_spread_angle = CLAMP(p_angle, 0.0f, 180.0f);
-	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
-}
-
-float LightStorage::light_area_get_spread_angle(RID p_light) const {
-	const Light *light = light_owner.get_or_null(p_light);
-	return light->area_spread_angle;
-}
-
-void LightStorage::light_area_set_spread_attenuation(RID p_light, float p_attenuation) {
-	Light *light = light_owner.get_or_null(p_light);
-	light->area_spread_attenuation = p_attenuation;
-	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
-}
-
-float LightStorage::light_area_get_spread_attenuation(RID p_light) const {
-	const Light *light = light_owner.get_or_null(p_light);
-	return light->area_spread_attenuation;
-}
-
-void LightStorage::light_area_set_spread_bleed(RID p_light, float p_bleed) {
-	Light *light = light_owner.get_or_null(p_light);
-	light->area_spread_bleed = CLAMP(p_bleed, 0.0f, 1.0f);
-	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
-}
-
-float LightStorage::light_area_get_spread_bleed(RID p_light) const {
-	const Light *light = light_owner.get_or_null(p_light);
-	return light->area_spread_bleed;
 }
 
 RSE::LightBakeMode LightStorage::light_get_bake_mode(RID p_light) {
@@ -463,6 +433,10 @@ AABB LightStorage::light_get_aabb(RID p_light) const {
 		};
 		case RSE::LIGHT_AREA: {
 			float len = light->param[RSE::LIGHT_PARAM_RANGE];
+			if (light->area_line_mode) {
+				Vector3 half_extents = light->area_size.x >= light->area_size.y ? Vector3(light->area_size.x * 0.5f + len, len, len) : Vector3(len, light->area_size.y * 0.5f + len, len);
+				return AABB(-half_extents, half_extents * 2.0f);
+			}
 
 			float width = light->area_size.x / 2.0 + len;
 			float height = light->area_size.y / 2.0 + len;

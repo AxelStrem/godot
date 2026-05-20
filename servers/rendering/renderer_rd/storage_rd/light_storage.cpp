@@ -449,21 +449,24 @@ bool LightStorage::light_area_get_normalize_energy(RID p_light) const {
 	return light->area_normalize_energy;
 }
 
-void LightStorage::light_area_set_use_node_scale(RID p_light, bool p_enabled) {
+void LightStorage::light_area_set_line_mode(RID p_light, bool p_enabled) {
 	Light *light = light_owner.get_or_null(p_light);
-	if (light->area_use_node_scale == p_enabled) {
+	ERR_FAIL_NULL(light);
+
+	if (light->area_line_mode == p_enabled) {
 		return;
 	}
 
-	light->area_use_node_scale = p_enabled;
-	// The illuminated range and normalized energy depend on effective area dimensions.
+	light->area_line_mode = p_enabled;
 	light->version++;
 	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
 }
 
-bool LightStorage::light_area_get_use_node_scale(RID p_light) const {
+bool LightStorage::light_area_get_line_mode(RID p_light) const {
 	const Light *light = light_owner.get_or_null(p_light);
-	return light->area_use_node_scale;
+	ERR_FAIL_NULL_V(light, false);
+
+	return light->area_line_mode;
 }
 
 void LightStorage::light_area_set_texture(RID p_light, RID p_texture) {
@@ -492,39 +495,6 @@ void LightStorage::light_area_set_texture(RID p_light, RID p_texture) {
 RID LightStorage::light_area_get_texture(RID p_light) const {
 	const Light *light = light_owner.get_or_null(p_light);
 	return light->area_texture;
-}
-
-void LightStorage::light_area_set_spread_angle(RID p_light, float p_angle) {
-	Light *light = light_owner.get_or_null(p_light);
-	light->area_spread_angle = CLAMP(p_angle, 0.0f, 180.0f);
-	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
-}
-
-float LightStorage::light_area_get_spread_angle(RID p_light) const {
-	const Light *light = light_owner.get_or_null(p_light);
-	return light->area_spread_angle;
-}
-
-void LightStorage::light_area_set_spread_attenuation(RID p_light, float p_attenuation) {
-	Light *light = light_owner.get_or_null(p_light);
-	light->area_spread_attenuation = p_attenuation;
-	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
-}
-
-float LightStorage::light_area_get_spread_attenuation(RID p_light) const {
-	const Light *light = light_owner.get_or_null(p_light);
-	return light->area_spread_attenuation;
-}
-
-void LightStorage::light_area_set_spread_bleed(RID p_light, float p_bleed) {
-	Light *light = light_owner.get_or_null(p_light);
-	light->area_spread_bleed = CLAMP(p_bleed, 0.0f, 1.0f);
-	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
-}
-
-float LightStorage::light_area_get_spread_bleed(RID p_light) const {
-	const Light *light = light_owner.get_or_null(p_light);
-	return light->area_spread_bleed;
 }
 
 uint32_t LightStorage::light_get_max_sdfgi_cascade(RID p_light) {
@@ -578,6 +548,12 @@ AABB LightStorage::light_get_aabb(RID p_light) const {
 		};
 		case RSE::LIGHT_AREA: {
 			float len = light->param[RSE::LIGHT_PARAM_RANGE];
+			if (light->area_line_mode) {
+				float half_length = light->area_size.x * 0.5f;
+				float half_width = light->area_size.y * 0.5f;
+				Vector3 half_extents = Vector3(half_length + len, half_width + len, half_width + len);
+				return AABB(-half_extents, half_extents * 2.0f);
+			}
 			float width = light->area_size.x / 2.0 + len;
 			float height = light->area_size.y / 2.0 + len;
 			return AABB(-Vector3(width, height, 0), Vector3(width * 2, height * 2, -len));
@@ -1106,6 +1082,8 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 		light_data.specular_amount = light->param[RSE::LIGHT_PARAM_SPECULAR] * 2.0;
 		light_data.volumetric_fog_energy = light->param[RSE::LIGHT_PARAM_VOLUMETRIC_FOG_ENERGY];
 		light_data.bake_mode = light->bake_mode;
+		light_data.pad[0] = 0.0f;
+		light_data.pad[1] = 0.0f;
 
 		float radius = MAX(0.001, light->param[RSE::LIGHT_PARAM_RANGE]);
 		light_data.inv_radius = 1.0 / radius;
@@ -1129,19 +1107,9 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 		float spot_angle = light->param[RSE::LIGHT_PARAM_SPOT_ANGLE];
 		light_data.cos_spot_angle = Math::cos(Math::deg_to_rad(spot_angle));
 		if (type == RSE::LIGHT_AREA) {
-			Vector3 area_vec_a = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(1, 0, 0)));
-			Vector3 area_vec_b = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(0, 1, 0)));
-
-			if (!light->area_use_node_scale) {
-				area_vec_a = area_vec_a.normalized();
-				area_vec_b = area_vec_b.normalized();
-			}
-
-			area_vec_a *= area_size.x;
-			area_vec_b *= area_size.y;
-
-			float area_width = area_vec_a.length();
-			float area_height = area_vec_b.length();
+			light_data.pad[0] = light->area_line_mode ? 1.0f : 0.0f;
+			Vector3 area_vec_a = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(1, 0, 0))).normalized() * area_size.x;
+			Vector3 area_vec_b = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(0, 1, 0))).normalized() * area_size.y;
 
 			light_data.area_width[0] = area_vec_a.x;
 			light_data.area_width[1] = area_vec_a.y;
@@ -1150,19 +1118,21 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 			light_data.area_height[0] = area_vec_b.x;
 			light_data.area_height[1] = area_vec_b.y;
 			light_data.area_height[2] = area_vec_b.z;
-			light_data.inv_spot_attenuation = 1.0f / (radius + Vector2(area_width, area_height).length() / 2.0f); // center range
+			light_data.inv_spot_attenuation = 1.0f / (radius + area_size.length() / 2.0f);
 
 			if (light->area_normalize_energy) {
 				// normalization to make larger lights output same amount of light as smaller lights with same energy
-				float surface_area = MAX(area_width * area_height, 0.00001f);
+				float surface_area = area_size.x * area_size.y;
+				if (light->area_line_mode) {
+					float line_length = area_size.x;
+					float effective_width = MAX(area_size.y, MAX(line_length * 0.0005f, 0.001f));
+					surface_area = line_length * effective_width;
+				}
+				surface_area = MAX(surface_area, 0.00001f);
 				light_data.color[0] /= surface_area;
 				light_data.color[1] /= surface_area;
 				light_data.color[2] /= surface_area;
 			}
-
-			light_data.spread_cos_angle = Math::cos(Math::deg_to_rad(light->area_spread_angle * 0.5f));
-			light_data.spread_attenuation = 1.0f / light->area_spread_attenuation;
-			light_data.spread_bleed = light->area_spread_bleed;
 		}
 		light_data.mask = light->cull_mask;
 
@@ -1303,7 +1273,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 		light_instance->cull_mask = light->cull_mask;
 
 		// hook for subclass to do further processing.
-		RendererSceneRenderRD::get_singleton()->setup_added_light(type, light_transform, radius, spot_angle, area_size);
+		RendererSceneRenderRD::get_singleton()->setup_added_light(type, light_transform, radius, spot_angle, area_size, light->area_line_mode);
 
 		r_positional_light_count++;
 	}
