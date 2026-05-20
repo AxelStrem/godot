@@ -1156,10 +1156,12 @@ void WFCSolver::_finish_async_job() {
 	if (async_job == nullptr) {
 		return;
 	}
+	uint64_t finish_begin = OS::get_singleton()->get_ticks_usec();
 	if (!async_job->wait_called) {
 		WorkerThreadPool::get_singleton()->wait_for_task_completion(async_task_id);
 		async_job->wait_called = true;
 	}
+	uint64_t wait_end = OS::get_singleton()->get_ticks_usec();
 
 	last_error = async_job->result.error;
 	if (async_job->result.success) {
@@ -1168,8 +1170,11 @@ void WFCSolver::_finish_async_job() {
 			materialize();
 		}
 	}
+	uint64_t apply_end = OS::get_singleton()->get_ticks_usec();
 
 	emit_signal(SNAME("solve_completed"), async_job->result.success, async_job->result.error);
+	uint64_t signal_end = OS::get_singleton()->get_ticks_usec();
+	print_line(vformat("WFC resolve_async finish: elements=%d, wait=%.2f ms, apply=%.2f ms, signal=%.2f ms, total=%.2f ms, success=%s", async_job->result.node_ids.size(), _usec_to_msec(wait_end - finish_begin), _usec_to_msec(apply_end - wait_end), _usec_to_msec(signal_end - apply_end), _usec_to_msec(signal_end - finish_begin), async_job->result.success ? "true" : "false"));
 	_clear_async_job();
 }
 
@@ -1320,6 +1325,7 @@ bool WFCSolver::resolve() {
 }
 
 Error WFCSolver::resolve_async() {
+	uint64_t resolve_begin = OS::get_singleton()->get_ticks_usec();
 	if (async_job != nullptr) {
 		return ERR_BUSY;
 	}
@@ -1334,15 +1340,20 @@ Error WFCSolver::resolve_async() {
 		emit_signal(SNAME("solve_completed"), false, last_error);
 		return ERR_CANT_CREATE;
 	}
+	uint64_t snapshot_end = OS::get_singleton()->get_ticks_usec();
 	Vector<ConnectionBuild> preview_connections;
 	_build_connections(snapshot, preview_connections);
+	uint64_t preview_build_end = OS::get_singleton()->get_ticks_usec();
 	_apply_preview_connections(snapshot, preview_connections);
+	uint64_t preview_apply_end = OS::get_singleton()->get_ticks_usec();
 
 	async_job = memnew(AsyncJob);
 	async_job->snapshot = snapshot;
 	async_job->graph_processor = graph_processor;
 	async_task_id = WorkerThreadPool::get_singleton()->add_native_task(&WFCSolver::_solve_async_task, async_job, true, SNAME("WFCSolver"));
 	set_process(true);
+	uint64_t submit_end = OS::get_singleton()->get_ticks_usec();
+	print_line(vformat("WFC resolve_async setup: elements=%d, connections=%d, snapshot=%.2f ms, preview_build=%.2f ms, preview_apply=%.2f ms, submit=%.2f ms, total=%.2f ms", snapshot.elements.size(), preview_connections.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(preview_build_end - snapshot_end), _usec_to_msec(preview_apply_end - preview_build_end), _usec_to_msec(submit_end - preview_apply_end), _usec_to_msec(submit_end - resolve_begin)));
 	emit_signal(SNAME("solve_started"));
 	return OK;
 }
