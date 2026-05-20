@@ -233,7 +233,7 @@ public:
 
 	void begin(const Transform3D &p_view_transform, const Projection &p_cam_projection, bool p_flip_y);
 
-	_FORCE_INLINE_ void add_light(LightType p_type, const Transform3D &p_transform, float p_radius, float p_spot_aperture, const Vector2 &p_area_size) {
+	_FORCE_INLINE_ void add_light(LightType p_type, const Transform3D &p_transform, float p_radius, float p_spot_aperture, const Vector2 &p_area_size, bool p_area_line_mode = false) {
 		if (p_type == LIGHT_TYPE_OMNI && cluster_count_by_type[ELEMENT_TYPE_OMNI_LIGHT] == max_elements_by_type) {
 			return; // Max number elements reached.
 		}
@@ -333,14 +333,23 @@ public:
 
 			cluster_count_by_type[ELEMENT_TYPE_SPOT_LIGHT]++;
 		} else { /* LIGHT_TYPE_AREA */
-			Vector3 scale = Vector3(p_area_size.x / 2.0 + radius, p_area_size.y / 2.0 + radius, radius / 2.0);
+			Vector3 scale;
+			if (p_area_line_mode) {
+				float half_length = p_area_size.x * 0.5f;
+				float half_width = p_area_size.y * 0.5f;
+				scale = Vector3(half_length + radius, half_width + radius, half_width + radius);
+			} else {
+				scale = Vector3(p_area_size.x / 2.0 + radius, p_area_size.y / 2.0 + radius, radius / 2.0);
+			}
 
 			for (uint32_t i = 0; i < 3; i++) {
 				float s = xform.basis.rows[i].length();
 				//scale[i] *= s; // lights ignore scale
 				xform.basis.rows[i] /= s;
 			}
-			xform.origin -= xform.basis.get_column(Vector3::AXIS_Z) * scale.z; // translate center to center of box
+			if (!p_area_line_mode) {
+				xform.origin -= xform.basis.get_column(Vector3::AXIS_Z) * scale.z; // translate center to center of box
+			}
 
 			float depth = -xform.origin.z;
 			float box_depth = Math::abs(xform.basis.xform_inv(Vector3(0, 0, -1)).dot(scale));

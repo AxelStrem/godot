@@ -83,6 +83,8 @@ public:
 	virtual bool light_area_get_normalize_energy(RID p_light) const = 0;
 	virtual void light_area_set_use_node_scale(RID p_light, bool p_enabled) = 0;
 	virtual bool light_area_get_use_node_scale(RID p_light) const = 0;
+	virtual void light_area_set_line_mode(RID p_light, bool p_enabled) = 0;
+	virtual bool light_area_get_line_mode(RID p_light) const = 0;
 	virtual void light_area_set_texture(RID p_light, RID p_texture) = 0;
 	virtual RID light_area_get_texture(RID p_light) const = 0;
 	virtual void light_area_set_spread_angle(RID p_light, float p_angle) = 0;

@@ -103,10 +103,10 @@ bool RenderingLightCuller::_prepare_light(const RendererSceneCull::Instance &p_i
 			lsource.range = RSG::light_storage->light_get_param(p_instance.base, RSE::LIGHT_PARAM_RANGE);
 			break;
 		case RSE::LIGHT_AREA: {
-			lsource.type = LightSource::ST_AREA;
 			lsource.area_size = RSG::light_storage->light_area_get_size(p_instance.base);
 			float half_diagonal = lsource.area_size.length() / 2.0;
 			lsource.range = RSG::light_storage->light_get_param(p_instance.base, RSE::LIGHT_PARAM_RANGE) + half_diagonal;
+			lsource.type = RSG::light_storage->light_area_get_line_mode(p_instance.base) ? LightSource::ST_OMNI : LightSource::ST_AREA;
 		} break;
 		case RSE::LIGHT_DIRECTIONAL:
 			lsource.type = LightSource::ST_DIRECTIONAL;

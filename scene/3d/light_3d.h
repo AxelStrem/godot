@@ -249,6 +249,7 @@ private:
 	float area_spread_attenuation = 1.0f;
 	float area_spread_bleed = 0.0f;
 	bool area_use_node_scale = false;
+	bool area_line_mode = false;
 
 protected:
 	static void _bind_methods();
@@ -273,6 +274,8 @@ public:
 	float get_area_spread_bleed() const;
 	void set_area_use_node_scale(bool p_enable);
 	bool is_area_using_node_scale() const;
+	void set_area_line_mode(bool p_enable);
+	bool is_area_line_mode() const;
 
 	PackedStringArray get_configuration_warnings() const override;
 
