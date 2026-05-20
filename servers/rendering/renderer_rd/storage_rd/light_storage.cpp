@@ -476,6 +476,8 @@ void LightStorage::light_area_set_line_mode(RID p_light, bool p_enabled) {
 bool LightStorage::light_area_get_use_node_scale(RID p_light) const {
 	const Light *light = light_owner.get_or_null(p_light);
 	return light->area_use_node_scale;
+}
+
 bool LightStorage::light_area_get_line_mode(RID p_light) const {
 	const Light *light = light_owner.get_or_null(p_light);
 	ERR_FAIL_NULL_V(light, false);
@@ -1129,8 +1131,6 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 		light_data.specular_amount = light->param[RSE::LIGHT_PARAM_SPECULAR] * 2.0;
 		light_data.volumetric_fog_energy = light->param[RSE::LIGHT_PARAM_VOLUMETRIC_FOG_ENERGY];
 		light_data.bake_mode = light->bake_mode;
-		light_data.pad[0] = 0.0f;
-		light_data.pad[1] = 0.0f;
 
 		float radius = MAX(0.001, light->param[RSE::LIGHT_PARAM_RANGE]);
 		light_data.inv_radius = 1.0 / radius;
@@ -1167,9 +1167,7 @@ void LightStorage::update_light_buffers(RenderDataRD *p_render_data, const Paged
 
 			float area_width = area_vec_a.length();
 			float area_height = area_vec_b.length();
-			light_data.pad[0] = light->area_line_mode ? 1.0f : 0.0f;
-			Vector3 area_vec_a = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(1, 0, 0))).normalized() * area_size.x;
-			Vector3 area_vec_b = inverse_transform.basis.xform(light_transform.basis.xform(Vector3(0, 1, 0))).normalized() * area_size.y;
+			light_data.pad0 = light->area_line_mode ? 1.0f : 0.0f;
 
 			light_data.area_width[0] = area_vec_a.x;
 			light_data.area_width[1] = area_vec_a.y;

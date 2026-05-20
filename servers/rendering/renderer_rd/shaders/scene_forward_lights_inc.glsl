@@ -1009,7 +1009,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 #endif
 		inout hvec3 diffuse_light, inout hvec3 specular_light) {
 	half EPSILON = half(1e-7);
-	bool line_mode = area_lights.data[idx].pad[0] > 0.5;
+	bool line_mode = area_lights.data[idx].pad0 > 0.5;
 	hvec3 area_width = hvec3(area_lights.data[idx].area_width);
 	hvec3 area_height = hvec3(area_lights.data[idx].area_height);
 
