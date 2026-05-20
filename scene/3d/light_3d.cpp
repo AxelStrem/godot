@@ -782,6 +782,8 @@ void AreaLight3D::set_area_use_node_scale(bool p_enable) {
 
 bool AreaLight3D::is_area_using_node_scale() const {
 	return area_use_node_scale;
+}
+
 void AreaLight3D::set_area_line_mode(bool p_enabled) {
 	area_line_mode = p_enabled;
 	RS::get_singleton()->light_area_set_line_mode(light, p_enabled);
