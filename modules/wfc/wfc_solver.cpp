@@ -998,13 +998,15 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, const Re
 struct WFCSolver::AsyncJob {
 	AuthoringSnapshot snapshot;
 	Ref<WFCGraphProcessor> graph_processor;
+	Vector<ConnectionBuild> preview_connections;
+	bool collect_preview_connections = false;
 	SolveResult result;
 	bool wait_called = false;
 };
 
 void WFCSolver::_solve_async_task(void *p_userdata) {
 	AsyncJob *job = static_cast<AsyncJob *>(p_userdata);
-	job->result = _solve_snapshot(job->snapshot, job->graph_processor);
+	job->result = _solve_snapshot(job->snapshot, job->graph_processor, job->collect_preview_connections ? &job->preview_connections : nullptr);
 }
 
 void WFCSolver::_bind_methods() {
@@ -1019,6 +1021,7 @@ void WFCSolver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_auto_materialize", "auto_materialize"), &WFCSolver::set_auto_materialize);
 	ClassDB::bind_method(D_METHOD("is_auto_materialize_enabled"), &WFCSolver::is_auto_materialize_enabled);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &WFCSolver::get_last_error);
+	ClassDB::bind_method(D_METHOD("get_last_resolved_elements"), &WFCSolver::get_last_resolved_elements);
 	ClassDB::bind_method(D_METHOD("is_solving"), &WFCSolver::is_solving);
 	ClassDB::bind_method(D_METHOD("reset"), &WFCSolver::reset);
 	ClassDB::bind_method(D_METHOD("cleanup"), &WFCSolver::cleanup);
@@ -1246,19 +1249,26 @@ void WFCSolver::_finish_async_job() {
 		async_job->wait_called = true;
 	}
 	uint64_t wait_end = OS::get_singleton()->get_ticks_usec();
+	if (!async_job->preview_connections.is_empty()) {
+		_apply_preview_connections(async_job->snapshot, async_job->preview_connections);
+	}
+	uint64_t preview_apply_end = OS::get_singleton()->get_ticks_usec();
 
 	last_error = async_job->result.error;
 	if (async_job->result.success) {
+		last_resolved_node_ids = async_job->result.node_ids;
 		_apply_solve_result_to_live_elements(async_job->result);
 		if (auto_materialize) {
 			materialize();
 		}
+	} else {
+		last_resolved_node_ids.clear();
 	}
 	uint64_t apply_end = OS::get_singleton()->get_ticks_usec();
 
 	emit_signal(SNAME("solve_completed"), async_job->result.success, async_job->result.error);
 	uint64_t signal_end = OS::get_singleton()->get_ticks_usec();
-	print_line(vformat("WFC resolve_async finish: elements=%d, wait=%.2f ms, apply=%.2f ms, signal=%.2f ms, total=%.2f ms, success=%s", async_job->result.node_ids.size(), _usec_to_msec(wait_end - finish_begin), _usec_to_msec(apply_end - wait_end), _usec_to_msec(signal_end - apply_end), _usec_to_msec(signal_end - finish_begin), async_job->result.success ? "true" : "false"));
+	print_line(vformat("WFC resolve_async finish: elements=%d, wait=%.2f ms, preview_apply=%.2f ms, apply=%.2f ms, signal=%.2f ms, total=%.2f ms, success=%s", async_job->result.node_ids.size(), _usec_to_msec(wait_end - finish_begin), _usec_to_msec(preview_apply_end - wait_end), _usec_to_msec(apply_end - preview_apply_end), _usec_to_msec(signal_end - apply_end), _usec_to_msec(signal_end - finish_begin), async_job->result.success ? "true" : "false"));
 	_clear_async_job();
 }
 
@@ -1319,18 +1329,31 @@ String WFCSolver::get_last_error() const {
 	return last_error;
 }
 
+TypedArray<WFCElement> WFCSolver::get_last_resolved_elements() const {
+	TypedArray<WFCElement> elements;
+	for (int i = 0; i < last_resolved_node_ids.size(); i++) {
+		WFCElement *element = Object::cast_to<WFCElement>(ObjectDB::get_instance(last_resolved_node_ids[i]));
+		if (element != nullptr) {
+			elements.append(element);
+		}
+	}
+	return elements;
+}
+
 bool WFCSolver::is_solving() const {
 	return async_job != nullptr;
 }
 
 void WFCSolver::reset() {
 	tracked_elements.clear();
+	last_resolved_node_ids.clear();
 	last_error = String();
 }
 
 void WFCSolver::cleanup() {
 	_clear_async_job();
 	tracked_elements.clear();
+	last_resolved_node_ids.clear();
 }
 
 void WFCSolver::add_element(WFCElement *p_element) {
@@ -1370,6 +1393,7 @@ bool WFCSolver::resolve() {
 		last_error = "WFCSolver is already solving asynchronously.";
 		return false;
 	}
+	last_resolved_node_ids.clear();
 	if (tracked_elements.is_empty()) {
 		_add_branch_recursive(this);
 	}
@@ -1391,12 +1415,14 @@ bool WFCSolver::resolve() {
 	uint64_t preview_end = OS::get_singleton()->get_ticks_usec();
 	last_error = result.error;
 	if (!result.success) {
+		last_resolved_node_ids.clear();
 		print_line(vformat("WFC resolve: elements=%d, connections=%d, snapshot=%.2f ms, solve=%.2f ms, preview=%.2f ms, total=%.2f ms, success=false, error=%s", snapshot.elements.size(), preview_connections.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(solve_end - snapshot_end), _usec_to_msec(preview_end - solve_end), _usec_to_msec(preview_end - resolve_begin), result.error));
 		emit_signal(SNAME("solve_completed"), false, last_error);
 		return false;
 	}
 
 	_apply_solve_result_to_live_elements(result);
+	last_resolved_node_ids = result.node_ids;
 	uint64_t apply_end = OS::get_singleton()->get_ticks_usec();
 	if (auto_materialize) {
 		materialize();
@@ -1413,6 +1439,7 @@ Error WFCSolver::resolve_async() {
 	if (async_job != nullptr) {
 		return ERR_BUSY;
 	}
+	last_resolved_node_ids.clear();
 	if (tracked_elements.is_empty()) {
 		_add_branch_recursive(this);
 	}
@@ -1425,19 +1452,15 @@ Error WFCSolver::resolve_async() {
 		return ERR_CANT_CREATE;
 	}
 	uint64_t snapshot_end = OS::get_singleton()->get_ticks_usec();
-	Vector<ConnectionBuild> preview_connections;
-	_build_connections(snapshot, preview_connections);
-	uint64_t preview_build_end = OS::get_singleton()->get_ticks_usec();
-	_apply_preview_connections(snapshot, preview_connections);
-	uint64_t preview_apply_end = OS::get_singleton()->get_ticks_usec();
 
 	async_job = memnew(AsyncJob);
 	async_job->snapshot = snapshot;
 	async_job->graph_processor = graph_processor;
+	async_job->collect_preview_connections = true;
 	async_task_id = WorkerThreadPool::get_singleton()->add_native_task(&WFCSolver::_solve_async_task, async_job, true, SNAME("WFCSolver"));
 	set_process(true);
 	uint64_t submit_end = OS::get_singleton()->get_ticks_usec();
-	print_line(vformat("WFC resolve_async setup: elements=%d, connections=%d, snapshot=%.2f ms, preview_build=%.2f ms, preview_apply=%.2f ms, submit=%.2f ms, total=%.2f ms", snapshot.elements.size(), preview_connections.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(preview_build_end - snapshot_end), _usec_to_msec(preview_apply_end - preview_build_end), _usec_to_msec(submit_end - preview_apply_end), _usec_to_msec(submit_end - resolve_begin)));
+	print_line(vformat("WFC resolve_async setup: elements=%d, snapshot=%.2f ms, submit=%.2f ms, total=%.2f ms", snapshot.elements.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(submit_end - snapshot_end), _usec_to_msec(submit_end - resolve_begin)));
 	emit_signal(SNAME("solve_started"));
 	return OK;
 }
@@ -1447,6 +1470,7 @@ Error WFCSolver::resolve_branch_async(Node3D *p_root, const Transform3D &p_root_
 	if (async_job != nullptr) {
 		return ERR_BUSY;
 	}
+	last_resolved_node_ids.clear();
 
 	AuthoringSnapshot snapshot;
 	String error;
@@ -1456,19 +1480,15 @@ Error WFCSolver::resolve_branch_async(Node3D *p_root, const Transform3D &p_root_
 		return ERR_CANT_CREATE;
 	}
 	uint64_t snapshot_end = OS::get_singleton()->get_ticks_usec();
-	Vector<ConnectionBuild> preview_connections;
-	_build_connections(snapshot, preview_connections);
-	uint64_t preview_build_end = OS::get_singleton()->get_ticks_usec();
-	_apply_preview_connections(snapshot, preview_connections);
-	uint64_t preview_apply_end = OS::get_singleton()->get_ticks_usec();
 
 	async_job = memnew(AsyncJob);
 	async_job->snapshot = snapshot;
 	async_job->graph_processor = graph_processor;
+	async_job->collect_preview_connections = true;
 	async_task_id = WorkerThreadPool::get_singleton()->add_native_task(&WFCSolver::_solve_async_task, async_job, true, SNAME("WFCSolver"));
 	set_process(true);
 	uint64_t submit_end = OS::get_singleton()->get_ticks_usec();
-	print_line(vformat("WFC resolve_branch_async setup: elements=%d, connections=%d, snapshot=%.2f ms, preview_build=%.2f ms, preview_apply=%.2f ms, submit=%.2f ms, total=%.2f ms", snapshot.elements.size(), preview_connections.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(preview_build_end - snapshot_end), _usec_to_msec(preview_apply_end - preview_build_end), _usec_to_msec(submit_end - preview_apply_end), _usec_to_msec(submit_end - resolve_begin)));
+	print_line(vformat("WFC resolve_branch_async setup: elements=%d, snapshot=%.2f ms, submit=%.2f ms, total=%.2f ms", snapshot.elements.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(submit_end - snapshot_end), _usec_to_msec(submit_end - resolve_begin)));
 	emit_signal(SNAME("solve_started"));
 	return OK;
 }

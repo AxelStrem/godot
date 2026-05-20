@@ -30,6 +30,7 @@ class WFCSolver : public Node {
 	bool auto_materialize = false;
 	uint64_t materialize_pass_id = 0;
 	String last_error;
+	Vector<ObjectID> last_resolved_node_ids;
 	AsyncJob *async_job = nullptr;
 	WorkerThreadPool::TaskID async_task_id = WorkerThreadPool::INVALID_TASK_ID;
 
@@ -58,6 +59,7 @@ public:
 	bool is_auto_materialize_enabled() const;
 
 	String get_last_error() const;
+	TypedArray<WFCElement> get_last_resolved_elements() const;
 	bool is_solving() const;
 
 	void reset();
