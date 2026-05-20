@@ -1026,6 +1026,7 @@ void WFCSolver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_branch", "root"), &WFCSolver::add_branch);
 	ClassDB::bind_method(D_METHOD("connect_neighbors"), &WFCSolver::connect_neighbors);
 	ClassDB::bind_method(D_METHOD("resolve"), &WFCSolver::resolve);
+	ClassDB::bind_method(D_METHOD("resolve_branch_async", "root", "root_global_transform"), &WFCSolver::resolve_branch_async);
 	ClassDB::bind_method(D_METHOD("resolve_async"), &WFCSolver::resolve_async);
 	ClassDB::bind_method(D_METHOD("materialize"), &WFCSolver::materialize);
 
@@ -1056,6 +1057,7 @@ void WFCSolver::_add_branch_recursive(Node *p_node) {
 }
 
 static bool _build_authoring_snapshot(HashSet<ObjectID> &p_tracked_elements, const Ref<WFCCatalogSet> &p_catalog_set, float p_cell_size, uint64_t p_seed, AuthoringSnapshot &r_snapshot, String &r_error) {
+	r_snapshot.elements.clear();
 	if (p_catalog_set.is_null()) {
 		r_error = "WFCSolver requires a WFCCatalogSet resource.";
 		return false;
@@ -1130,6 +1132,88 @@ static bool _build_authoring_snapshot(HashSet<ObjectID> &p_tracked_elements, con
 
 	if (r_snapshot.elements.is_empty()) {
 		r_error = "WFCSolver has no tracked WFCElement nodes.";
+		return false;
+	}
+
+	return true;
+}
+
+static void _append_authoring_element_snapshot(WFCElement *p_element, const Transform3D &p_global_transform, AuthoringSnapshot &r_snapshot) {
+	AuthoringElement snapshot_element;
+	snapshot_element.node_id = p_element->get_instance_id();
+	snapshot_element.type = p_element->get_type();
+	snapshot_element.global_transform = p_global_transform;
+	snapshot_element.resolve_priority = p_element->get_resolve_priority();
+	snapshot_element.defer_collapse = p_element->is_defer_collapse_enabled();
+
+	TypedArray<WFCParam> options = p_element->get_options();
+	for (int i = 0; i < options.size(); i++) {
+		Ref<WFCParam> option = options[i];
+		if (option.is_null()) {
+			continue;
+		}
+		AuthoringOption snapshot_option;
+		snapshot_option.option = option->get_option();
+		snapshot_option.probability = option->get_probability();
+		snapshot_option.enabled = option->is_enabled();
+		snapshot_element.options.push_back(snapshot_option);
+	}
+
+	TypedArray<WFCNeighbor> neighbors = p_element->get_neighbor_points();
+	for (int i = 0; i < neighbors.size(); i++) {
+		Ref<WFCNeighbor> neighbor = neighbors[i];
+		if (neighbor.is_null()) {
+			continue;
+		}
+		AuthoringNeighbor snapshot_neighbor;
+		snapshot_neighbor.name = neighbor->get_side_name();
+		snapshot_neighbor.inv_name = neighbor->get_inv_name();
+		snapshot_neighbor.type = neighbor->get_type();
+		snapshot_neighbor.offset = neighbor->get_offset();
+		snapshot_neighbor.wobble = neighbor->get_wobble();
+		snapshot_neighbor.angular_wobble = neighbor->get_angular_wobble();
+		snapshot_neighbor.primary = neighbor->is_primary();
+		snapshot_element.neighbors.push_back(snapshot_neighbor);
+	}
+
+	r_snapshot.elements.push_back(snapshot_element);
+}
+
+static void _build_authoring_snapshot_for_branch_recursive(Node *p_node, const Transform3D &p_node_global_transform, AuthoringSnapshot &r_snapshot) {
+	WFCElement *element = Object::cast_to<WFCElement>(p_node);
+	if (element != nullptr) {
+		_append_authoring_element_snapshot(element, p_node_global_transform, r_snapshot);
+	}
+
+	for (int child_index = 0; child_index < p_node->get_child_count(); child_index++) {
+		Node *child = p_node->get_child(child_index);
+		Transform3D child_global_transform = p_node_global_transform;
+		Node3D *child_3d = Object::cast_to<Node3D>(child);
+		if (child_3d != nullptr) {
+			child_global_transform = p_node_global_transform * child_3d->get_transform();
+		}
+		_build_authoring_snapshot_for_branch_recursive(child, child_global_transform, r_snapshot);
+	}
+}
+
+static bool _build_authoring_snapshot_for_branch(Node3D *p_root, const Transform3D &p_root_global_transform, const Ref<WFCCatalogSet> &p_catalog_set, float p_cell_size, uint64_t p_seed, AuthoringSnapshot &r_snapshot, String &r_error) {
+	r_snapshot.elements.clear();
+	if (p_root == nullptr) {
+		r_error = "WFCSolver requires a valid detached root Node3D.";
+		return false;
+	}
+	if (p_catalog_set.is_null()) {
+		r_error = "WFCSolver requires a WFCCatalogSet resource.";
+		return false;
+	}
+
+	r_snapshot.merged_rules = p_catalog_set->merge_rules();
+	r_snapshot.cell_size = MAX(0.001f, p_cell_size);
+	r_snapshot.seed = p_seed;
+	_build_authoring_snapshot_for_branch_recursive(p_root, p_root_global_transform, r_snapshot);
+
+	if (r_snapshot.elements.is_empty()) {
+		r_error = "WFCSolver branch snapshot has no WFCElement nodes.";
 		return false;
 	}
 
@@ -1354,6 +1438,37 @@ Error WFCSolver::resolve_async() {
 	set_process(true);
 	uint64_t submit_end = OS::get_singleton()->get_ticks_usec();
 	print_line(vformat("WFC resolve_async setup: elements=%d, connections=%d, snapshot=%.2f ms, preview_build=%.2f ms, preview_apply=%.2f ms, submit=%.2f ms, total=%.2f ms", snapshot.elements.size(), preview_connections.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(preview_build_end - snapshot_end), _usec_to_msec(preview_apply_end - preview_build_end), _usec_to_msec(submit_end - preview_apply_end), _usec_to_msec(submit_end - resolve_begin)));
+	emit_signal(SNAME("solve_started"));
+	return OK;
+}
+
+Error WFCSolver::resolve_branch_async(Node3D *p_root, const Transform3D &p_root_global_transform) {
+	uint64_t resolve_begin = OS::get_singleton()->get_ticks_usec();
+	if (async_job != nullptr) {
+		return ERR_BUSY;
+	}
+
+	AuthoringSnapshot snapshot;
+	String error;
+	if (!_build_authoring_snapshot_for_branch(p_root, p_root_global_transform, catalog_set, cell_size, seed, snapshot, error)) {
+		last_error = error;
+		emit_signal(SNAME("solve_completed"), false, last_error);
+		return ERR_CANT_CREATE;
+	}
+	uint64_t snapshot_end = OS::get_singleton()->get_ticks_usec();
+	Vector<ConnectionBuild> preview_connections;
+	_build_connections(snapshot, preview_connections);
+	uint64_t preview_build_end = OS::get_singleton()->get_ticks_usec();
+	_apply_preview_connections(snapshot, preview_connections);
+	uint64_t preview_apply_end = OS::get_singleton()->get_ticks_usec();
+
+	async_job = memnew(AsyncJob);
+	async_job->snapshot = snapshot;
+	async_job->graph_processor = graph_processor;
+	async_task_id = WorkerThreadPool::get_singleton()->add_native_task(&WFCSolver::_solve_async_task, async_job, true, SNAME("WFCSolver"));
+	set_process(true);
+	uint64_t submit_end = OS::get_singleton()->get_ticks_usec();
+	print_line(vformat("WFC resolve_branch_async setup: elements=%d, connections=%d, snapshot=%.2f ms, preview_build=%.2f ms, preview_apply=%.2f ms, submit=%.2f ms, total=%.2f ms", snapshot.elements.size(), preview_connections.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(preview_build_end - snapshot_end), _usec_to_msec(preview_apply_end - preview_build_end), _usec_to_msec(submit_end - preview_apply_end), _usec_to_msec(submit_end - resolve_begin)));
 	emit_signal(SNAME("solve_started"));
 	return OK;
 }
