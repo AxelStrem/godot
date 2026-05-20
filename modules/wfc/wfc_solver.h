@@ -66,6 +66,7 @@ public:
 	void add_branch(Node *p_root);
 	int connect_neighbors();
 	bool resolve();
+	Error resolve_branch_async(Node3D *p_root, const Transform3D &p_root_global_transform);
 	Error resolve_async();
 	void materialize();
 
