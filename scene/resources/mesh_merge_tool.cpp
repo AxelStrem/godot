@@ -58,6 +58,24 @@ bool MeshMergeTool::is_merge_shadow_meshes_enabled() const {
 	return merge_shadow_meshes;
 }
 
+uint64_t MeshMergeTool::_get_resource_identity_hash(const Ref<Resource> &p_resource) const {
+	if (p_resource.is_null()) {
+		return 0;
+	}
+
+	String path = p_resource->get_path();
+	if (!path.is_empty()) {
+		return path.hash64();
+	}
+
+	String scene_unique_id = p_resource->get_scene_unique_id();
+	if (!scene_unique_id.is_empty()) {
+		return (String("local://") + scene_unique_id).hash64();
+	}
+
+	return uint64_t(p_resource->get_instance_id());
+}
+
 Error MeshMergeTool::_append_mesh_to_buckets(const Ref<Mesh> &p_mesh, const Transform3D &p_transform, HashMap<BucketKey, SurfaceBucket, BucketKeyHasher> &r_buckets, Vector<BucketKey> &r_order) {
 	ERR_FAIL_COND_V_MSG(p_mesh.is_null(), ERR_INVALID_PARAMETER, "MeshMergeTool.append_mesh() requires a valid Mesh resource.");
 	const ArrayMesh *source_array_mesh = Object::cast_to<ArrayMesh>(p_mesh.ptr());
@@ -87,7 +105,7 @@ Error MeshMergeTool::_append_mesh_to_buckets(const Ref<Mesh> &p_mesh, const Tran
 		key.surface_index = surface_index;
 		key.format = p_mesh->surface_get_format(surface_index);
 		key.primitive = p_mesh->surface_get_primitive_type(surface_index);
-		key.material_id = material.is_valid() ? uint64_t(material->get_instance_id()) : uint64_t(0);
+		key.material_id = _get_resource_identity_hash(material);
 
 		SurfaceBucket *bucket = r_buckets.getptr(key);
 		if (bucket == nullptr) {

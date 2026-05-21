@@ -70,6 +70,7 @@ class MeshMergeTool : public RefCounted {
 	Vector<BucketKey> shadow_surface_order;
 	bool merge_shadow_meshes = true;
 
+	uint64_t _get_resource_identity_hash(const Ref<Resource> &p_resource) const;
 	Error _append_mesh_to_buckets(const Ref<Mesh> &p_mesh, const Transform3D &p_transform, HashMap<BucketKey, SurfaceBucket, BucketKeyHasher> &r_buckets, Vector<BucketKey> &r_order);
 	Ref<ArrayMesh> _commit_buckets(HashMap<BucketKey, SurfaceBucket, BucketKeyHasher> &r_buckets, const Vector<BucketKey> &p_order, uint64_t p_flags);
 
