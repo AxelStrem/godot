@@ -63,6 +63,20 @@ Error MeshMergeTool::_append_mesh_to_buckets(const Ref<Mesh> &p_mesh, const Tran
 	const ArrayMesh *source_array_mesh = Object::cast_to<ArrayMesh>(p_mesh.ptr());
 
 	for (int surface_index = 0; surface_index < p_mesh->get_surface_count(); surface_index++) {
+		if (p_mesh->surface_get_array_len(surface_index) <= 0) {
+			continue;
+		}
+
+		Array arrays = p_mesh->surface_get_arrays(surface_index);
+		if (arrays.is_empty()) {
+			continue;
+		}
+
+		Vector<Vector3> vertices = arrays[Mesh::ARRAY_VERTEX];
+		if (vertices.is_empty()) {
+			continue;
+		}
+
 		Ref<Material> material = p_mesh->surface_get_material(surface_index);
 		String surface_name;
 		if (source_array_mesh != nullptr) {
