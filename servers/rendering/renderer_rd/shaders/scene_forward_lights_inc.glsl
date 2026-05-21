@@ -1009,7 +1009,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 #endif
 		inout hvec3 diffuse_light, inout hvec3 specular_light) {
 	half EPSILON = half(1e-7);
-	bool line_mode = area_lights.data[idx].pad[0] > 0.5;
+	bool line_mode = area_lights.data[idx].pad0 > 0.5;
 	hvec3 area_width = hvec3(area_lights.data[idx].area_width);
 	hvec3 area_height = hvec3(area_lights.data[idx].area_height);
 
@@ -1040,7 +1040,8 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 	vec3 line_points[2];
 	half dist;
 	half attenuation_distance;
-
+	hvec3 pos_local_to_light = hvec3(0.0);
+	half spread_atten = half(1.0);
 	if (line_mode) {
 		area_a_dir = normalize(area_width);
 		a_len = width_len;
@@ -1096,7 +1097,7 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		a_half_len = a_len / half(2.0);
 		b_half_len = b_len / half(2.0);
 
-		hvec3 pos_local_to_light = hvec3(dot(light_to_vert, area_a_dir), dot(light_to_vert, area_b_dir), dot(light_to_vert, -area_direction));
+		pos_local_to_light = hvec3(dot(light_to_vert, area_a_dir), dot(light_to_vert, area_b_dir), dot(light_to_vert, -area_direction));
 		closest_point_local_to_light = hvec3(clamp(pos_local_to_light.x, -a_half_len, a_half_len), clamp(pos_local_to_light.y, -b_half_len, b_half_len), 0);
 		dist = length(closest_point_local_to_light - pos_local_to_light);
 		closest_light_point = light_center + area_a_dir * closest_point_local_to_light.x + area_b_dir * closest_point_local_to_light.y;
@@ -1110,8 +1111,33 @@ void light_process_area(uint idx, vec3 vertex, hvec3 eye_vec, hvec3 normal, vec3
 		points[3] = area_lights.data[idx].position - h_area_width + h_area_height - vertex;
 	}
 
+	if (!line_mode) {
+		half spread_cos = half(area_lights.data[idx].spread_cos_angle);
+		half spread_bleed = half(area_lights.data[idx].spread_bleed);
+		if (spread_cos > half(1e-4)) {
+			half depth = -pos_local_to_light.z;
+			half tan_spread = sqrt(half(1.0) - spread_cos * spread_cos) / spread_cos;
+			half spread_extent = depth * tan_spread;
+
+			half dx = max(abs(pos_local_to_light.x) - a_half_len, half(0.0));
+			half dy = max(abs(pos_local_to_light.y) - b_half_len, half(0.0));
+			half edge_dist = sqrt(dx * dx + dy * dy) / max(spread_extent, half(1e-6));
+			if (edge_dist >= half(1.0)) {
+				if (spread_bleed > half(0.0)) {
+					spread_atten = spread_bleed;
+				} else {
+					return;
+				}
+			} else if (edge_dist > half(0.0)) {
+				half falloff = half(1.0) - half(pow(float(edge_dist), area_lights.data[idx].spread_attenuation));
+				spread_atten = mix(spread_bleed, half(1.0), falloff);
+			}
+		}
+	}
+
 	half light_length = max(attenuation_distance, half(0.001));
 	half light_attenuation_raw = get_omni_attenuation(float(light_length), area_lights.data[idx].inv_radius, area_lights.data[idx].attenuation);
+	light_attenuation_raw *= spread_atten;
 	half light_attenuation_ltc = light_attenuation_raw * half(light_length * light_length); // solid angle already decreases by inverse square, so attenuation power is 2.0 by default -> subtract 2.0
 	half shadow = half(1.0);
 

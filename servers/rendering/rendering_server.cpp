@@ -2539,6 +2539,10 @@ void RenderingServer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("light_area_set_size", "light", "size"), &RenderingServer::light_area_set_size);
 	ClassDB::bind_method(D_METHOD("light_area_set_normalize_energy", "light", "enable"), &RenderingServer::light_area_set_normalize_energy);
+	ClassDB::bind_method(D_METHOD("light_area_set_spread_angle", "light", "angle"), &RenderingServer::light_area_set_spread_angle);
+	ClassDB::bind_method(D_METHOD("light_area_set_spread_attenuation", "light", "attenuation"), &RenderingServer::light_area_set_spread_attenuation);
+	ClassDB::bind_method(D_METHOD("light_area_set_spread_bleed", "light", "bleed"), &RenderingServer::light_area_set_spread_bleed);
+	ClassDB::bind_method(D_METHOD("light_area_set_use_node_scale", "light", "enable"), &RenderingServer::light_area_set_use_node_scale);
 	ClassDB::bind_method(D_METHOD("light_area_set_line_mode", "light", "enable"), &RenderingServer::light_area_set_line_mode);
 
 	ClassDB::bind_method(D_METHOD("light_projectors_set_filter", "filter"), &RenderingServer::light_projectors_set_filter);

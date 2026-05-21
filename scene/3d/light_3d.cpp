@@ -745,6 +745,45 @@ bool AreaLight3D::is_area_normalizing_energy() const {
 	return area_normalize_energy;
 }
 
+void AreaLight3D::set_area_spread_angle(float p_angle) {
+	area_spread_angle = CLAMP(p_angle, 0.0f, 180.0f);
+	RS::get_singleton()->light_area_set_spread_angle(light, area_spread_angle);
+}
+
+float AreaLight3D::get_area_spread_angle() const {
+	return area_spread_angle;
+}
+
+void AreaLight3D::set_area_spread_attenuation(float p_attenuation) {
+	area_spread_attenuation = p_attenuation;
+	RS::get_singleton()->light_area_set_spread_attenuation(light, area_spread_attenuation);
+}
+
+float AreaLight3D::get_area_spread_attenuation() const {
+	return area_spread_attenuation;
+}
+
+void AreaLight3D::set_area_spread_bleed(float p_bleed) {
+	area_spread_bleed = CLAMP(p_bleed, 0.0f, 1.0f);
+	RS::get_singleton()->light_area_set_spread_bleed(light, area_spread_bleed);
+}
+
+float AreaLight3D::get_area_spread_bleed() const {
+	return area_spread_bleed;
+}
+
+void AreaLight3D::set_area_use_node_scale(bool p_enable) {
+	area_use_node_scale = p_enable;
+	set_disable_scale(!p_enable);
+	RS::get_singleton()->light_area_set_use_node_scale(light, p_enable);
+
+	update_gizmos();
+}
+
+bool AreaLight3D::is_area_using_node_scale() const {
+	return area_use_node_scale;
+}
+
 void AreaLight3D::set_area_line_mode(bool p_enabled) {
 	area_line_mode = p_enabled;
 	RS::get_singleton()->light_area_set_line_mode(light, p_enabled);
@@ -779,13 +818,28 @@ void AreaLight3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_area_line_mode", "enable"), &AreaLight3D::set_area_line_mode);
 	ClassDB::bind_method(D_METHOD("is_area_line_mode"), &AreaLight3D::is_area_line_mode);
 
+	ClassDB::bind_method(D_METHOD("set_area_spread_angle", "angle"), &AreaLight3D::set_area_spread_angle);
+	ClassDB::bind_method(D_METHOD("get_area_spread_angle"), &AreaLight3D::get_area_spread_angle);
+
+	ClassDB::bind_method(D_METHOD("set_area_spread_attenuation", "attenuation"), &AreaLight3D::set_area_spread_attenuation);
+	ClassDB::bind_method(D_METHOD("get_area_spread_attenuation"), &AreaLight3D::get_area_spread_attenuation);
+
+	ClassDB::bind_method(D_METHOD("set_area_spread_bleed", "bleed"), &AreaLight3D::set_area_spread_bleed);
+	ClassDB::bind_method(D_METHOD("get_area_spread_bleed"), &AreaLight3D::get_area_spread_bleed);
+	ClassDB::bind_method(D_METHOD("set_area_use_node_scale", "enable"), &AreaLight3D::set_area_use_node_scale);
+	ClassDB::bind_method(D_METHOD("is_area_using_node_scale"), &AreaLight3D::is_area_using_node_scale);
+
 	ADD_GROUP("Area", "area_");
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "area_range", PROPERTY_HINT_RANGE, "0,4096,0.001,or_greater,exp,suffix:m"), "set_param", "get_param", PARAM_RANGE);
 	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "area_attenuation", PROPERTY_HINT_RANGE, "-10,10,0.001,or_greater,or_less"), "set_param", "get_param", PARAM_ATTENUATION);
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "area_normalize_energy"), "set_area_normalize_energy", "is_area_normalizing_energy");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "area_use_node_scale"), "set_area_use_node_scale", "is_area_using_node_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "area_line_mode"), "set_area_line_mode", "is_area_line_mode");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "area_size", PROPERTY_HINT_LINK, "suffix:m"), "set_area_size", "get_area_size");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "area_texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D,-AnimatedTexture,-AtlasTexture,-CameraTexture,-CanvasTexture,-MeshTexture,-Texture2DRD,-ViewportTexture"), "set_area_texture", "get_area_texture");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "area_spread_angle", PROPERTY_HINT_RANGE, "0,180,0.01,degrees"), "set_area_spread_angle", "get_area_spread_angle");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "area_spread_attenuation", PROPERTY_HINT_EXP_EASING, "attenuation"), "set_area_spread_attenuation", "get_area_spread_attenuation");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "area_spread_bleed", PROPERTY_HINT_RANGE, "0,1,0.001"), "set_area_spread_bleed", "get_area_spread_bleed");
 }
 
 PackedStringArray AreaLight3D::get_configuration_warnings() const {

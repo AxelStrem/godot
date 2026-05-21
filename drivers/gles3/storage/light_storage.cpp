@@ -362,6 +362,26 @@ bool LightStorage::light_area_get_normalize_energy(RID p_light) const {
 	return light->area_normalize_energy;
 }
 
+void LightStorage::light_area_set_use_node_scale(RID p_light, bool p_enabled) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+
+	if (light->area_use_node_scale == p_enabled) {
+		return;
+	}
+
+	light->area_use_node_scale = p_enabled;
+	// The illuminated range and normalized energy depend on effective area dimensions.
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+bool LightStorage::light_area_get_use_node_scale(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, false);
+
+	return light->area_use_node_scale;
+}
+
 void LightStorage::light_area_set_line_mode(RID p_light, bool p_enabled) {
 	Light *light = light_owner.get_or_null(p_light);
 	ERR_FAIL_NULL(light);
@@ -387,6 +407,51 @@ void LightStorage::light_area_set_texture(RID p_light, RID p_texture) {
 }
 RID LightStorage::light_area_get_texture(RID p_light) const {
 	return RID(); // not implemented
+}
+
+void LightStorage::light_area_set_spread_angle(RID p_light, float p_angle) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+
+	light->area_spread_angle = CLAMP(p_angle, 0.0f, 180.0f);
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+float LightStorage::light_area_get_spread_angle(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, 180.0f);
+
+	return light->area_spread_angle;
+}
+
+void LightStorage::light_area_set_spread_attenuation(RID p_light, float p_attenuation) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+
+	light->area_spread_attenuation = p_attenuation;
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+float LightStorage::light_area_get_spread_attenuation(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, 1.0f);
+
+	return light->area_spread_attenuation;
+}
+
+void LightStorage::light_area_set_spread_bleed(RID p_light, float p_bleed) {
+	Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL(light);
+
+	light->area_spread_bleed = CLAMP(p_bleed, 0.0f, 1.0f);
+	light->dependency.changed_notify(Dependency::DEPENDENCY_CHANGED_LIGHT);
+}
+
+float LightStorage::light_area_get_spread_bleed(RID p_light) const {
+	const Light *light = light_owner.get_or_null(p_light);
+	ERR_FAIL_NULL_V(light, 0.0f);
+
+	return light->area_spread_bleed;
 }
 
 RSE::LightBakeMode LightStorage::light_get_bake_mode(RID p_light) {
