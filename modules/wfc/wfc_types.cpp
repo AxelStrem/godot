@@ -320,9 +320,7 @@ void WFCElement::_notification(int p_what) {
 }
 
 void WFCElement::_capture_nested_scenes() {
-	uint64_t capture_begin = OS::get_singleton()->get_ticks_usec();
 	Vector<Node *> nodes_to_remove;
-	int newly_packed = 0;
 	for (int i = 0; i < get_child_count(); i++) {
 		Node *child = get_child(i);
 		if (child == nullptr || !child->has_meta("wfc")) {
@@ -343,7 +341,6 @@ void WFCElement::_capture_nested_scenes() {
 			packed_scene = _pack_wfc_variant(child);
 			if (packed_scene.is_valid()) {
 				nested_scene_cache.insert(cache_key, packed_scene);
-				newly_packed++;
 			}
 		}
 		if (packed_scene.is_valid()) {
@@ -356,11 +353,6 @@ void WFCElement::_capture_nested_scenes() {
 		Node *node = nodes_to_remove[i];
 		remove_child(node);
 		node->queue_free();
-	}
-
-	if (newly_packed > 0) {
-		uint64_t elapsed_usec = OS::get_singleton()->get_ticks_usec() - capture_begin;
-		print_line(vformat("WFC fallback capture: type=%s, variants=%d, time=%.2f ms", String(type), newly_packed, double(elapsed_usec) / 1000.0));
 	}
 }
 

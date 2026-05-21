@@ -239,8 +239,6 @@ static SpatialKey _make_spatial_key(const Vector3 &p_position, float p_cell_size
 
 static int _build_connections(const AuthoringSnapshot &p_snapshot, Vector<ConnectionBuild> &r_connections) {
 	HashMap<SpatialKey, Vector<int>, SpatialKey> lookup;
-	int ambiguous_wall_panel_matches = 0;
-	int divergent_wall_panel_matches = 0;
 	for (int i = 0; i < p_snapshot.elements.size(); i++) {
 		const AuthoringElement &element = p_snapshot.elements[i];
 		SpatialKey key = _make_spatial_key(element.global_transform.origin, p_snapshot.cell_size);
@@ -306,13 +304,6 @@ static int _build_connections(const AuthoringSnapshot &p_snapshot, Vector<Connec
 				}
 			}
 
-			if (match_count > 1 && element.type == WFC_WALL_PANEL_TYPE) {
-				ambiguous_wall_panel_matches++;
-				if (nearest_match != last_match) {
-					divergent_wall_panel_matches++;
-				}
-			}
-
 			if (last_match != -1) {
 				ConnectionBuild connection;
 				connection.from_index = element_index;
@@ -322,10 +313,6 @@ static int _build_connections(const AuthoringSnapshot &p_snapshot, Vector<Connec
 				r_connections.push_back(connection);
 			}
 		}
-	}
-
-	if (ambiguous_wall_panel_matches > 0) {
-		print_line(vformat("WFC connection ambiguity: wall_panel_sides=%d, nearest_vs_legacy_different=%d", ambiguous_wall_panel_matches, divergent_wall_panel_matches));
 	}
 
 	return r_connections.size();
@@ -1243,16 +1230,13 @@ void WFCSolver::_finish_async_job() {
 	if (async_job == nullptr) {
 		return;
 	}
-	uint64_t finish_begin = OS::get_singleton()->get_ticks_usec();
 	if (!async_job->wait_called) {
 		WorkerThreadPool::get_singleton()->wait_for_task_completion(async_task_id);
 		async_job->wait_called = true;
 	}
-	uint64_t wait_end = OS::get_singleton()->get_ticks_usec();
 	if (!async_job->preview_connections.is_empty()) {
 		_apply_preview_connections(async_job->snapshot, async_job->preview_connections);
 	}
-	uint64_t preview_apply_end = OS::get_singleton()->get_ticks_usec();
 
 	last_error = async_job->result.error;
 	if (async_job->result.success) {
@@ -1264,11 +1248,8 @@ void WFCSolver::_finish_async_job() {
 	} else {
 		last_resolved_node_ids.clear();
 	}
-	uint64_t apply_end = OS::get_singleton()->get_ticks_usec();
 
 	emit_signal(SNAME("solve_completed"), async_job->result.success, async_job->result.error);
-	uint64_t signal_end = OS::get_singleton()->get_ticks_usec();
-	print_line(vformat("WFC resolve_async finish: elements=%d, wait=%.2f ms, preview_apply=%.2f ms, apply=%.2f ms, signal=%.2f ms, total=%.2f ms, success=%s", async_job->result.node_ids.size(), _usec_to_msec(wait_end - finish_begin), _usec_to_msec(preview_apply_end - wait_end), _usec_to_msec(apply_end - preview_apply_end), _usec_to_msec(signal_end - apply_end), _usec_to_msec(signal_end - finish_begin), async_job->result.success ? "true" : "false"));
 	_clear_async_job();
 }
 
@@ -1388,7 +1369,6 @@ int WFCSolver::connect_neighbors() {
 }
 
 bool WFCSolver::resolve() {
-	uint64_t resolve_begin = OS::get_singleton()->get_ticks_usec();
 	if (async_job != nullptr) {
 		last_error = "WFCSolver is already solving asynchronously.";
 		return false;
@@ -1405,37 +1385,29 @@ bool WFCSolver::resolve() {
 		emit_signal(SNAME("solve_completed"), false, last_error);
 		return false;
 	}
-	uint64_t snapshot_end = OS::get_singleton()->get_ticks_usec();
 	Vector<ConnectionBuild> preview_connections;
 
 	emit_signal(SNAME("solve_started"));
 	SolveResult result = _solve_snapshot(snapshot, graph_processor, &preview_connections);
-	uint64_t solve_end = OS::get_singleton()->get_ticks_usec();
 	_apply_preview_connections(snapshot, preview_connections);
-	uint64_t preview_end = OS::get_singleton()->get_ticks_usec();
 	last_error = result.error;
 	if (!result.success) {
 		last_resolved_node_ids.clear();
-		print_line(vformat("WFC resolve: elements=%d, connections=%d, snapshot=%.2f ms, solve=%.2f ms, preview=%.2f ms, total=%.2f ms, success=false, error=%s", snapshot.elements.size(), preview_connections.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(solve_end - snapshot_end), _usec_to_msec(preview_end - solve_end), _usec_to_msec(preview_end - resolve_begin), result.error));
 		emit_signal(SNAME("solve_completed"), false, last_error);
 		return false;
 	}
 
 	_apply_solve_result_to_live_elements(result);
 	last_resolved_node_ids = result.node_ids;
-	uint64_t apply_end = OS::get_singleton()->get_ticks_usec();
 	if (auto_materialize) {
 		materialize();
 	}
-	uint64_t resolve_end = OS::get_singleton()->get_ticks_usec();
-	print_line(vformat("WFC resolve: elements=%d, connections=%d, snapshot=%.2f ms, solve=%.2f ms, preview=%.2f ms, apply=%.2f ms, total=%.2f ms, success=true", snapshot.elements.size(), preview_connections.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(solve_end - snapshot_end), _usec_to_msec(preview_end - solve_end), _usec_to_msec(apply_end - preview_end), _usec_to_msec(resolve_end - resolve_begin)));
 	last_error = String();
 	emit_signal(SNAME("solve_completed"), true, String());
 	return true;
 }
 
 Error WFCSolver::resolve_async() {
-	uint64_t resolve_begin = OS::get_singleton()->get_ticks_usec();
 	if (async_job != nullptr) {
 		return ERR_BUSY;
 	}
@@ -1451,7 +1423,6 @@ Error WFCSolver::resolve_async() {
 		emit_signal(SNAME("solve_completed"), false, last_error);
 		return ERR_CANT_CREATE;
 	}
-	uint64_t snapshot_end = OS::get_singleton()->get_ticks_usec();
 
 	async_job = memnew(AsyncJob);
 	async_job->snapshot = snapshot;
@@ -1459,14 +1430,11 @@ Error WFCSolver::resolve_async() {
 	async_job->collect_preview_connections = true;
 	async_task_id = WorkerThreadPool::get_singleton()->add_native_task(&WFCSolver::_solve_async_task, async_job, true, SNAME("WFCSolver"));
 	set_process(true);
-	uint64_t submit_end = OS::get_singleton()->get_ticks_usec();
-	print_line(vformat("WFC resolve_async setup: elements=%d, snapshot=%.2f ms, submit=%.2f ms, total=%.2f ms", snapshot.elements.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(submit_end - snapshot_end), _usec_to_msec(submit_end - resolve_begin)));
 	emit_signal(SNAME("solve_started"));
 	return OK;
 }
 
 Error WFCSolver::resolve_branch_async(Node3D *p_root, const Transform3D &p_root_global_transform) {
-	uint64_t resolve_begin = OS::get_singleton()->get_ticks_usec();
 	if (async_job != nullptr) {
 		return ERR_BUSY;
 	}
@@ -1479,7 +1447,6 @@ Error WFCSolver::resolve_branch_async(Node3D *p_root, const Transform3D &p_root_
 		emit_signal(SNAME("solve_completed"), false, last_error);
 		return ERR_CANT_CREATE;
 	}
-	uint64_t snapshot_end = OS::get_singleton()->get_ticks_usec();
 
 	async_job = memnew(AsyncJob);
 	async_job->snapshot = snapshot;
@@ -1487,14 +1454,11 @@ Error WFCSolver::resolve_branch_async(Node3D *p_root, const Transform3D &p_root_
 	async_job->collect_preview_connections = true;
 	async_task_id = WorkerThreadPool::get_singleton()->add_native_task(&WFCSolver::_solve_async_task, async_job, true, SNAME("WFCSolver"));
 	set_process(true);
-	uint64_t submit_end = OS::get_singleton()->get_ticks_usec();
-	print_line(vformat("WFC resolve_branch_async setup: elements=%d, snapshot=%.2f ms, submit=%.2f ms, total=%.2f ms", snapshot.elements.size(), _usec_to_msec(snapshot_end - resolve_begin), _usec_to_msec(submit_end - snapshot_end), _usec_to_msec(submit_end - resolve_begin)));
 	emit_signal(SNAME("solve_started"));
 	return OK;
 }
 
 void WFCSolver::materialize() {
-	uint64_t materialize_begin = OS::get_singleton()->get_ticks_usec();
 	if (async_job != nullptr) {
 		last_error = "WFCSolver cannot materialize while an async solve is still in progress.";
 		ERR_PRINT(last_error);
@@ -1513,15 +1477,12 @@ void WFCSolver::materialize() {
 	for (int i = 0; i < elements.size(); i++) {
 		elements[i]->materialize();
 	}
-	uint64_t instantiate_end = OS::get_singleton()->get_ticks_usec();
 	for (int i = 0; i < elements.size(); i++) {
 		if (elements[i]->get_selected_option().is_empty()) {
 			continue;
 		}
 		elements[i]->post_materialize();
 	}
-	uint64_t materialize_end = OS::get_singleton()->get_ticks_usec();
-	print_line(vformat("WFC materialize: elements=%d, instantiate=%.2f ms, post=%.2f ms, total=%.2f ms", elements.size(), _usec_to_msec(instantiate_end - materialize_begin), _usec_to_msec(materialize_end - instantiate_end), _usec_to_msec(materialize_end - materialize_begin)));
 }
 
 WFCSolver::~WFCSolver() {
