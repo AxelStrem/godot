@@ -304,10 +304,10 @@ static int _build_connections(const AuthoringSnapshot &p_snapshot, Vector<Connec
 				}
 			}
 
-			if (last_match != -1) {
+			if (nearest_match != -1) {
 				ConnectionBuild connection;
 				connection.from_index = element_index;
-				connection.to_index = last_match;
+				connection.to_index = nearest_match;
 				connection.from_side = neighbor.name;
 				connection.to_side = neighbor.inv_name;
 				r_connections.push_back(connection);
