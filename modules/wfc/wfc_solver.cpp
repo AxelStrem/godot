@@ -245,6 +245,20 @@ static int _build_connections(const AuthoringSnapshot &p_snapshot, Vector<Connec
 		lookup[key].push_back(i);
 	}
 
+	print_line("=== WFC Connection Build: All Elements ===");
+	for (int i = 0; i < p_snapshot.elements.size(); i++) {
+		const AuthoringElement &elem = p_snapshot.elements[i];
+		Node *elem_node = Object::cast_to<Node>(ObjectDB::get_instance(elem.node_id));
+		String node_desc;
+		if (elem_node) {
+			node_desc = vformat("name=%s path=%s", String(elem_node->get_name()), String(elem_node->get_path()));
+		} else {
+			node_desc = "<null>";
+		}
+		print_line(vformat("  [%d] type=%s %s pos=(%.1f, %.1f, %.1f)", i, elem.type, node_desc, elem.global_transform.origin.x, elem.global_transform.origin.y, elem.global_transform.origin.z));
+	}
+
+	int total_connections = 0;
 	for (int element_index = 0; element_index < p_snapshot.elements.size(); element_index++) {
 		const AuthoringElement &element = p_snapshot.elements[element_index];
 		Transform3D inverse = element.global_transform.affine_inverse();
@@ -311,10 +325,26 @@ static int _build_connections(const AuthoringSnapshot &p_snapshot, Vector<Connec
 				connection.from_side = neighbor.name;
 				connection.to_side = neighbor.inv_name;
 				r_connections.push_back(connection);
+				total_connections++;
+
+				Node *from_node = Object::cast_to<Node>(ObjectDB::get_instance(p_snapshot.elements[element_index].node_id));
+				Node *to_node = Object::cast_to<Node>(ObjectDB::get_instance(p_snapshot.elements[nearest_match].node_id));
+				String from_name = from_node ? String(from_node->get_name()) : String("<null>");
+				String to_name = to_node ? String(to_node->get_name()) : String("<null>");
+				print_line(vformat("  CONNECTION [%d] '%s' (type=%s, side=%s) -> [%d] '%s' (type=%s, side=%s)  [from pos=(%.1f,%.1f,%.1f) to pos=(%.1f,%.1f,%.1f)]",
+					element_index, from_name, p_snapshot.elements[element_index].type, neighbor.name,
+					nearest_match, to_name, p_snapshot.elements[nearest_match].type, neighbor.inv_name,
+					p_snapshot.elements[element_index].global_transform.origin.x,
+					p_snapshot.elements[element_index].global_transform.origin.y,
+					p_snapshot.elements[element_index].global_transform.origin.z,
+					p_snapshot.elements[nearest_match].global_transform.origin.x,
+					p_snapshot.elements[nearest_match].global_transform.origin.y,
+					p_snapshot.elements[nearest_match].global_transform.origin.z));
 			}
 		}
 	}
 
+	print_line(vformat("=== WFC Connection Build Complete: %d total connections ===", total_connections));
 	return r_connections.size();
 }
 
