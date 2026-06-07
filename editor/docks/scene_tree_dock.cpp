@@ -32,10 +32,12 @@
 
 #include "core/config/project_settings.h"
 #include "core/input/input.h"
+#include "core/io/file_access.h"
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "core/object/object.h"
 #include "core/os/keyboard.h"
 #include "editor/animation/animation_player_editor_plugin.h"
 #include "editor/debugger/editor_debugger_node.h"
@@ -62,6 +64,7 @@
 #include "editor/settings/editor_feature_profile.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/shader/shader_create_dialog.h"
+#include "scene/resources/material.h"
 #include "editor/themes/editor_scale.h"
 #include "scene/2d/node_2d.h"
 #include "scene/animation/animation_tree.h"
@@ -1568,6 +1571,29 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 				undo_redo->commit_action();
 			}
 		} break;
+		case TOOL_TOGGLE_EXPOSED_TO_OWNER: {
+			const List<Node *>::Element *first_selected = editor_selection->get_top_selected_node_list().front();
+			if (first_selected == nullptr) {
+				return;
+			}
+
+			Node *edited_scene_root = get_tree()->get_edited_scene_root();
+			List<Node *> full_selection = editor_selection->get_full_selected_node_list();
+			bool enabling = !edited_scene_root->is_exposed_node_to_owner(first_selected->get());
+
+			EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
+			undo_redo->create_action(enabling ? TTR("Enable Exposed to Owner") : TTR("Disable Exposed to Owner"));
+			for (Node *node : full_selection) {
+				if (!edited_scene_root->can_expose_node_to_owner(node)) {
+					continue;
+				}
+				undo_redo->add_do_method(edited_scene_root, "set_exposed_node_to_owner", node, enabling);
+				undo_redo->add_undo_method(edited_scene_root, "set_exposed_node_to_owner", node, !enabling);
+			}
+			undo_redo->add_do_method(scene_tree, "update_tree");
+			undo_redo->add_undo_method(scene_tree, "update_tree");
+			undo_redo->commit_action();
+		} break;
 		case TOOL_CREATE_2D_SCENE:
 		case TOOL_CREATE_3D_SCENE:
 		case TOOL_CREATE_USER_INTERFACE:
@@ -2684,16 +2710,21 @@ void SceneTreeDock::_script_created(Ref<Script> p_script) {
 }
 
 void SceneTreeDock::_shader_created(Ref<Shader> p_shader) {
-	if (selected_shader_material.is_null()) {
+	Object *shader_owner = ObjectDB::get_instance(selected_shader_owner_id);
+	if (!shader_owner) {
 		return;
 	}
 
-	Ref<Shader> existing = selected_shader_material->get_shader();
+	Variant existing_var;
+	if (shader_owner->has_method("get_shader")) {
+		existing_var = shader_owner->call("get_shader");
+	}
+	Ref<Shader> existing = existing_var;
 
 	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
 	undo_redo->create_action(TTR("Set Shader"));
-	undo_redo->add_do_method(selected_shader_material.ptr(), "set_shader", p_shader);
-	undo_redo->add_undo_method(selected_shader_material.ptr(), "set_shader", existing);
+	undo_redo->add_do_method(shader_owner, "set_shader", p_shader);
+	undo_redo->add_undo_method(shader_owner, "set_shader", existing);
 	undo_redo->commit_action();
 
 	EditorNode::get_singleton()->edit_item(p_shader.ptr(), this);
@@ -2709,6 +2740,7 @@ void SceneTreeDock::_shader_creation_closed() {
 	shader_create_dialog->disconnect("shader_created", callable_mp(this, &SceneTreeDock::_shader_created));
 	shader_create_dialog->disconnect(SceneStringName(confirmed), callable_mp(this, &SceneTreeDock::_shader_creation_closed));
 	shader_create_dialog->disconnect("canceled", callable_mp(this, &SceneTreeDock::_shader_creation_closed));
+	selected_shader_owner_id = ObjectID();
 }
 
 void SceneTreeDock::_toggle_editable_children_from_selection() {
@@ -4040,24 +4072,47 @@ void SceneTreeDock::_tree_rmb(const Vector2 &p_menu_pos) {
 
 	if (profile_allow_editing) {
 		// Allow multi-toggling scene unique names but only if all selected nodes are owned by the edited scene root.
+		Node *edited_scene_root = EditorNode::get_singleton()->get_edited_scene();
 		bool all_owned = true;
 		for (Node *node : full_selection) {
-			if (node->get_owner() != EditorNode::get_singleton()->get_edited_scene()) {
+			if (node->get_owner() != edited_scene_root) {
 				all_owned = false;
 				break;
 			}
 		}
+		bool all_exposable = true;
+		for (Node *node : full_selection) {
+			if (!edited_scene_root->can_expose_node_to_owner(node)) {
+				all_exposable = false;
+				break;
+			}
+		}
+		bool added_profile_section = false;
 		if (all_owned) {
 			// Group "toggle_unique_name" with "copy_node_path", if it is available.
 			if (menu->get_item_index(TOOL_COPY_NODE_PATH) == -1) {
 				BEGIN_SECTION()
 			}
+			added_profile_section = true;
 			Node *node = full_selection.front()->get();
 			menu->add_icon_check_item(get_editor_theme_icon(SNAME("SceneUniqueName")), TTRC("Access as Unique Name"), TOOL_TOGGLE_SCENE_UNIQUE_NAME);
 			menu->set_item_shortcut(menu->get_item_index(TOOL_TOGGLE_SCENE_UNIQUE_NAME), ED_GET_SHORTCUT("scene_tree/toggle_unique_name"));
 			menu->set_item_checked(menu->get_item_index(TOOL_TOGGLE_SCENE_UNIQUE_NAME), node->is_unique_name_in_owner());
 		}
-		END_SECTION()
+		if (all_exposable) {
+			if (!added_profile_section) {
+				BEGIN_SECTION()
+				added_profile_section = true;
+			}
+			Node *node = full_selection.front()->get();
+			if (node != edited_scene_root) {
+				menu->add_check_item(TTR("Exposed to Owner"), TOOL_TOGGLE_EXPOSED_TO_OWNER);
+				menu->set_item_checked(menu->get_item_index(TOOL_TOGGLE_EXPOSED_TO_OWNER), edited_scene_root->is_exposed_node_to_owner(node));
+			}
+		}
+		if (added_profile_section) {
+			END_SECTION()
+		}
 	}
 
 	if (selection.size() == 1) {
@@ -4320,21 +4375,27 @@ void SceneTreeDock::open_script_dialog(Node *p_for_node, bool p_extend) {
 }
 
 void SceneTreeDock::attach_shader_to_selected(int p_preferred_mode) {
-	if (selected_shader_material.is_null()) {
+	Object *shader_owner = ObjectDB::get_instance(selected_shader_owner_id);
+	if (!shader_owner) {
 		return;
 	}
 
-	String path = selected_shader_material->get_path();
+	Resource *resource = Object::cast_to<Resource>(shader_owner);
+	if (!resource) {
+		return;
+	}
+
+	String path = resource->get_path();
 	if (path.get_base_dir().is_empty()) {
 		String root_path;
 		if (editor_data->get_edited_scene_root()) {
 			root_path = editor_data->get_edited_scene_root()->get_scene_file_path();
 		}
 		String shader_name;
-		if (selected_shader_material->get_name().is_empty()) {
+		if (resource->get_name().is_empty()) {
 			shader_name = root_path.get_file();
 		} else {
-			shader_name = selected_shader_material->get_name();
+			shader_name = resource->get_name();
 		}
 		if (shader_name.is_empty()) {
 			shader_name = "new_shader";
@@ -4353,9 +4414,14 @@ void SceneTreeDock::attach_shader_to_selected(int p_preferred_mode) {
 	shader_create_dialog->popup_centered();
 }
 
-void SceneTreeDock::open_shader_dialog(const Ref<ShaderMaterial> &p_for_material, int p_preferred_mode) {
-	selected_shader_material = p_for_material;
+void SceneTreeDock::open_shader_dialog(const Ref<Resource> &p_for_resource, int p_preferred_mode) {
+	selected_shader_owner_id = p_for_resource.is_valid() ? p_for_resource->get_instance_id() : ObjectID();
 	attach_shader_to_selected(p_preferred_mode);
+}
+
+void SceneTreeDock::open_shader_dialog(const Ref<ShaderMaterial> &p_for_material, int p_preferred_mode) {
+	Ref<Resource> resource = p_for_material;
+	open_shader_dialog(resource, p_preferred_mode);
 }
 
 void SceneTreeDock::open_add_child_dialog() {
@@ -4761,6 +4827,20 @@ void SceneTreeDock::_create_remap_for_node(Node *p_node, HashMap<Ref<Resource>, 
 				}
 
 				if (res->is_built_in() && !r_remap.has(res)) {
+					// Resources from imported files (.blend, .glb, etc.) have paths like
+					// "res://models/foo.blend::ArrayMesh_abc123". Since is_built_in() returns
+					// true for any :: path, they would normally be duplicated when pasting
+					// across scenes. But these are independently loadable sub-resources
+					// — we should keep the reference to the source file, not create a copy.
+					String rpath = res->get_path();
+					int sep = rpath.find("::");
+					if (sep != -1) {
+						String base_path = rpath.substr(0, sep);
+						if (FileAccess::exists(base_path + ".import")) {
+							// This is a sub-resource of an imported file — don't duplicate.
+							continue;
+						}
+					}
 					_create_remap_for_resource(res, r_remap);
 				}
 			}
@@ -4788,6 +4868,16 @@ void SceneTreeDock::_create_remap_for_resource(Ref<Resource> p_resource, HashMap
 			Ref<Resource> res = v;
 			if (res.is_valid()) {
 				if (res->is_built_in() && !r_remap.has(res)) {
+					// Skip sub-resources of imported files — they are independently
+					// loadable and should keep their reference to the source file.
+					String rpath = res->get_path();
+					int sep = rpath.find("::");
+					if (sep != -1) {
+						String base_path = rpath.substr(0, sep);
+						if (FileAccess::exists(base_path + ".import")) {
+							continue;
+						}
+					}
 					_create_remap_for_resource(res, r_remap);
 				}
 			}

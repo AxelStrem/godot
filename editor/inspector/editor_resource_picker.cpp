@@ -31,6 +31,7 @@
 #include "editor_resource_picker.h"
 
 #include "core/input/input.h"
+#include "core/io/file_access.h"
 #include "core/io/resource_loader.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
@@ -54,6 +55,7 @@
 #include "scene/property_utils.h"
 #include "scene/resources/gradient_texture.h"
 #include "scene/resources/image_texture.h"
+#include "scene/resources/shader.h"
 #include "servers/rendering/rendering_server.h"
 
 static bool _has_sub_resources(const Ref<Resource> &p_res) {
@@ -571,6 +573,21 @@ void EditorResourcePicker::_edit_menu_cbk(int p_which) {
 				Resource *res = Object::cast_to<Resource>(resource_owner);
 				if (res && edited_resource->get_path().get_slice("::", 0) == res->get_path().get_slice("::", 0)) {
 					make_unique = false;
+				}
+			}
+
+			// Resources from imported files (.blend, .fbx, etc.) have :: paths,
+			// which is_built_in() returns true for. But they are independently
+			// loadable from the import file — keep the ExtResource reference
+			// instead of duplicating (which would embed the mesh data).
+			if (make_unique) {
+				String rpath = edited_resource->get_path();
+				int sep = rpath.find("::");
+				if (sep != -1) {
+					String base_path = rpath.substr(0, sep);
+					if (FileAccess::exists(base_path + ".import")) {
+						make_unique = false;
+					}
 				}
 			}
 
@@ -1580,13 +1597,20 @@ void EditorShaderPicker::set_create_options(Object *p_menu_node) {
 }
 
 bool EditorShaderPicker::handle_menu_selected(int p_which) {
-	Ref<ShaderMaterial> ed_material = Ref<ShaderMaterial>(get_edited_material());
-
+	Object *edited_object = get_edited_object();
 	switch (p_which) {
 		case OBJ_MENU_NEW_SHADER: {
-			if (ed_material.is_valid()) {
-				SceneTreeDock::get_singleton()->open_shader_dialog(ed_material, preferred_mode);
-				return true;
+			Resource *resource = Object::cast_to<Resource>(edited_object);
+			if (resource) {
+				Ref<Resource> resource_ref(resource);
+				if (resource_ref.is_valid()) {
+					int mode = preferred_mode;
+					if (mode < 0 && edited_object && edited_object->is_class("ShaderTexture2D")) {
+						mode = Shader::MODE_CANVAS_ITEM;
+					}
+					SceneTreeDock::get_singleton()->open_shader_dialog(resource_ref, mode);
+					return true;
+				}
 			}
 		} break;
 		default:
@@ -1596,11 +1620,19 @@ bool EditorShaderPicker::handle_menu_selected(int p_which) {
 }
 
 void EditorShaderPicker::set_edited_material(ShaderMaterial *p_material) {
-	edited_material = p_material;
+	set_edited_object(p_material);
 }
 
 ShaderMaterial *EditorShaderPicker::get_edited_material() const {
-	return edited_material;
+	return Object::cast_to<ShaderMaterial>(get_edited_object());
+}
+
+void EditorShaderPicker::set_edited_object(Object *p_object) {
+	edited_object_id = p_object ? p_object->get_instance_id() : ObjectID();
+}
+
+Object *EditorShaderPicker::get_edited_object() const {
+	return ObjectDB::get_instance(edited_object_id);
 }
 
 void EditorShaderPicker::set_preferred_mode(int p_mode) {
