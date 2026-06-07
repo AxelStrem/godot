@@ -182,6 +182,7 @@ struct SolvedElement {
 struct SolveContext {
 	CompiledCatalog catalog;
 	Vector<SolvedElement> elements;
+	int connection_count = 0;
 };
 
 struct SolveResult {
@@ -607,6 +608,7 @@ static void _apply_context_to_graph(const SolveContext &p_context, const Ref<WFC
 
 static bool _populate_solve_result(const SolveContext &p_context, const Ref<WFCGraph> &p_graph, SolveResult &r_result, String &r_error) {
 	r_result.success = true;
+	r_result.connection_count = p_context.connection_count;
 	r_result.node_ids.resize(p_context.elements.size());
 	r_result.selected_options.resize(p_context.elements.size());
 	r_result.remaining_options.resize(p_context.elements.size());
@@ -649,6 +651,7 @@ static bool _build_solve_context(const AuthoringSnapshot &p_snapshot, SolveConte
 
 	Vector<ConnectionBuild> connections;
 	_build_connections(p_snapshot, connections);
+	r_context.connection_count = connections.size();
 	if (r_connection_preview != nullptr) {
 		*r_connection_preview = connections;
 	}
@@ -985,11 +988,21 @@ struct WFCSolver::AsyncJob {
 	bool collect_preview_connections = false;
 	SolveResult result;
 	bool wait_called = false;
+	uint64_t snapshot_build_usec = 0;
+	int element_count = 0;
+	uint64_t submit_time_usec = 0;
 };
 
 void WFCSolver::_solve_async_task(void *p_userdata) {
 	AsyncJob *job = static_cast<AsyncJob *>(p_userdata);
+	uint64_t solve_begin = OS::get_singleton()->get_ticks_usec();
 	job->result = _solve_snapshot(job->snapshot, job->graph_processor, job->collect_preview_connections ? &job->preview_connections : nullptr);
+	uint64_t solve_elapsed = OS::get_singleton()->get_ticks_usec() - solve_begin;
+	if (solve_elapsed > 10000) {
+		print_line(vformat("[WFC PERF] solve task: %.3f ms (%d elements, %d connections)  *** WARNING: long solve ***", _usec_to_msec(solve_elapsed), job->snapshot.elements.size(), job->result.connection_count));
+	} else {
+		print_line(vformat("[WFC PERF] solve task: %.3f ms (%d elements, %d connections)", _usec_to_msec(solve_elapsed), job->snapshot.elements.size(), job->result.connection_count));
+	}
 }
 
 void WFCSolver::_bind_methods() {
@@ -1226,6 +1239,7 @@ void WFCSolver::_finish_async_job() {
 	if (async_job == nullptr) {
 		return;
 	}
+	uint64_t finish_begin = OS::get_singleton()->get_ticks_usec();
 	if (!async_job->wait_called) {
 		WorkerThreadPool::get_singleton()->wait_for_task_completion(async_task_id);
 		async_job->wait_called = true;
@@ -1237,13 +1251,32 @@ void WFCSolver::_finish_async_job() {
 	last_error = async_job->result.error;
 	if (async_job->result.success) {
 		last_resolved_node_ids = async_job->result.node_ids;
+		uint64_t apply_begin = OS::get_singleton()->get_ticks_usec();
 		_apply_solve_result_to_live_elements(async_job->result);
+		uint64_t apply_elapsed = OS::get_singleton()->get_ticks_usec() - apply_begin;
+		if (apply_elapsed > 1000) {
+			print_line(vformat("[WFC PERF] _finish_async_job: result apply took %.3f ms (%d elements)  *** WARNING: main thread blocker ***", _usec_to_msec(apply_elapsed), async_job->result.node_ids.size()));
+		} else {
+			print_line(vformat("[WFC PERF] _finish_async_job: result apply took %.3f ms (%d elements)", _usec_to_msec(apply_elapsed), async_job->result.node_ids.size()));
+		}
 		if (auto_materialize) {
+			uint64_t mat_begin = OS::get_singleton()->get_ticks_usec();
 			materialize();
+			uint64_t mat_elapsed = OS::get_singleton()->get_ticks_usec() - mat_begin;
+			print_line(vformat("[WFC PERF] _finish_async_job: auto_materialize took %.3f ms (%d elements)", _usec_to_msec(mat_elapsed), async_job->element_count));
 		}
 	} else {
 		last_resolved_node_ids.clear();
 	}
+
+	uint64_t finish_elapsed = OS::get_singleton()->get_ticks_usec() - finish_begin;
+	uint64_t snapshot_build = async_job->snapshot_build_usec;
+	uint64_t async_duration = finish_begin - async_job->submit_time_usec;
+	print_line(vformat("[WFC PERF] --- chamber summary: snapshot=%+.3fms  async_solve=%+.3fms  finish=%+.3fms  total_latency=%+.3fms ---",
+			_usec_to_msec(snapshot_build),
+			_usec_to_msec(async_duration),
+			_usec_to_msec(finish_elapsed),
+			_usec_to_msec(snapshot_build + async_duration + finish_elapsed)));
 
 	emit_signal(SNAME("solve_completed"), async_job->result.success, async_job->result.error);
 	_clear_async_job();
@@ -1414,16 +1447,28 @@ Error WFCSolver::resolve_async() {
 
 	AuthoringSnapshot snapshot;
 	String error;
+	uint64_t snapshot_begin = OS::get_singleton()->get_ticks_usec();
 	if (!_build_authoring_snapshot(tracked_elements, catalog_set, cell_size, seed, snapshot, error)) {
+		uint64_t snapshot_elapsed = OS::get_singleton()->get_ticks_usec() - snapshot_begin;
+		print_line(vformat("[WFC PERF] resolve_async: snapshot build FAILED after %.3f ms", _usec_to_msec(snapshot_elapsed)));
 		last_error = error;
 		emit_signal(SNAME("solve_completed"), false, last_error);
 		return ERR_CANT_CREATE;
 	}
+	uint64_t snapshot_elapsed = OS::get_singleton()->get_ticks_usec() - snapshot_begin;
+	if (snapshot_elapsed > 2000) {
+		print_line(vformat("[WFC PERF] resolve_async: snapshot build took %.3f ms (%d elements)  *** WARNING: main thread blocker ***", _usec_to_msec(snapshot_elapsed), snapshot.elements.size()));
+	} else {
+		print_line(vformat("[WFC PERF] resolve_async: snapshot build took %.3f ms (%d elements)", _usec_to_msec(snapshot_elapsed), snapshot.elements.size()));
+	}
 
 	async_job = memnew(AsyncJob);
+	async_job->snapshot_build_usec = snapshot_elapsed;
+	async_job->element_count = snapshot.elements.size();
 	async_job->snapshot = snapshot;
 	async_job->graph_processor = graph_processor;
 	async_job->collect_preview_connections = true;
+	async_job->submit_time_usec = OS::get_singleton()->get_ticks_usec();
 	async_task_id = WorkerThreadPool::get_singleton()->add_native_task(&WFCSolver::_solve_async_task, async_job, true, SNAME("WFCSolver"));
 	set_process(true);
 	emit_signal(SNAME("solve_started"));
@@ -1438,16 +1483,28 @@ Error WFCSolver::resolve_branch_async(Node3D *p_root, const Transform3D &p_root_
 
 	AuthoringSnapshot snapshot;
 	String error;
+	uint64_t snapshot_begin = OS::get_singleton()->get_ticks_usec();
 	if (!_build_authoring_snapshot_for_branch(p_root, p_root_global_transform, catalog_set, cell_size, seed, snapshot, error)) {
+		uint64_t snapshot_elapsed = OS::get_singleton()->get_ticks_usec() - snapshot_begin;
+		print_line(vformat("[WFC PERF] resolve_branch_async: snapshot build FAILED after %.3f ms", _usec_to_msec(snapshot_elapsed)));
 		last_error = error;
 		emit_signal(SNAME("solve_completed"), false, last_error);
 		return ERR_CANT_CREATE;
 	}
+	uint64_t snapshot_elapsed = OS::get_singleton()->get_ticks_usec() - snapshot_begin;
+	if (snapshot_elapsed > 2000) {
+		print_line(vformat("[WFC PERF] resolve_branch_async: snapshot build took %.3f ms (%d elements)  *** WARNING: main thread blocker ***", _usec_to_msec(snapshot_elapsed), snapshot.elements.size()));
+	} else {
+		print_line(vformat("[WFC PERF] resolve_branch_async: snapshot build took %.3f ms (%d elements)", _usec_to_msec(snapshot_elapsed), snapshot.elements.size()));
+	}
 
 	async_job = memnew(AsyncJob);
+	async_job->snapshot_build_usec = snapshot_elapsed;
+	async_job->element_count = snapshot.elements.size();
 	async_job->snapshot = snapshot;
 	async_job->graph_processor = graph_processor;
 	async_job->collect_preview_connections = true;
+	async_job->submit_time_usec = OS::get_singleton()->get_ticks_usec();
 	async_task_id = WorkerThreadPool::get_singleton()->add_native_task(&WFCSolver::_solve_async_task, async_job, true, SNAME("WFCSolver"));
 	set_process(true);
 	emit_signal(SNAME("solve_started"));

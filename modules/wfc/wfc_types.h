@@ -123,16 +123,11 @@ class WFCElement : public Node3D {
 	int resolve_priority = 0;
 	bool defer_collapse = false;
 	Dictionary resolved_data;
-	HashMap<StringName, Ref<PackedScene>> nested_scenes;
 	HashMap<StringName, ObjectID> connected_neighbors;
-	static HashMap<String, Ref<PackedScene>> nested_scene_cache;
 	Vector<ObjectID> materialized_children;
-
-	void _capture_nested_scenes();
 
 protected:
 	static void _bind_methods();
-	void _notification(int p_what);
 	GDVIRTUAL0(_post_materialize);
 
 public:

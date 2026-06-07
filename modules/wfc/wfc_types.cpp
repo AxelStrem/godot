@@ -8,52 +8,8 @@
 
 #include "wfc_types.h"
 
-#include "core/config/engine.h"
 #include "core/object/class_db.h"
-#include "core/os/os.h"
-#include "core/string/print_string.h"
 #include "core/templates/hash_set.h"
-
-HashMap<String, Ref<PackedScene>> WFCElement::nested_scene_cache;
-
-namespace {
-
-static bool _variant_to_string_name(const Variant &p_value, StringName &r_name) {
-	if (p_value.get_type() == Variant::STRING_NAME || p_value.get_type() == Variant::STRING) {
-		r_name = StringName(String(p_value));
-		return true;
-	}
-	return false;
-}
-
-static void _normalize_packed_scene_ownership(Node *p_node, Node *p_root) {
-	if (p_node == p_root) {
-		p_node->set_owner(nullptr);
-	} else {
-		p_node->set_owner(p_root);
-	}
-
-	for (int i = 0; i < p_node->get_child_count(); i++) {
-		_normalize_packed_scene_ownership(p_node->get_child(i), p_root);
-	}
-}
-
-static Ref<PackedScene> _pack_wfc_variant(Node *p_node) {
-	ERR_FAIL_NULL_V(p_node, Ref<PackedScene>());
-	_normalize_packed_scene_ownership(p_node, p_node);
-
-	Ref<PackedScene> packed_scene;
-	packed_scene.instantiate();
-	Error err = packed_scene->pack(p_node);
-
-	if (err != OK) {
-		packed_scene.unref();
-	}
-
-	return packed_scene;
-}
-
-} // namespace
 
 void WFCCatalog::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_rules", "rules"), &WFCCatalog::set_rules);
@@ -308,54 +264,6 @@ void WFCElement::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::DICTIONARY, "resolved_data", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_INTERNAL), "set_resolved_data", "get_resolved_data");
 }
 
-void WFCElement::_notification(int p_what) {
-	if (p_what == NOTIFICATION_READY) {
-		if (Engine::get_singleton()->is_editor_hint()) {
-			return;
-		}
-		if (nested_scenes.is_empty()) {
-			_capture_nested_scenes();
-		}
-	}
-}
-
-void WFCElement::_capture_nested_scenes() {
-	Vector<Node *> nodes_to_remove;
-	for (int i = 0; i < get_child_count(); i++) {
-		Node *child = get_child(i);
-		if (child == nullptr || !child->has_meta("wfc")) {
-			continue;
-		}
-
-		Variant meta_value = child->get_meta("wfc");
-		if (meta_value.get_type() != Variant::STRING_NAME && meta_value.get_type() != Variant::STRING) {
-			continue;
-		}
-
-		StringName scene_name = meta_value;
-		String cache_key = String(type) + "/" + String(scene_name);
-		Ref<PackedScene> packed_scene;
-		if (nested_scene_cache.has(cache_key)) {
-			packed_scene = nested_scene_cache[cache_key];
-		} else {
-			packed_scene = _pack_wfc_variant(child);
-			if (packed_scene.is_valid()) {
-				nested_scene_cache.insert(cache_key, packed_scene);
-			}
-		}
-		if (packed_scene.is_valid()) {
-			nested_scenes.insert(scene_name, packed_scene);
-			nodes_to_remove.push_back(child);
-		}
-	}
-
-	for (int i = 0; i < nodes_to_remove.size(); i++) {
-		Node *node = nodes_to_remove[i];
-		remove_child(node);
-		node->queue_free();
-	}
-}
-
 void WFCElement::set_type(const StringName &p_type) {
 	type = p_type;
 }
@@ -510,15 +418,6 @@ void WFCElement::clear_materialized() {
 
 void WFCElement::materialize() {
 	clear_materialized();
-	if (nested_scenes.is_empty()) {
-		for (int i = 0; i < get_child_count(); i++) {
-			Node *child = get_child(i);
-			if (child != nullptr && child->has_meta("wfc")) {
-				_capture_nested_scenes();
-				break;
-			}
-		}
-	}
 	if (selected_option.is_empty()) {
 		return;
 	}
@@ -534,12 +433,6 @@ void WFCElement::materialize() {
 			materialized_children.push_back(node->get_instance_id());
 		}
 		break;
-	}
-
-	if (nested_scenes.has(selected_option) && nested_scenes[selected_option].is_valid()) {
-		Node *node = nested_scenes[selected_option]->instantiate();
-		add_child(node);
-		materialized_children.push_back(node->get_instance_id());
 	}
 }
 
