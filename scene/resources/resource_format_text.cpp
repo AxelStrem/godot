@@ -1647,7 +1647,21 @@ void ResourceFormatSaverTextInstance::_find_resources(const Variant &p_variant, 
 				return;
 			}
 
-			if (!p_main && (!bundle_resources) && !res->is_built_in()) {
+			// Resources from imported files (.blend, .glb, etc.) are stored
+			// at paths like "res://models/foo.blend::ArrayMesh_abc123".
+			// These are independently loadable and should be saved as
+			// ExtResource references rather than embedded inline.
+			bool can_externalize = !res->is_built_in();
+			if (!can_externalize) {
+				String rpath = res->get_path();
+				int sep = rpath.find("::");
+				if (sep != -1) {
+					String base_path = rpath.substr(0, sep);
+					can_externalize = ResourceLoader::exists(base_path);
+				}
+			}
+
+			if (!p_main && (!bundle_resources) && can_externalize) {
 				if (res->get_path() == local_path) {
 					ERR_PRINT("Circular reference to resource being saved found: '" + local_path + "' will be null next time it's loaded.");
 					return;
