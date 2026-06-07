@@ -36,6 +36,7 @@
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/variant/variant_parser.h"
+#include "scene/resources/packed_scene.h"
 
 bool ResourceFormatImporter::SortImporterByName::operator()(const Ref<ResourceImporter> &p_a, const Ref<ResourceImporter> &p_b) const {
 	return p_a->get_importer_name() < p_b->get_importer_name();
@@ -156,17 +157,48 @@ Error ResourceFormatImporter::_get_path_and_type(const String &p_path, PathAndTy
 }
 
 Ref<Resource> ResourceFormatImporter::load(const String &p_path, const String &p_original_path, Error *r_error, bool p_use_sub_threads, float *r_progress, CacheMode p_cache_mode) {
+	// Handle sub-resource paths (e.g., "res://models/foo.blend::ArrayMesh_abc123").
+	// Strip the sub-resource name, load the base file, then extract the sub-resource.
+	int sep = p_path.find("::");
+	String base_path = p_path;
+	String sub_name;
+	if (sep != -1) {
+		base_path = p_path.substr(0, sep);
+		sub_name = p_path.substr(sep + 2);
+	}
+
+	Ref<Resource> res;
 #ifdef TOOLS_ENABLED
 	// When loading a resource on startup, we use the load_on_startup callback,
 	// which executes the loading in the EditorFileSystem. It can reimport
 	// the resource and retry the load, allowing the resource to be loaded
 	// even if it is not yet imported.
 	if (ResourceImporter::load_on_startup != nullptr) {
-		return ResourceImporter::load_on_startup(this, p_path, r_error, p_use_sub_threads, r_progress, p_cache_mode);
-	}
+		res = ResourceImporter::load_on_startup(this, base_path, r_error, p_use_sub_threads, r_progress, p_cache_mode);
+	} else
 #endif
+	{
+		res = load_internal(base_path, r_error, p_use_sub_threads, r_progress, p_cache_mode, false);
+	}
 
-	return load_internal(p_path, r_error, p_use_sub_threads, r_progress, p_cache_mode, false);
+	// If there was a sub-resource name, extract it from the loaded base.
+	if (res.is_valid() && !sub_name.is_empty()) {
+		Ref<PackedScene> packed_scene = res;
+		if (packed_scene.is_valid()) {
+			Ref<SceneState> state = packed_scene->get_state();
+			Ref<Resource> sub_res = state->get_sub_resource(p_path);
+			if (sub_res.is_valid()) {
+				return sub_res;
+			}
+		}
+		// Sub-resource not found in the base resource.
+		if (r_error) {
+			*r_error = ERR_FILE_CORRUPT;
+		}
+		return Ref<Resource>();
+	}
+
+	return res;
 }
 
 Ref<Resource> ResourceFormatImporter::load_internal(const String &p_path, Error *r_error, bool p_use_sub_threads, float *r_progress, CacheMode p_cache_mode, bool p_silence_errors) {
@@ -245,10 +277,18 @@ void ResourceFormatImporter::get_recognized_extensions_for_type(const String &p_
 }
 
 bool ResourceFormatImporter::exists(const String &p_path) const {
+	int sep = p_path.find("::");
+	if (sep != -1) {
+		return FileAccess::exists(p_path.substr(0, sep) + ".import");
+	}
 	return FileAccess::exists(p_path + ".import");
 }
 
 bool ResourceFormatImporter::recognize_path(const String &p_path, const String &p_for_type) const {
+	int sep = p_path.find("::");
+	if (sep != -1) {
+		return FileAccess::exists(p_path.substr(0, sep) + ".import");
+	}
 	return FileAccess::exists(p_path + ".import");
 }
 

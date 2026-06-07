@@ -32,6 +32,7 @@
 
 #include "core/config/project_settings.h"
 #include "core/input/input.h"
+#include "core/io/file_access.h"
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
 #include "core/object/callable_mp.h"
@@ -4826,6 +4827,20 @@ void SceneTreeDock::_create_remap_for_node(Node *p_node, HashMap<Ref<Resource>, 
 				}
 
 				if (res->is_built_in() && !r_remap.has(res)) {
+					// Resources from imported files (.blend, .glb, etc.) have paths like
+					// "res://models/foo.blend::ArrayMesh_abc123". Since is_built_in() returns
+					// true for any :: path, they would normally be duplicated when pasting
+					// across scenes. But these are independently loadable sub-resources
+					// — we should keep the reference to the source file, not create a copy.
+					String rpath = res->get_path();
+					int sep = rpath.find("::");
+					if (sep != -1) {
+						String base_path = rpath.substr(0, sep);
+						if (FileAccess::exists(base_path + ".import")) {
+							// This is a sub-resource of an imported file — don't duplicate.
+							continue;
+						}
+					}
 					_create_remap_for_resource(res, r_remap);
 				}
 			}
@@ -4853,6 +4868,16 @@ void SceneTreeDock::_create_remap_for_resource(Ref<Resource> p_resource, HashMap
 			Ref<Resource> res = v;
 			if (res.is_valid()) {
 				if (res->is_built_in() && !r_remap.has(res)) {
+					// Skip sub-resources of imported files — they are independently
+					// loadable and should keep their reference to the source file.
+					String rpath = res->get_path();
+					int sep = rpath.find("::");
+					if (sep != -1) {
+						String base_path = rpath.substr(0, sep);
+						if (FileAccess::exists(base_path + ".import")) {
+							continue;
+						}
+					}
 					_create_remap_for_resource(res, r_remap);
 				}
 			}

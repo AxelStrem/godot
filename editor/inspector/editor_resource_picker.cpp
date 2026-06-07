@@ -31,6 +31,7 @@
 #include "editor_resource_picker.h"
 
 #include "core/input/input.h"
+#include "core/io/file_access.h"
 #include "core/io/resource_loader.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
@@ -572,6 +573,21 @@ void EditorResourcePicker::_edit_menu_cbk(int p_which) {
 				Resource *res = Object::cast_to<Resource>(resource_owner);
 				if (res && edited_resource->get_path().get_slice("::", 0) == res->get_path().get_slice("::", 0)) {
 					make_unique = false;
+				}
+			}
+
+			// Resources from imported files (.blend, .fbx, etc.) have :: paths,
+			// which is_built_in() returns true for. But they are independently
+			// loadable from the import file — keep the ExtResource reference
+			// instead of duplicating (which would embed the mesh data).
+			if (make_unique) {
+				String rpath = edited_resource->get_path();
+				int sep = rpath.find("::");
+				if (sep != -1) {
+					String base_path = rpath.substr(0, sep);
+					if (FileAccess::exists(base_path + ".import")) {
+						make_unique = false;
+					}
 				}
 			}
 
