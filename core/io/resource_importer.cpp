@@ -167,6 +167,42 @@ Ref<Resource> ResourceFormatImporter::load(const String &p_path, const String &p
 		sub_name = p_path.substr(sep + 2);
 	}
 
+	// When loading a sub-resource via :: syntax, the base .scn registers ALL
+	// internal resource paths in ResourceCache during the first load. Check
+	// the cache first to avoid re-loading the .scn from disk, which would
+	// trigger "Another resource is loaded from path" errors.
+	if (!sub_name.is_empty()) {
+		String local_path = ProjectSettings::get_singleton()->localize_path(p_path);
+		bool ignore_cache = p_cache_mode == CACHE_MODE_IGNORE || p_cache_mode == CACHE_MODE_IGNORE_DEEP;
+		if (!ignore_cache) {
+			// Exact sub-resource already cached.
+			Ref<Resource> cached = ResourceCache::get_ref(local_path);
+			if (cached.is_valid()) {
+				if (r_error) {
+					*r_error = OK;
+				}
+				return cached;
+			}
+
+			// Base PackedScene is cached — extract sub-resource directly.
+			String base_local = ProjectSettings::get_singleton()->localize_path(base_path);
+			Ref<Resource> base_cached = ResourceCache::get_ref(base_local);
+			if (base_cached.is_valid()) {
+				Ref<PackedScene> packed_scene = base_cached;
+				if (packed_scene.is_valid()) {
+					Ref<SceneState> state = packed_scene->get_state();
+					Ref<Resource> sub_res = state->get_sub_resource(local_path);
+					if (sub_res.is_valid()) {
+						if (r_error) {
+							*r_error = OK;
+						}
+						return sub_res;
+					}
+				}
+			}
+		}
+	}
+
 	Ref<Resource> res;
 #ifdef TOOLS_ENABLED
 	// When loading a resource on startup, we use the load_on_startup callback,
