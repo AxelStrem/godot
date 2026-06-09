@@ -737,7 +737,19 @@ Error ResourceLoaderBinary::load() {
 		if (r) {
 			if (!path.is_empty()) {
 				if (cache_mode != ResourceFormatLoader::CACHE_MODE_IGNORE) {
-					r->set_path(path, cache_mode == ResourceFormatLoader::CACHE_MODE_REPLACE); // If got here because the resource with same path has different type, replace it.
+					// A nested/re-entrant load_internal (triggered by an ExtResource
+					// dependency loaded while parsing this resource's properties) may
+					// have already registered a resource at 'path'. If so, reuse the
+					// cached one to avoid "Another resource is loaded from path" errors.
+					if (cache_mode == ResourceFormatLoader::CACHE_MODE_REUSE && ResourceCache::has(path)) {
+						Ref<Resource> already_cached = ResourceCache::get_ref(path);
+						if (already_cached.is_valid()) {
+							res = already_cached;
+							r = res.ptr();
+						}
+					} else {
+						r->set_path(path, cache_mode == ResourceFormatLoader::CACHE_MODE_REPLACE);
+					}
 				} else {
 					r->set_path_cache(path);
 				}
