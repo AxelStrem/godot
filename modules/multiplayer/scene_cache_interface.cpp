@@ -108,14 +108,45 @@ void SceneCacheInterface::process_simplify_path(int p_from, const uint8_t *p_pac
 	int id = decode_uint32(&p_packet[ofs]);
 	ofs += 4;
 
-	ERR_FAIL_COND_MSG(peers_info[p_from].recv_nodes.has(id), vformat("Duplicate remote cache ID %d for peer %d", id, p_from));
+	// If we already know this cache ID, the host is retrying because it
+	// didn't receive our previous CONFIRM_PATH. Re-verify and re-confirm.
+	if (peers_info[p_from].recv_nodes.has(id)) {
+		String paths = String::utf8((const char *)(p_packet + ofs), p_packet_len - ofs);
+		const NodePath path = paths;
+		Node *node = root_node->get_node_or_null(path);
+		if (node) {
+			const bool rpc_ok = multiplayer->get_rpc_md5(node) == methods_md5;
+			if (!rpc_ok) {
+				ERR_PRINT("The rpc node checksum failed. Make sure to have the same methods on both nodes. Node path: " + String(path));
+			}
+			// Re-send CONFIRM_PATH.
+			Vector<uint8_t> confirm_packet;
+			confirm_packet.resize(1 + 1 + 4);
+			confirm_packet.write[0] = SceneMultiplayer::NETWORK_COMMAND_CONFIRM_PATH;
+			confirm_packet.write[1] = rpc_ok ? 1 : 0;
+			encode_uint32(id, &confirm_packet.write[2]);
+
+			Ref<MultiplayerPeer> mp_peer = multiplayer->get_multiplayer_peer();
+			ERR_FAIL_COND(mp_peer.is_null());
+
+			mp_peer->set_transfer_channel(0);
+			mp_peer->set_transfer_mode(MultiplayerPeer::TRANSFER_MODE_RELIABLE);
+			multiplayer->send_command(p_from, confirm_packet.ptr(), confirm_packet.size());
+		}
+		return;
+	}
 
 	String paths = String::utf8((const char *)(p_packet + ofs), p_packet_len - ofs);
 
 	const NodePath path = paths;
 
-	Node *node = root_node->get_node(path);
-	ERR_FAIL_NULL(node);
+	// Use get_node_or_null to avoid error spam when the node doesn't exist
+	// on the client yet (e.g. chambers not yet generated). The host will
+	// retry and eventually the node will be available.
+	Node *node = root_node->get_node_or_null(path);
+	if (!node) {
+		return;
+	}
 	const bool valid_rpc_checksum = multiplayer->get_rpc_md5(node) == methods_md5;
 	if (valid_rpc_checksum == false) {
 		ERR_PRINT("The rpc node checksum failed. Make sure to have the same methods on both nodes. Node path: " + String(path));
@@ -248,6 +279,10 @@ bool SceneCacheInterface::send_object_cache(Object *p_obj, int p_peer_id, int &r
 			peers_to_add.push_back(p_peer_id); // Need to also be notified.
 			has_all_peers = false;
 		} else if (!(*confirmed)) {
+			// Previous SIMPLIFY_PATH failed (client didn't have the node yet).
+			// Clear the deadlocked entry so we retry sending a fresh SIMPLIFY_PATH.
+			cache.confirmed_peers.erase(p_peer_id);
+			peers_to_add.push_back(p_peer_id);
 			has_all_peers = false;
 		}
 	} else {
