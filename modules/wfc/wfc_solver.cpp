@@ -18,7 +18,9 @@
 
 namespace {
 
-static const StringName WFC_NONE_CONNECTION = SNAME("none");
+// Use a macro instead of static const to avoid static init order issues — SNAME
+// requires the StringName system to be configured, which isn't guaranteed at DLL load time.
+#define WFC_NONE_CONNECTION SNAME("none")
 static const StringName WFC_WALL_PANEL_TYPE = SNAME("wall_panel");
 static constexpr int WFC_LOOKUP_RANGE = 3;
 
@@ -100,6 +102,7 @@ struct AuthoringOption {
 	StringName option;
 	float probability = 1.0f;
 	bool enabled = true;
+	int symmetry_fold = 1;
 };
 
 struct AuthoringNeighbor {
@@ -110,6 +113,7 @@ struct AuthoringNeighbor {
 	float wobble = 0.001f;
 	Vector3 angular_wobble = Vector3(0.5, 0.5, 0.5);
 	bool primary = true;
+	StringName rotation_lock;
 };
 
 struct AuthoringElement {
@@ -151,6 +155,9 @@ struct CompiledCatalog {
 		HashMap<StringName, int> side_ids;
 		Vector<SideData> sides;
 		int option_word_count = 0;
+		Vector<int> variant_base_option;
+		Vector<int> variant_rotation;
+		Vector<StringName> rotation_sides;
 	};
 
 	HashMap<StringName, int> type_ids;
@@ -159,6 +166,7 @@ struct CompiledCatalog {
 	Vector<TypeData> types;
 	int connection_word_count = 0;
 	int none_connection_id = -1;
+	Vector<BitMask> connection_pair_masks;
 };
 
 struct SolvedSide {
@@ -177,6 +185,7 @@ struct SolvedElement {
 	int remaining = 0;
 	Vector<SolvedSide> sides;
 	Vector<int> connected_elements;
+	Vector3 position; // debug: grid position
 };
 
 struct SolveContext {
@@ -190,6 +199,7 @@ struct SolveResult {
 	String error;
 	Vector<ObjectID> node_ids;
 	Vector<StringName> selected_options;
+	Vector<int> selected_rotation_steps;
 	Vector<PackedStringArray> remaining_options;
 	Vector<bool> persist_remaining_options;
 	Vector<Dictionary> resolved_data;
@@ -315,10 +325,51 @@ static int _build_connections(const AuthoringSnapshot &p_snapshot, Vector<Connec
 	return r_connections.size();
 }
 
-static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catalog, String &r_error) {
+static bool _compile_catalog(const Dictionary &p_rules, const HashMap<StringName, HashMap<StringName, int>> &p_symmetry_map, CompiledCatalog &r_catalog, String &r_error) {
 	r_catalog.none_connection_id = 0;
 	r_catalog.connection_ids.insert(WFC_NONE_CONNECTION, 0);
 	r_catalog.connection_names.push_back(WFC_NONE_CONNECTION);
+
+	const StringName ROTATION_SIDES_KEY = SNAME("@rotation_sides");
+	const StringName CONNECTION_PAIRS_KEY = SNAME("@connection_pairs");
+
+	// Parse @connection_pairs early to register all connection names
+	HashMap<StringName, Vector<StringName>> raw_connection_pairs;
+	if (p_rules.has(CONNECTION_PAIRS_KEY)) {
+		Dictionary pairs_dict = p_rules[CONNECTION_PAIRS_KEY];
+		Array pair_keys = pairs_dict.keys();
+		for (int pk = 0; pk < pair_keys.size(); pk++) {
+			StringName from_conn;
+			if (!_variant_to_string_name(pair_keys[pk], from_conn)) {
+				continue;
+			}
+			Vector<StringName> to_list;
+			Array to_arr;
+			Variant to_val = pairs_dict[pair_keys[pk]];
+			if (to_val.get_type() == Variant::ARRAY) {
+				to_arr = to_val;
+			} else {
+				to_arr.append(to_val);
+			}
+			for (int ti = 0; ti < to_arr.size(); ti++) {
+				StringName to_conn;
+				if (_variant_to_string_name(to_arr[ti], to_conn)) {
+					to_list.push_back(to_conn);
+					// Register connection names (don't add "none" — it's already id 0)
+					if (!r_catalog.connection_ids.has(to_conn) && to_conn != WFC_NONE_CONNECTION) {
+						r_catalog.connection_ids.insert(to_conn, r_catalog.connection_names.size());
+						r_catalog.connection_names.push_back(to_conn);
+					}
+				}
+			}
+			// Register the from_conn too
+			if (!r_catalog.connection_ids.has(from_conn) && from_conn != WFC_NONE_CONNECTION) {
+				r_catalog.connection_ids.insert(from_conn, r_catalog.connection_names.size());
+				r_catalog.connection_names.push_back(from_conn);
+			}
+			raw_connection_pairs.insert(from_conn, to_list);
+		}
+	}
 
 	Array type_keys = p_rules.keys();
 	for (int type_index = 0; type_index < type_keys.size(); type_index++) {
@@ -327,9 +378,26 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 		if (!_variant_to_string_name(type_variant, type_name)) {
 			continue;
 		}
+		// Skip top-level metadata keys
+		if (type_name == CONNECTION_PAIRS_KEY) {
+			continue;
+		}
 		CompiledCatalog::TypeData type_data;
 		type_data.name = type_name;
 		Dictionary type_rules = p_rules[type_name];
+
+		// Read rotation_sides special key
+		if (type_rules.has(ROTATION_SIDES_KEY)) {
+			Array rotation_sides_arr = type_rules[ROTATION_SIDES_KEY];
+			for (int i = 0; i < rotation_sides_arr.size(); i++) {
+				StringName side_name;
+				if (_variant_to_string_name(rotation_sides_arr[i], side_name)) {
+					type_data.rotation_sides.push_back(side_name);
+				}
+			}
+		}
+
+		// First pass: collect option names and side names
 		Array side_keys = type_rules.keys();
 		for (int side_index = 0; side_index < side_keys.size(); side_index++) {
 			Variant side_variant = side_keys[side_index];
@@ -337,6 +405,11 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 			if (!_variant_to_string_name(side_variant, side_name)) {
 				continue;
 			}
+			// Skip special metadata keys
+			if (side_name == ROTATION_SIDES_KEY) {
+				continue;
+			}
+
 			int new_side_index = type_data.sides.size();
 			type_data.side_ids.insert(side_name, new_side_index);
 			type_data.sides.push_back(CompiledCatalog::SideData());
@@ -380,18 +453,60 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 						r_catalog.connection_names.push_back(connection_name);
 					}
 				}
+
 			}
 		}
 
-		type_data.option_word_count = (type_data.option_names.size() + 63) / 64;
+		// Ensure all rotation_sides have side data entries
+		for (int i = 0; i < type_data.rotation_sides.size(); i++) {
+			const StringName &rs = type_data.rotation_sides[i];
+			if (!type_data.side_ids.has(rs)) {
+				int new_side_index = type_data.sides.size();
+				type_data.side_ids.insert(rs, new_side_index);
+				type_data.sides.push_back(CompiledCatalog::SideData());
+				type_data.sides.write[new_side_index].name = rs;
+			}
+		}
+
+		// Expand options with rotation variants
+		const HashMap<StringName, int> *symmetry_folds = nullptr;
+		if (p_symmetry_map.has(type_name)) {
+			symmetry_folds = &p_symmetry_map[type_name];
+		}
+
+		for (int base_option = 0; base_option < type_data.option_names.size(); base_option++) {
+			const StringName &opt_name = type_data.option_names[base_option];
+			int fold = 1;
+			if (symmetry_folds != nullptr && symmetry_folds->has(opt_name)) {
+				fold = MAX(1, (*symmetry_folds)[opt_name]);
+			}
+			// Clamp fold: requires rotation_sides to be non-empty
+			if (type_data.rotation_sides.is_empty()) {
+				fold = 1;
+			} else if (fold > 1) {
+				// Fold must be a divisor of rotation_sides.size() to tile cleanly
+				while (fold > 1 && type_data.rotation_sides.size() % fold != 0) {
+					fold--;
+				}
+			}
+			for (int step = 0; step < fold; step++) {
+				type_data.variant_base_option.push_back(base_option);
+				type_data.variant_rotation.push_back(step);
+			}
+		}
+
+		int total_variants = type_data.variant_base_option.size();
+		type_data.option_word_count = (total_variants + 63) / 64;
 		r_catalog.type_ids.insert(type_name, r_catalog.types.size());
 		r_catalog.types.push_back(type_data);
 	}
 
 	r_catalog.connection_word_count = (r_catalog.connection_names.size() + 63) / 64;
 
+	// Second pass: resize side data arrays for expanded option space
 	for (int type_index = 0; type_index < r_catalog.types.size(); type_index++) {
 		CompiledCatalog::TypeData &type_data = r_catalog.types.write[type_index];
+		int option_count = type_data.variant_base_option.size();
 		for (int side_index = 0; side_index < type_data.sides.size(); side_index++) {
 			CompiledCatalog::SideData &side_data = type_data.sides.write[side_index];
 			side_data.none_options.resize(type_data.option_word_count);
@@ -399,13 +514,15 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 			for (int connection_index = 0; connection_index < side_data.connection_to_options.size(); connection_index++) {
 				side_data.connection_to_options.write[connection_index].resize(type_data.option_word_count);
 			}
-			side_data.option_to_connections.resize(type_data.option_names.size());
-			for (int option_index = 0; option_index < side_data.option_to_connections.size(); option_index++) {
-				side_data.option_to_connections.write[option_index].resize(r_catalog.connection_word_count);
+			side_data.option_to_connections.resize(option_count);
+			for (int variant_index = 0; variant_index < option_count; variant_index++) {
+				side_data.option_to_connections.write[variant_index].resize(r_catalog.connection_word_count);
 			}
 		}
 	}
 
+	// Fill side data with rotation-aware remapping
+	int rotation_sides_len;
 	for (int type_index = 0; type_index < type_keys.size(); type_index++) {
 		StringName type_name;
 		if (!_variant_to_string_name(type_keys[type_index], type_name)) {
@@ -415,6 +532,7 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 			continue;
 		}
 		CompiledCatalog::TypeData &type_data = r_catalog.types.write[r_catalog.type_ids[type_name]];
+		rotation_sides_len = type_data.rotation_sides.size();
 		Dictionary type_rules = p_rules[type_name];
 		Array side_keys = type_rules.keys();
 		for (int side_index = 0; side_index < side_keys.size(); side_index++) {
@@ -422,10 +540,21 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 			if (!_variant_to_string_name(side_keys[side_index], side_name)) {
 				continue;
 			}
+			// Skip special metadata keys
+			if (side_name == ROTATION_SIDES_KEY) {
+				continue;
+			}
 			if (!type_data.side_ids.has(side_name)) {
 				continue;
 			}
-			CompiledCatalog::SideData &side_data = type_data.sides.write[type_data.side_ids[side_name]];
+			int catalog_side_pos = -1;
+			for (int ri = 0; ri < rotation_sides_len; ri++) {
+				if (type_data.rotation_sides[ri] == side_name) {
+					catalog_side_pos = ri;
+					break;
+				}
+			}
+
 			Array entries = type_rules[side_name];
 			for (int entry_index = 0; entry_index < entries.size(); entry_index++) {
 				if (entries[entry_index].get_type() != Variant::ARRAY) {
@@ -442,7 +571,7 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 				if (!type_data.option_ids.has(option_name)) {
 					continue;
 				}
-				int option_id = type_data.option_ids[option_name];
+				int base_option_id = type_data.option_ids[option_name];
 
 				Array connection_values;
 				if (entry[1].get_type() == Variant::ARRAY) {
@@ -451,22 +580,86 @@ static bool _compile_catalog(const Dictionary &p_rules, CompiledCatalog &r_catal
 					connection_values.append(entry[1]);
 				}
 
-				for (int connection_index = 0; connection_index < connection_values.size(); connection_index++) {
-					if (_variant_is_none_connection(connection_values[connection_index])) {
-						side_data.none_options.set_bit(option_id);
-						continue;
+				// Apply to all rotation variants of this option
+				int variant_count = type_data.variant_base_option.size();
+				int fold = 0;
+				int first_variant = -1;
+				for (int vi = 0; vi < variant_count; vi++) {
+					if (type_data.variant_base_option[vi] == base_option_id) {
+						if (first_variant == -1) {
+							first_variant = vi;
+						}
+						fold++;
 					}
-					StringName connection_name;
-					if (!_variant_to_string_name(connection_values[connection_index], connection_name)) {
-						continue;
-					}
-					if (!r_catalog.connection_ids.has(connection_name)) {
-						continue;
-					}
-					int compiled_connection = r_catalog.connection_ids[connection_name];
-					side_data.option_to_connections.write[option_id].set_bit(compiled_connection);
-					side_data.connection_to_options.write[compiled_connection].set_bit(option_id);
 				}
+
+				for (int vi = first_variant; vi < first_variant + fold; vi++) {
+					int rotation_step = type_data.variant_rotation[vi];
+
+					// Compute which side this variant presents the connection on
+					StringName effective_side = side_name;
+					if (catalog_side_pos >= 0 && rotation_step > 0 && rotation_sides_len > 0 && fold > 0) {
+						int step_size = rotation_sides_len / fold;
+						int remapped_pos = (catalog_side_pos + rotation_step * step_size) % rotation_sides_len;
+						effective_side = type_data.rotation_sides[remapped_pos];
+					}
+
+					if (!type_data.side_ids.has(effective_side)) {
+						continue;
+					}
+					CompiledCatalog::SideData &effective_side_data = type_data.sides.write[type_data.side_ids[effective_side]];
+
+					for (int connection_index = 0; connection_index < connection_values.size(); connection_index++) {
+						if (_variant_is_none_connection(connection_values[connection_index])) {
+							effective_side_data.none_options.set_bit(vi);
+							// Also populate connection_to_options for "none" so _allowed_options works
+							effective_side_data.connection_to_options.write[r_catalog.none_connection_id].set_bit(vi);
+							continue;
+						}
+						StringName connection_name;
+						if (!_variant_to_string_name(connection_values[connection_index], connection_name)) {
+							continue;
+						}
+						if (!r_catalog.connection_ids.has(connection_name)) {
+							continue;
+						}
+						int compiled_connection = r_catalog.connection_ids[connection_name];
+						effective_side_data.option_to_connections.write[vi].set_bit(compiled_connection);
+						effective_side_data.connection_to_options.write[compiled_connection].set_bit(vi);
+					}
+				}
+			}
+		}
+	}
+
+	// Build connection_pair_masks: default self-pairing, then apply @connection_pairs overrides
+	int conn_count = r_catalog.connection_names.size();
+	r_catalog.connection_pair_masks.resize(conn_count);
+	for (int ci = 0; ci < conn_count; ci++) {
+		r_catalog.connection_pair_masks.write[ci].resize(r_catalog.connection_word_count);
+		// Default: each connection pairs with itself
+		r_catalog.connection_pair_masks.write[ci].set_bit(ci);
+	}
+	// Apply user overrides
+	for (const KeyValue<StringName, Vector<StringName>> &kv : raw_connection_pairs) {
+		if (!r_catalog.connection_ids.has(kv.key)) {
+			continue;
+		}
+		int from_id = r_catalog.connection_ids[kv.key];
+		r_catalog.connection_pair_masks.write[from_id].words.fill(0); // Clear default self-pairing
+		for (const StringName &to_name : kv.value) {
+			if (to_name == WFC_NONE_CONNECTION) {
+				r_catalog.connection_pair_masks.write[from_id].set_bit(r_catalog.none_connection_id);
+			} else if (r_catalog.connection_ids.has(to_name)) {
+				r_catalog.connection_pair_masks.write[from_id].set_bit(r_catalog.connection_ids[to_name]);
+			}
+		}
+	}
+	// Ensure symmetry: if A pairs with B, B must pair with A
+	for (int ci = 0; ci < conn_count; ci++) {
+		for (int cj = 0; cj < conn_count; cj++) {
+			if (r_catalog.connection_pair_masks[ci].has_bit(cj) && !r_catalog.connection_pair_masks[cj].has_bit(ci)) {
+				r_catalog.connection_pair_masks.write[cj].set_bit(ci);
 			}
 		}
 	}
@@ -483,9 +676,10 @@ static BitMask _possible_connections(const CompiledCatalog::TypeData &p_type, in
 	BitMask result;
 	result.resize(p_connection_word_count);
 	const CompiledCatalog::SideData &side_data = p_type.sides[p_side_id];
-	for (int option_index = 0; option_index < p_type.option_names.size(); option_index++) {
-		if (p_options.has_bit(option_index)) {
-			result.bit_or(side_data.option_to_connections[option_index]);
+	int variant_count = p_type.variant_base_option.size();
+	for (int vi = 0; vi < variant_count; vi++) {
+		if (p_options.has_bit(vi)) {
+			result.bit_or(side_data.option_to_connections[vi]);
 		}
 	}
 	return result;
@@ -505,9 +699,16 @@ static BitMask _allowed_options(const CompiledCatalog::TypeData &p_type, int p_s
 
 static PackedStringArray _export_allowed_options(const SolvedElement &p_element, const CompiledCatalog::TypeData &p_type_data) {
 	PackedStringArray allowed_options;
-	for (int option_index = 0; option_index < p_type_data.option_names.size(); option_index++) {
-		if (p_element.options.has_bit(option_index)) {
-			allowed_options.push_back(String(p_type_data.option_names[option_index]));
+	HashSet<StringName> seen;
+	int variant_count = p_type_data.variant_base_option.size();
+	for (int vi = 0; vi < variant_count; vi++) {
+		if (p_element.options.has_bit(vi)) {
+			int base_id = p_type_data.variant_base_option[vi];
+			StringName base_name = p_type_data.option_names[base_id];
+			if (!seen.has(base_name)) {
+				seen.insert(base_name);
+				allowed_options.push_back(String(base_name));
+			}
 		}
 	}
 	return allowed_options;
@@ -611,6 +812,7 @@ static bool _populate_solve_result(const SolveContext &p_context, const Ref<WFCG
 	r_result.connection_count = p_context.connection_count;
 	r_result.node_ids.resize(p_context.elements.size());
 	r_result.selected_options.resize(p_context.elements.size());
+	r_result.selected_rotation_steps.resize(p_context.elements.size());
 	r_result.remaining_options.resize(p_context.elements.size());
 	r_result.persist_remaining_options.resize(p_context.elements.size());
 	r_result.resolved_data.resize(p_context.elements.size());
@@ -623,6 +825,7 @@ static bool _populate_solve_result(const SolveContext &p_context, const Ref<WFCG
 		r_result.node_ids.write[element_index] = element.node_id;
 		r_result.remaining_options.write[element_index] = allowed_options;
 		r_result.persist_remaining_options.write[element_index] = element.defer_collapse;
+		r_result.selected_rotation_steps.write[element_index] = 0;
 
 		if (!element.defer_collapse) {
 			if (allowed_options.size() != 1) {
@@ -631,6 +834,15 @@ static bool _populate_solve_result(const SolveContext &p_context, const Ref<WFCG
 				return false;
 			}
 			r_result.selected_options.write[element_index] = StringName(allowed_options[0]);
+
+			// Find which variant is set and extract rotation step
+			int variant_count = type_data.variant_base_option.size();
+			for (int vi = 0; vi < variant_count; vi++) {
+				if (element.options.has_bit(vi)) {
+					r_result.selected_rotation_steps.write[element_index] = type_data.variant_rotation[vi];
+					break;
+				}
+			}
 		}
 
 		if (p_graph.is_valid()) {
@@ -645,7 +857,25 @@ static bool _populate_solve_result(const SolveContext &p_context, const Ref<WFCG
 }
 
 static bool _build_solve_context(const AuthoringSnapshot &p_snapshot, SolveContext &r_context, Vector<ConnectionBuild> *r_connection_preview, String &r_error) {
-	if (!_compile_catalog(p_snapshot.merged_rules, r_context.catalog, r_error)) {
+	// Collect symmetry folds from authoring elements
+	HashMap<StringName, HashMap<StringName, int>> symmetry_map;
+	for (int element_index = 0; element_index < p_snapshot.elements.size(); element_index++) {
+		const AuthoringElement &authoring = p_snapshot.elements[element_index];
+		if (!symmetry_map.has(authoring.type)) {
+			symmetry_map[authoring.type] = HashMap<StringName, int>();
+		}
+		HashMap<StringName, int> &type_sym = symmetry_map[authoring.type];
+		for (int option_index = 0; option_index < authoring.options.size(); option_index++) {
+			const AuthoringOption &option = authoring.options[option_index];
+			if (!type_sym.has(option.option)) {
+				type_sym[option.option] = option.symmetry_fold;
+			} else {
+				type_sym[option.option] = MAX(type_sym[option.option], option.symmetry_fold);
+			}
+		}
+	}
+
+	if (!_compile_catalog(p_snapshot.merged_rules, symmetry_map, r_context.catalog, r_error)) {
 		return false;
 	}
 
@@ -671,9 +901,12 @@ static bool _build_solve_context(const AuthoringSnapshot &p_snapshot, SolveConte
 		element.type_id = type_id;
 		element.resolve_priority = authoring.resolve_priority;
 		element.defer_collapse = authoring.defer_collapse;
+		element.position = authoring.global_transform.origin;
 		element.options.resize(type_data.option_word_count);
-		element.weights.resize(type_data.option_names.size());
-		for (int weight_index = 0; weight_index < element.weights.size(); weight_index++) {
+
+		int variant_count = type_data.variant_base_option.size();
+		element.weights.resize(variant_count);
+		for (int weight_index = 0; weight_index < variant_count; weight_index++) {
 			element.weights.write[weight_index] = 0.0f;
 		}
 
@@ -698,9 +931,15 @@ static bool _build_solve_context(const AuthoringSnapshot &p_snapshot, SolveConte
 			if (!option.enabled || !type_data.option_ids.has(option.option)) {
 				continue;
 			}
-			int compiled_option = type_data.option_ids[option.option];
-			element.options.set_bit(compiled_option);
-			element.weights.write[compiled_option] = option.probability;
+			int base_option_id = type_data.option_ids[option.option];
+
+			// Enable all rotation variants of this base option
+			for (int vi = 0; vi < variant_count; vi++) {
+				if (type_data.variant_base_option[vi] == base_option_id) {
+					element.options.set_bit(vi);
+					element.weights.write[vi] = option.probability;
+				}
+			}
 		}
 
 		element.remaining = element.options.count_bits();
@@ -871,13 +1110,28 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, const Re
 					const CompiledCatalog::TypeData &other_type = context.catalog.types[other.type_id];
 					BitMask my_connections = _possible_connections(type_data, side.side_id, element.options, context.catalog.connection_word_count);
 					BitMask other_connections = _possible_connections(other_type, side.other_side_id, other.options, context.catalog.connection_word_count);
-					BitMask connection_mask = my_connections.intersected(other_connections);
-					BitMask allowed = _allowed_options(type_data, side.side_id, connection_mask);
+					// Expand other_connections through pair masks: for each connection d
+					// the other offers, include all connections c such that c pairs with d
+					BitMask expanded_other;
+					expanded_other.resize(context.catalog.connection_word_count);
+					int conn_count = context.catalog.connection_names.size();
+					for (int ci = 0; ci < conn_count; ci++) {
+						if (other_connections.has_bit(ci)) {
+							expanded_other.bit_or(context.catalog.connection_pair_masks[ci]);
+						}
+					}
+					// My allowed connections = what I offer AND pairs with something the other offers
+					BitMask allowed_connections = my_connections.intersected(expanded_other);
+					BitMask allowed = _allowed_options(type_data, side.side_id, allowed_connections);
 					bool changed = element.options.bit_and_in_place(allowed);
 					if (changed) {
 						element.remaining = element.options.count_bits();
 						if (element.remaining == 0) {
-							result.error = vformat("Contradiction while solving WFC element of type '%s'.", String(type_data.name));
+							float cell_size = p_snapshot.cell_size;
+							int gx = Math::round(element.position.x / cell_size);
+							int gy = Math::round(element.position.y / cell_size);
+							int gz = Math::round(element.position.z / cell_size);
+							result.error = vformat("Contradiction while solving WFC element of type '%s' at grid(%d,%d).", String(type_data.name), gx, gz);
 							return false;
 						}
 						for (int neighbor_index = 0; neighbor_index < element.connected_elements.size(); neighbor_index++) {
@@ -885,11 +1139,21 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, const Re
 						}
 					}
 				} else {
-					bool changed = element.options.bit_and_in_place(type_data.sides[side.side_id].none_options);
+					// No neighbor: keep options that explicitly list "none", plus options
+					// offering connections that pair with "none" per @connection_pairs
+					BitMask no_neighbor_mask = type_data.sides[side.side_id].none_options;
+					const BitMask &none_pair_mask = context.catalog.connection_pair_masks[context.catalog.none_connection_id];
+					BitMask none_pairing_opts = _allowed_options(type_data, side.side_id, none_pair_mask);
+					no_neighbor_mask.bit_or(none_pairing_opts);
+					bool changed = element.options.bit_and_in_place(no_neighbor_mask);
 					if (changed) {
 						element.remaining = element.options.count_bits();
 						if (element.remaining == 0) {
-							result.error = vformat("Contradiction while solving WFC element of type '%s'.", String(type_data.name));
+							float cell_size = p_snapshot.cell_size;
+							int gx = Math::round(element.position.x / cell_size);
+							int gy = Math::round(element.position.y / cell_size);
+							int gz = Math::round(element.position.z / cell_size);
+							result.error = vformat("Contradiction (no-neighbor) while solving WFC element of type '%s' at grid(%d,%d).", String(type_data.name), gx, gz);
 							return false;
 						}
 						for (int neighbor_index = 0; neighbor_index < element.connected_elements.size(); neighbor_index++) {
@@ -1095,6 +1359,7 @@ static bool _build_authoring_snapshot(HashSet<ObjectID> &p_tracked_elements, con
 			snapshot_option.option = option->get_option();
 			snapshot_option.probability = option->get_probability();
 			snapshot_option.enabled = option->is_enabled();
+			snapshot_option.symmetry_fold = option->get_symmetry_fold();
 			snapshot_element.options.push_back(snapshot_option);
 		}
 
@@ -1112,6 +1377,7 @@ static bool _build_authoring_snapshot(HashSet<ObjectID> &p_tracked_elements, con
 			snapshot_neighbor.wobble = neighbor->get_wobble();
 			snapshot_neighbor.angular_wobble = neighbor->get_angular_wobble();
 			snapshot_neighbor.primary = neighbor->is_primary();
+			snapshot_neighbor.rotation_lock = neighbor->get_rotation_lock();
 			snapshot_element.neighbors.push_back(snapshot_neighbor);
 		}
 
@@ -1148,6 +1414,7 @@ static void _append_authoring_element_snapshot(WFCElement *p_element, const Tran
 		snapshot_option.option = option->get_option();
 		snapshot_option.probability = option->get_probability();
 		snapshot_option.enabled = option->is_enabled();
+		snapshot_option.symmetry_fold = option->get_symmetry_fold();
 		snapshot_element.options.push_back(snapshot_option);
 	}
 
@@ -1165,6 +1432,7 @@ static void _append_authoring_element_snapshot(WFCElement *p_element, const Tran
 		snapshot_neighbor.wobble = neighbor->get_wobble();
 		snapshot_neighbor.angular_wobble = neighbor->get_angular_wobble();
 		snapshot_neighbor.primary = neighbor->is_primary();
+		snapshot_neighbor.rotation_lock = neighbor->get_rotation_lock();
 		snapshot_element.neighbors.push_back(snapshot_neighbor);
 	}
 
@@ -1218,7 +1486,28 @@ static void _apply_solve_result_to_live_elements(const SolveResult &p_result) {
 		if (element == nullptr) {
 			continue;
 		}
-		element->set_resolved_data(p_result.resolved_data[i]);
+		Dictionary data = p_result.resolved_data[i];
+		int rotation_step = p_result.selected_rotation_steps[i];
+		data["wfc_rotation_step"] = rotation_step;
+
+		// Compute rotation angle in degrees from the selected option's symmetry_fold
+		float rotation_degrees = 0.0f;
+		if (rotation_step > 0 && !p_result.selected_options[i].is_empty()) {
+			TypedArray<WFCParam> options = element->get_options();
+			for (int opt_idx = 0; opt_idx < options.size(); opt_idx++) {
+				Ref<WFCParam> opt = options[opt_idx];
+				if (opt.is_valid() && opt->get_option() == p_result.selected_options[i]) {
+					int fold = MAX(1, opt->get_symmetry_fold());
+					if (fold > 1) {
+						rotation_degrees = float(rotation_step) * 360.0f / float(fold);
+					}
+					break;
+				}
+			}
+		}
+		data["wfc_rotation_degrees"] = rotation_degrees;
+
+		element->set_resolved_data(data);
 		if (p_result.persist_remaining_options[i]) {
 			element->set_selected_option(StringName());
 			element->set_enabled_options(p_result.remaining_options[i]);

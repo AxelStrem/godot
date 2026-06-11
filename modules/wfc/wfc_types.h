@@ -50,6 +50,7 @@ class WFCParam : public Resource {
 	float probability = 1.0f;
 	bool enabled = true;
 	Ref<PackedScene> scene;
+	int symmetry_fold = 1;
 
 protected:
 	static void _bind_methods();
@@ -66,6 +67,9 @@ public:
 
 	void set_scene(const Ref<PackedScene> &p_scene);
 	Ref<PackedScene> get_scene() const;
+
+	void set_symmetry_fold(int p_symmetry_fold);
+	int get_symmetry_fold() const;
 };
 
 class WFCNeighbor : public Resource {
@@ -80,6 +84,7 @@ class WFCNeighbor : public Resource {
 	Vector3 angular_wobble = Vector3(0.5, 0.5, 0.5);
 	StringName connection;
 	bool primary = true;
+	StringName rotation_lock;
 
 protected:
 	static void _bind_methods();
@@ -111,6 +116,9 @@ public:
 
 	void set_primary(bool p_primary);
 	bool is_primary() const;
+
+	void set_rotation_lock(const StringName &p_rotation_lock);
+	StringName get_rotation_lock() const;
 };
 
 class WFCElement : public Node3D {

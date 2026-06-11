@@ -88,11 +88,14 @@ void WFCParam::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_enabled"), &WFCParam::is_enabled);
 	ClassDB::bind_method(D_METHOD("set_scene", "scene"), &WFCParam::set_scene);
 	ClassDB::bind_method(D_METHOD("get_scene"), &WFCParam::get_scene);
+	ClassDB::bind_method(D_METHOD("set_symmetry_fold", "symmetry_fold"), &WFCParam::set_symmetry_fold);
+	ClassDB::bind_method(D_METHOD("get_symmetry_fold"), &WFCParam::get_symmetry_fold);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "option"), "set_option", "get_option");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "probability", PROPERTY_HINT_RANGE, "0,1000,0.001,or_greater"), "set_probability", "get_probability");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "enabled"), "set_enabled", "is_enabled");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "scene", PROPERTY_HINT_RESOURCE_TYPE, "PackedScene"), "set_scene", "get_scene");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "symmetry_fold", PROPERTY_HINT_RANGE, "1,8,1,or_greater"), "set_symmetry_fold", "get_symmetry_fold");
 }
 
 void WFCParam::set_option(const StringName &p_option) {
@@ -127,6 +130,14 @@ Ref<PackedScene> WFCParam::get_scene() const {
 	return scene;
 }
 
+void WFCParam::set_symmetry_fold(int p_symmetry_fold) {
+	symmetry_fold = MAX(1, p_symmetry_fold);
+}
+
+int WFCParam::get_symmetry_fold() const {
+	return symmetry_fold;
+}
+
 void WFCNeighbor::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_side_name", "name"), &WFCNeighbor::set_side_name);
 	ClassDB::bind_method(D_METHOD("get_side_name"), &WFCNeighbor::get_side_name);
@@ -146,6 +157,8 @@ void WFCNeighbor::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_connection"), &WFCNeighbor::get_connection);
 	ClassDB::bind_method(D_METHOD("set_primary", "primary"), &WFCNeighbor::set_primary);
 	ClassDB::bind_method(D_METHOD("is_primary"), &WFCNeighbor::is_primary);
+	ClassDB::bind_method(D_METHOD("set_rotation_lock", "rotation_lock"), &WFCNeighbor::set_rotation_lock);
+	ClassDB::bind_method(D_METHOD("get_rotation_lock"), &WFCNeighbor::get_rotation_lock);
 
 	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "name"), "set_side_name", "get_side_name");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "inv_name"), "set_inv_name", "get_inv_name");
@@ -156,6 +169,7 @@ void WFCNeighbor::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "angular_wobble"), "set_angular_wobble", "get_angular_wobble");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "connection"), "set_connection", "get_connection");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "primary"), "set_primary", "is_primary");
+	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "rotation_lock"), "set_rotation_lock", "get_rotation_lock");
 }
 
 void WFCNeighbor::set_side_name(const StringName &p_name) {
@@ -230,6 +244,14 @@ bool WFCNeighbor::is_primary() const {
 	return primary;
 }
 
+void WFCNeighbor::set_rotation_lock(const StringName &p_rotation_lock) {
+	rotation_lock = p_rotation_lock;
+}
+
+StringName WFCNeighbor::get_rotation_lock() const {
+	return rotation_lock;
+}
+
 void WFCElement::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_type", "type"), &WFCElement::set_type);
 	ClassDB::bind_method(D_METHOD("get_type"), &WFCElement::get_type);
@@ -274,12 +296,7 @@ StringName WFCElement::get_type() const {
 
 void WFCElement::set_options(const Array &p_options) {
 	options.clear();
-	for (int i = 0; i < p_options.size(); i++) {
-		Ref<WFCParam> option = p_options[i];
-		if (option.is_valid()) {
-			options.append(option);
-		}
-	}
+	options.append_array(p_options);
 }
 
 TypedArray<WFCParam> WFCElement::get_options() const {
@@ -288,12 +305,7 @@ TypedArray<WFCParam> WFCElement::get_options() const {
 
 void WFCElement::set_neighbor_points(const Array &p_neighbor_points) {
 	neighbor_points.clear();
-	for (int i = 0; i < p_neighbor_points.size(); i++) {
-		Ref<WFCNeighbor> neighbor = p_neighbor_points[i];
-		if (neighbor.is_valid()) {
-			neighbor_points.append(neighbor);
-		}
-	}
+	neighbor_points.append_array(p_neighbor_points);
 }
 
 TypedArray<WFCNeighbor> WFCElement::get_neighbor_points() const {
@@ -422,6 +434,11 @@ void WFCElement::materialize() {
 		return;
 	}
 
+	float rotation_degrees = 0.0f;
+	if (resolved_data.has("wfc_rotation_degrees")) {
+		rotation_degrees = float(resolved_data["wfc_rotation_degrees"]);
+	}
+
 	for (int i = 0; i < options.size(); i++) {
 		Ref<WFCParam> option_data = options[i];
 		if (!option_data.is_valid() || option_data->get_option() != selected_option) {
@@ -429,6 +446,14 @@ void WFCElement::materialize() {
 		}
 		if (option_data->get_scene().is_valid()) {
 			Node *node = option_data->get_scene()->instantiate();
+			if (node != nullptr && rotation_degrees != 0.0f) {
+				Node3D *node_3d = Object::cast_to<Node3D>(node);
+				if (node_3d != nullptr) {
+					Vector3 euler = node_3d->get_rotation();
+					euler.y += Math::deg_to_rad(rotation_degrees);
+					node_3d->set_rotation(euler);
+				}
+			}
 			add_child(node);
 			materialized_children.push_back(node->get_instance_id());
 		}
