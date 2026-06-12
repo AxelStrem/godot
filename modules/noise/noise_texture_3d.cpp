@@ -83,6 +83,9 @@ void NoiseTexture3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_normalize", "normalize"), &NoiseTexture3D::set_normalize);
 	ClassDB::bind_method(D_METHOD("is_normalized"), &NoiseTexture3D::is_normalized);
 
+	ClassDB::bind_method(D_METHOD("set_generate_gradient", "enabled"), &NoiseTexture3D::set_generate_gradient);
+	ClassDB::bind_method(D_METHOD("get_generate_gradient"), &NoiseTexture3D::get_generate_gradient);
+
 	ClassDB::bind_method(D_METHOD("set_seamless_blend_skirt", "seamless_blend_skirt"), &NoiseTexture3D::set_seamless_blend_skirt);
 	ClassDB::bind_method(D_METHOD("get_seamless_blend_skirt"), &NoiseTexture3D::get_seamless_blend_skirt);
 
@@ -99,6 +102,7 @@ void NoiseTexture3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "seamless"), "set_seamless", "get_seamless");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "invert"), "set_invert", "get_invert");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "normalize"), "set_normalize", "is_normalized");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "generate_gradient"), "set_generate_gradient", "get_generate_gradient");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "seamless_blend_skirt", PROPERTY_HINT_RANGE, "0.05,1,0.001"), "set_seamless_blend_skirt", "get_seamless_blend_skirt");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "blur_strength", PROPERTY_HINT_RANGE, "0,8,0.1"), "set_blur_strength", "get_blur_strength");
 	const String format_hint = "L8:" + itos(Image::FORMAT_L8) + ",L16:" + itos(Image::FORMAT_L16) + ",LH:" + itos(Image::FORMAT_LH) + ",LF:" + itos(Image::FORMAT_LF);
@@ -111,6 +115,11 @@ void NoiseTexture3D::_validate_property(PropertyInfo &p_property) const {
 	}
 	if (p_property.name == "seamless_blend_skirt") {
 		if (!seamless) {
+			p_property.usage = PROPERTY_USAGE_NO_EDITOR;
+		}
+	}
+	if (generate_gradient) {
+		if (p_property.name == "color_ramp") {
 			p_property.usage = PROPERTY_USAGE_NO_EDITOR;
 		}
 	}
@@ -183,7 +192,9 @@ TypedArray<Image> NoiseTexture3D::_generate_texture() {
 		Noise::apply_blur(images, blur_strength, seamless, seamless);
 	}
 
-	if (color_ramp.is_valid()) {
+	if (generate_gradient && images.size() >= 3) {
+		images = _compute_gradient(images);
+	} else if (color_ramp.is_valid()) {
 		for (int i = 0; i < images.size(); i++) {
 			images.write[i] = _modulate_with_gradient(images[i], color_ramp);
 		}
@@ -415,4 +426,56 @@ Vector<Ref<Image>> NoiseTexture3D::get_data() const {
 
 Image::Format NoiseTexture3D::get_format() const {
 	return format;
+}
+
+void NoiseTexture3D::set_generate_gradient(bool p_enabled) {
+	if (generate_gradient == p_enabled) {
+		return;
+	}
+	generate_gradient = p_enabled;
+	notify_property_list_changed();
+	_queue_update();
+}
+
+bool NoiseTexture3D::get_generate_gradient() const {
+	return generate_gradient;
+}
+
+Vector<Ref<Image>> NoiseTexture3D::_compute_gradient(const Vector<Ref<Image>> &p_slices) {
+	int w = p_slices[0]->get_width();
+	int h = p_slices[0]->get_height();
+	int d = p_slices.size();
+
+	// For normalized noise [0,1], central difference range is [-1, 1].
+	// Remap to [0,1] for RGB8 storage: (val + 1.0) * 0.5.
+	// In shader: sample * 2.0 - 1.0 recovers the signed gradient direction.
+
+	Vector<Ref<Image>> grad_slices;
+	grad_slices.resize(d);
+
+	for (int z = 0; z < d; z++) {
+		Ref<Image> grad = Image::create_empty(w, h, false, Image::FORMAT_RGB8);
+
+		for (int y = 0; y < h; y++) {
+			for (int x = 0; x < w; x++) {
+				int xp = (x + 1) % w;
+				int xn = (x - 1 + w) % w;
+				int yp = (y + 1) % h;
+				int yn = (y - 1 + h) % h;
+				int zp = (z + 1) % d;
+				int zn = (z - 1 + d) % d;
+
+				float dx = p_slices[z]->get_pixel(xp, y).r - p_slices[z]->get_pixel(xn, y).r;
+				float dy = p_slices[z]->get_pixel(x, yp).r - p_slices[z]->get_pixel(x, yn).r;
+				float dz = p_slices[zp]->get_pixel(x, y).r - p_slices[zn]->get_pixel(x, y).r;
+
+				// Remap [-1, 1] → [0, 1]
+				Color c(dx * 0.5f + 0.5f, dy * 0.5f + 0.5f, dz * 0.5f + 0.5f);
+				grad->set_pixel(x, y, c);
+			}
+		}
+		grad_slices.write[z] = grad;
+	}
+
+	return grad_slices;
 }
