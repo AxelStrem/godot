@@ -56,6 +56,7 @@ private:
 	bool seamless = false;
 	real_t seamless_blend_skirt = 0.1;
 	bool normalize = true;
+	bool generate_gradient = false;
 
 	Ref<Gradient> color_ramp;
 	Ref<Noise> noise;
@@ -71,6 +72,7 @@ private:
 	void _set_texture_data(const TypedArray<Image> &p_data);
 
 	Ref<Image> _modulate_with_gradient(Ref<Image> p_image, Ref<Gradient> p_gradient);
+	Vector<Ref<Image>> _compute_gradient(const Vector<Ref<Image>> &p_slices);
 
 protected:
 	static void _bind_methods();
@@ -95,6 +97,9 @@ public:
 
 	void set_normalize(bool p_normalize);
 	bool is_normalized() const;
+
+	void set_generate_gradient(bool p_enabled);
+	bool get_generate_gradient() const;
 
 	void set_color_ramp(const Ref<Gradient> &p_gradient);
 	Ref<Gradient> get_color_ramp() const;
