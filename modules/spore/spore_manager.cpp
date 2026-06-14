@@ -23,8 +23,8 @@ static constexpr float MAX_RADIUS_STRAIN = 2.0f;
 
 // Phase timing (seconds since spawn).
 static constexpr float PHASE1_DURATION = 0.3f;   // snap to visible
-static constexpr float PHASE2_DURATION = 14.7f;  // slow pulsing growth (0.5→2.0)
-static constexpr float PHASE3_DURATION = 15.0f;  // accelerating growth (2.0→cap)
+static constexpr float PHASE2_DURATION = 25.0f;  // slow pulsing growth (0.5→2.0)
+static constexpr float PHASE3_DURATION = 30.0f;  // accelerating growth (2.0→cap)
 
 static constexpr float PULSE_FREQ = 3.0f;        // pulse oscillations per second
 static constexpr float PHASE2_PULSE_AMP = 0.1f;  // pulse amplitude during phase 2
@@ -87,8 +87,8 @@ float SporeManager::_compute_radius(float p_elapsed, int p_profile, float p_seed
 		// Phase 3: accelerating growth 2.0 → cap.
 		float phase3_elapsed = p_elapsed - PHASE1_DURATION - PHASE2_DURATION;
 		float t = phase3_elapsed / PHASE3_DURATION;
-		float t2 = t * t; // ease-in quadratic
-		base = 2.0f + t2 * (cap - 2.0f);
+		float t3 = t * t * t; // ease-in cubic (slower start than quadratic)
+		base = 2.0f + t3 * (cap - 2.0f);
 		pulse_amp = PHASE3_PULSE_AMP_INITIAL * (1.0f - t); // pulse fades out
 	} else {
 		// Phase 4: stable at cap.
@@ -108,6 +108,7 @@ int32_t SporeManager::add_spore(const Vector3 &p_pos, int p_profile) {
 	int32_t id = _allocate_id();
 	_positions.set(id, p_pos);
 	_spawn_times.set(id, -1.0f); // Will be set by the first update() call.
+	_radii.set(id, 0.0001f);     // Reset stale radius from recycled ID.
 	_seed_offsets.set(id, Math::randf() * 6.2831853f);
 	_states.set(id, STATE_START_DELAY);
 	_profiles.set(id, (p_profile == PROFILE_STRAIN) ? PROFILE_STRAIN : PROFILE_NORMAL);
@@ -253,9 +254,10 @@ Vector<int32_t> SporeManager::query_sphere(const Vector3 &p_center, float p_radi
 }
 
 Vector<int32_t> SporeManager::query_spores_in_range(const Vector3 &p_pos, float p_radius) const {
-	// Use the grid to get candidates, then filter by actual distance.
+	// Use query_sphere to search ALL grid levels (unlike query_nearby which
+	// only scans levels 0-1 and would miss spores with radius > 8.0).
 	Vector<int32_t> candidates;
-	_grid.query_nearby(p_pos, candidates);
+	_grid.query_sphere(p_pos, p_radius, candidates);
 
 	Vector<int32_t> result;
 	float r2 = p_radius * p_radius;
