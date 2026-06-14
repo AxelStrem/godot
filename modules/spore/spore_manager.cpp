@@ -18,13 +18,13 @@
 // ---------------------------------------------------------------------------
 
 static constexpr float MIN_RADIUS = 0.25f;
-static constexpr float MAX_RADIUS_NORMAL = 50.0f;
+static constexpr float MAX_RADIUS_NORMAL = 20.0f;
 static constexpr float MAX_RADIUS_STRAIN = 2.0f;
 
 // Phase timing (seconds since spawn).
 static constexpr float PHASE1_DURATION = 0.3f;   // snap to visible
 static constexpr float PHASE2_DURATION = 25.0f;  // slow pulsing growth (0.5→2.0)
-static constexpr float PHASE3_DURATION = 30.0f;  // accelerating growth (2.0→cap)
+static constexpr float PHASE3_DURATION = 60.0f;  // accelerating growth (2.0→cap)
 
 static constexpr float PULSE_FREQ = 3.0f;        // pulse oscillations per second
 static constexpr float PHASE2_PULSE_AMP = 0.1f;  // pulse amplitude during phase 2
@@ -87,8 +87,8 @@ float SporeManager::_compute_radius(float p_elapsed, int p_profile, float p_seed
 		// Phase 3: accelerating growth 2.0 → cap.
 		float phase3_elapsed = p_elapsed - PHASE1_DURATION - PHASE2_DURATION;
 		float t = phase3_elapsed / PHASE3_DURATION;
-		float t3 = t * t * t; // ease-in cubic (slower start than quadratic)
-		base = 2.0f + t3 * (cap - 2.0f);
+		float t5 = t * t * t * t * t; // ease-in quintic (very slow start, ramps late)
+		base = 2.0f + t5 * (cap - 2.0f);
 		pulse_amp = PHASE3_PULSE_AMP_INITIAL * (1.0f - t); // pulse fades out
 	} else {
 		// Phase 4: stable at cap.
