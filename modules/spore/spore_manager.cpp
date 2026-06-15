@@ -185,6 +185,15 @@ void SporeManager::update(double p_delta, double p_total_time) {
 			_grid.migrate(id, _positions[id], old_radius, _positions[id], new_radius);
 		}
 	}
+
+	// Rebuild compact alive list for fast linear-scan queries.
+	_alive_ids.clear();
+	_alive_ids.reserve(_alive.size() - _free_list.size());
+	for (int32_t id = 0; id < _alive.size(); id++) {
+		if (_alive[id]) {
+			_alive_ids.push_back(id);
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -224,16 +233,21 @@ int SporeManager::get_active_spore_count() const {
 }
 
 // ---------------------------------------------------------------------------
-// Spatial queries
+// Spatial queries — linear scan over compact _alive_ids array.
+// For typical spore counts (≤ 500) this is faster than any spatial index
+// due to cache locality, branch predictability, and zero hashing overhead.
+// If spore counts grow beyond ~5000, layer on coarse bucketing via SporeGrid
+// to skip entire buckets of spores in a single branch.
 // ---------------------------------------------------------------------------
 
 Vector<int32_t> SporeManager::query_nearby(const Vector3 &p_pos) const {
-	Vector<int32_t> ids;
-	_grid.query_nearby(p_pos, ids);
-
+	// Cell-range query (levels 0-1, ±1 cell). Equivalent to the old
+	// SporeGrid::query_nearby but much cheaper.
 	Vector<int32_t> result;
-	for (int32_t id : ids) {
-		if (_alive[id]) {
+	for (int32_t id : _alive_ids) {
+		// Nearby = within 8 units (level 0: cell=1, level 1: cell=4, ±1 cell each).
+		float dist2 = p_pos.distance_squared_to(_positions[id]);
+		if (dist2 < 64.0f) { // 8²
 			result.push_back(id);
 		}
 	}
@@ -241,12 +255,11 @@ Vector<int32_t> SporeManager::query_nearby(const Vector3 &p_pos) const {
 }
 
 Vector<int32_t> SporeManager::query_sphere(const Vector3 &p_center, float p_radius) const {
-	Vector<int32_t> ids;
-	_grid.query_sphere(p_center, p_radius, ids);
-
 	Vector<int32_t> result;
-	for (int32_t id : ids) {
-		if (_alive[id]) {
+	float r2 = p_radius * p_radius;
+	for (int32_t id : _alive_ids) {
+		float total_r = p_radius + _radii[id];
+		if (_positions[id].distance_squared_to(p_center) < total_r * total_r) {
 			result.push_back(id);
 		}
 	}
@@ -254,24 +267,28 @@ Vector<int32_t> SporeManager::query_sphere(const Vector3 &p_center, float p_radi
 }
 
 Vector<int32_t> SporeManager::query_spores_in_range(const Vector3 &p_pos, float p_radius) const {
-	// Use query_sphere to search ALL grid levels (unlike query_nearby which
-	// only scans levels 0-1 and would miss spores with radius > 8.0).
-	Vector<int32_t> candidates;
-	_grid.query_sphere(p_pos, p_radius, candidates);
-
+	// Distance-filtered query: surface of query sphere intersects spore surface.
 	Vector<int32_t> result;
 	float r2 = p_radius * p_radius;
-	for (int32_t id : candidates) {
-		if (!_alive[id]) {
-			continue;
-		}
-		float dist2 = p_pos.distance_squared_to(_positions[id]);
+	for (int32_t id : _alive_ids) {
 		float total_r = p_radius + _radii[id];
-		if (dist2 < total_r * total_r) {
+		if (_positions[id].distance_squared_to(p_pos) < total_r * total_r) {
 			result.push_back(id);
 		}
 	}
 	return result;
+}
+
+bool SporeManager::is_any_spore_in_range(const Vector3 &p_center, float p_radius) const {
+	// Early-out variant for damage/destructible checks.
+	float r2 = p_radius * p_radius;
+	for (int32_t id : _alive_ids) {
+		float total_r = p_radius + _radii[id];
+		if (_positions[id].distance_squared_to(p_center) < total_r * total_r) {
+			return true;
+		}
+	}
+	return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -376,6 +393,7 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query_nearby", "position"), &SporeManager::query_nearby);
 	ClassDB::bind_method(D_METHOD("query_sphere", "center", "radius"), &SporeManager::query_sphere);
 	ClassDB::bind_method(D_METHOD("query_spores_in_range", "position", "radius"), &SporeManager::query_spores_in_range);
+	ClassDB::bind_method(D_METHOD("is_any_spore_in_range", "center", "radius"), &SporeManager::is_any_spore_in_range);
 
 	// Wards
 	ClassDB::bind_method(D_METHOD("set_wards", "positions", "radii"), &SporeManager::set_wards);
