@@ -50,6 +50,7 @@ int SporeManager::_allocate_id() {
 		_seed_offsets.push_back(0.0f);
 		_states.push_back(STATE_DEAD);
 		_profiles.push_back(PROFILE_NORMAL);
+		_chamber_ids.push_back(-1);
 		_alive.push_back(false);
 		return id;
 	}
@@ -104,7 +105,7 @@ float SporeManager::_compute_radius(float p_elapsed, int p_profile, float p_seed
 // Public API — Spore lifecycle
 // ---------------------------------------------------------------------------
 
-int32_t SporeManager::add_spore(const Vector3 &p_pos, int p_profile) {
+int32_t SporeManager::add_spore(const Vector3 &p_pos, int p_profile, int p_chamber_id) {
 	int32_t id = _allocate_id();
 	_positions.set(id, p_pos);
 	_spawn_times.set(id, -1.0f); // Will be set by the first update() call.
@@ -112,6 +113,7 @@ int32_t SporeManager::add_spore(const Vector3 &p_pos, int p_profile) {
 	_seed_offsets.set(id, Math::randf() * 6.2831853f);
 	_states.set(id, STATE_START_DELAY);
 	_profiles.set(id, (p_profile == PROFILE_STRAIN) ? PROFILE_STRAIN : PROFILE_NORMAL);
+	_chamber_ids.set(id, p_chamber_id);
 	_alive.set(id, true);
 
 	// Insert into spatial grid with initial tiny radius.
@@ -126,6 +128,19 @@ void SporeManager::remove_spore(int32_t p_id) {
 	}
 	_grid.remove(p_id);
 	_free_id(p_id);
+}
+
+void SporeManager::remove_spores_in_chamber(int p_chamber_id) {
+	// Collect matching IDs first; removing while iterating would invalidate.
+	Vector<int32_t> to_remove;
+	for (int32_t id : _alive_ids) {
+		if (_chamber_ids[id] == p_chamber_id) {
+			to_remove.push_back(id);
+		}
+	}
+	for (int32_t id : to_remove) {
+		remove_spore(id);
+	}
 }
 
 void SporeManager::set_spore_state(int32_t p_id, int p_state) {
@@ -357,6 +372,70 @@ bool SporeManager::is_spore_warded(int32_t p_id) const {
 }
 
 // ---------------------------------------------------------------------------
+// Per-chamber queries
+// ---------------------------------------------------------------------------
+
+PackedFloat32Array SporeManager::get_spore_transforms_for_chamber(int p_chamber_id) const {
+	// Each instance is 12 floats: a 3x4 transform matrix (column-major).
+	// [col0.x, col0.y, col0.z, origin.x,
+	//  col1.x, col1.y, col1.z, origin.y,
+	//  col2.x, col2.y, col2.z, origin.z]
+	// For a uniform scaled sphere: columns are [R,0,0], [0,R,0], [0,0,R].
+	int count = 0;
+	for (int32_t id : _alive_ids) {
+		if (_chamber_ids[id] == p_chamber_id) {
+			count++;
+		}
+	}
+
+	PackedFloat32Array buffer;
+	buffer.resize(count * 12);
+	float *ptr = buffer.ptrw();
+	int idx = 0;
+	for (int32_t id : _alive_ids) {
+		if (_chamber_ids[id] != p_chamber_id) {
+			continue;
+		}
+		const Vector3 &pos = _positions[id];
+		float r = _radii[id];
+		// Column 0: (r, 0, 0), origin.x
+		ptr[idx + 0] = r;
+		ptr[idx + 1] = 0.0f;
+		ptr[idx + 2] = 0.0f;
+		ptr[idx + 3] = pos.x;
+		// Column 1: (0, r, 0), origin.y
+		ptr[idx + 4] = 0.0f;
+		ptr[idx + 5] = r;
+		ptr[idx + 6] = 0.0f;
+		ptr[idx + 7] = pos.y;
+		// Column 2: (0, 0, r), origin.z
+		ptr[idx + 8] = 0.0f;
+		ptr[idx + 9] = 0.0f;
+		ptr[idx + 10] = r;
+		ptr[idx + 11] = pos.z;
+		idx += 12;
+	}
+	return buffer;
+}
+
+int SporeManager::get_spore_count_for_chamber(int p_chamber_id) const {
+	int count = 0;
+	for (int32_t id : _alive_ids) {
+		if (_chamber_ids[id] == p_chamber_id) {
+			count++;
+		}
+	}
+	return count;
+}
+
+int SporeManager::get_spore_chamber(int32_t p_id) const {
+	if (!_alive[p_id]) {
+		return -1;
+	}
+	return _chamber_ids[p_id];
+}
+
+// ---------------------------------------------------------------------------
 // Bind methods
 // ---------------------------------------------------------------------------
 
@@ -372,7 +451,7 @@ void SporeManager::_bind_methods() {
 	BIND_ENUM_CONSTANT(PROFILE_STRAIN);
 
 	// Lifecycle
-	ClassDB::bind_method(D_METHOD("add_spore", "position", "profile"), &SporeManager::add_spore, DEFVAL(PROFILE_NORMAL));
+	ClassDB::bind_method(D_METHOD("add_spore", "position", "profile", "chamber_id"), &SporeManager::add_spore, DEFVAL(PROFILE_NORMAL), DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("remove_spore", "id"), &SporeManager::remove_spore);
 	ClassDB::bind_method(D_METHOD("set_spore_state", "id", "state"), &SporeManager::set_spore_state);
 	ClassDB::bind_method(D_METHOD("get_spore_state", "id"), &SporeManager::get_spore_state);
@@ -398,4 +477,10 @@ void SporeManager::_bind_methods() {
 	// Wards
 	ClassDB::bind_method(D_METHOD("set_wards", "positions", "radii"), &SporeManager::set_wards);
 	ClassDB::bind_method(D_METHOD("is_spore_warded", "id"), &SporeManager::is_spore_warded);
+
+	// Per-chamber
+	ClassDB::bind_method(D_METHOD("remove_spores_in_chamber", "chamber_id"), &SporeManager::remove_spores_in_chamber);
+	ClassDB::bind_method(D_METHOD("get_spore_transforms_for_chamber", "chamber_id"), &SporeManager::get_spore_transforms_for_chamber);
+	ClassDB::bind_method(D_METHOD("get_spore_count_for_chamber", "chamber_id"), &SporeManager::get_spore_count_for_chamber);
+	ClassDB::bind_method(D_METHOD("get_spore_chamber", "id"), &SporeManager::get_spore_chamber);
 }
