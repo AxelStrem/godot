@@ -44,6 +44,7 @@ private:
 	Vector<float> _seed_offsets;   // unique per-spore offset for pulse phase
 	Vector<uint8_t> _states;       // SporeState
 	Vector<uint8_t> _profiles;     // Profile
+	Vector<int32_t> _chamber_ids;  // chamber number this spore belongs to (-1 = unowned)
 	Vector<bool> _alive;
 	Vector<int32_t> _free_list;    // recycled IDs
 	Vector<int32_t> _alive_ids;    // compact list rebuilt each update() for fast iteration
@@ -79,8 +80,9 @@ public:
 	~SporeManager();
 
 	// ---- Spore lifecycle (called from GDScript) ----
-	int32_t add_spore(const Vector3 &p_pos, int p_profile = PROFILE_NORMAL);
+	int32_t add_spore(const Vector3 &p_pos, int p_profile = PROFILE_NORMAL, int p_chamber_id = -1);
 	void remove_spore(int32_t p_id);
+	void remove_spores_in_chamber(int p_chamber_id);
 	void set_spore_state(int32_t p_id, int p_state);
 	int get_spore_state(int32_t p_id) const;
 	void set_spore_profile(int32_t p_id, int p_profile);
@@ -109,6 +111,14 @@ public:
 	// Returns spore IDs within `p_radius` of `p_pos`, performing actual
 	// distance checks (unlike query_nearby which returns cell-neighbor candidates).
 	Vector<int32_t> query_spores_in_range(const Vector3 &p_pos, float p_radius) const;
+
+	// ---- Per-chamber queries (for MultiMesh rendering) ----
+	// Returns a PackedFloat32Array where every 12 floats is a 3x4 transform
+	// matrix (scale=radius, translate=position) for each spore in the chamber.
+	// GDScript feeds this directly to MultiMeshInstance3D.buffer.
+	PackedFloat32Array get_spore_transforms_for_chamber(int p_chamber_id) const;
+	int get_spore_count_for_chamber(int p_chamber_id) const;
+	int get_spore_chamber(int32_t p_id) const;
 };
 
 VARIANT_ENUM_CAST(SporeManager::SporeState);
