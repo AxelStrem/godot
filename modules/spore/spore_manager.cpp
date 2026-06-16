@@ -21,14 +21,24 @@ static constexpr float MIN_RADIUS = 0.25f;
 static constexpr float MAX_RADIUS_NORMAL = 20.0f;
 static constexpr float MAX_RADIUS_STRAIN = 2.0f;
 
-// Phase timing (seconds since spawn).
-static constexpr float PHASE1_DURATION = 0.3f;   // snap to visible
+// Initial delay: spore sits at radius 0 while the tentacle from its parent
+// grows toward it (matches SporeConfig.TENTACLE_EMERGENCE_TIME).
+static constexpr float START_DELAY = 1.5f;
+
+// Phase timing (seconds since start of growth, after START_DELAY).
+static constexpr float PHASE1_DURATION = 0.3f;   // fast burst 0→0.5 (visible)
 static constexpr float PHASE2_DURATION = 25.0f;  // slow pulsing growth (0.5→2.0)
 static constexpr float PHASE3_DURATION = 60.0f;  // accelerating growth (2.0→cap)
 
-static constexpr float PULSE_FREQ = 3.0f;        // pulse oscillations per second
-static constexpr float PHASE2_PULSE_AMP = 0.1f;  // pulse amplitude during phase 2
-static constexpr float PHASE3_PULSE_AMP_INITIAL = 0.15f; // pulse amp at start of phase 3
+static constexpr float PULSE_FREQ = 3.0f;         // pulse oscillations per second
+static constexpr float PHASE2_PULSE_AMP = 0.1f;   // pulse amplitude during phase 2
+static constexpr float PHASE3_PULSE_AMP_INITIAL = 0.15f;  // pulse amp at start of phase 3
+static constexpr float PHASE4_PULSE_AMP = 0.05f;  // subtle pulse once mature
+
+// Lifetime (seconds). When elapsed > lifetime, the spore is removed.
+static constexpr float STRAIN_LIFETIME = 120.0f;
+static constexpr float NORMAL_LIFETIME = 30.0f;
+static constexpr float SHORT_LIFETIME = 15.0f;
 
 // ---------------------------------------------------------------------------
 // Constructor / Destructor
@@ -70,35 +80,41 @@ void SporeManager::_free_id(int32_t p_id) {
 // ---------------------------------------------------------------------------
 
 float SporeManager::_compute_radius(float p_elapsed, int p_profile, float p_seed_offset) const {
+	// Phase 0: invisible delay while the parent tentacle connects.
+	if (p_elapsed < START_DELAY) {
+		return 0.0f;
+	}
+	float t_elapsed = p_elapsed - START_DELAY;
+
 	float cap = (p_profile == PROFILE_STRAIN) ? MAX_RADIUS_STRAIN : MAX_RADIUS_NORMAL;
 	float base;
 	float pulse_amp;
 
-	if (p_elapsed < PHASE1_DURATION) {
-		// Phase 1: fast snap to visible.
-		float t = p_elapsed / PHASE1_DURATION;
+	if (t_elapsed < PHASE1_DURATION) {
+		// Phase 1: fast burst into view.
+		float t = t_elapsed / PHASE1_DURATION;
 		base = t * 0.5f;
 		pulse_amp = 0.0f;
-	} else if (p_elapsed < PHASE1_DURATION + PHASE2_DURATION) {
+	} else if (t_elapsed < PHASE1_DURATION + PHASE2_DURATION) {
 		// Phase 2: slow pulsing growth 0.5 → 2.0.
-		float t = (p_elapsed - PHASE1_DURATION) / PHASE2_DURATION;
+		float t = (t_elapsed - PHASE1_DURATION) / PHASE2_DURATION;
 		base = 0.5f + t * 1.5f;
 		pulse_amp = PHASE2_PULSE_AMP;
-	} else if (p_elapsed < PHASE1_DURATION + PHASE2_DURATION + PHASE3_DURATION) {
+	} else if (t_elapsed < PHASE1_DURATION + PHASE2_DURATION + PHASE3_DURATION) {
 		// Phase 3: accelerating growth 2.0 → cap.
-		float phase3_elapsed = p_elapsed - PHASE1_DURATION - PHASE2_DURATION;
+		float phase3_elapsed = t_elapsed - PHASE1_DURATION - PHASE2_DURATION;
 		float t = phase3_elapsed / PHASE3_DURATION;
 		float t5 = t * t * t * t * t; // ease-in quintic (very slow start, ramps late)
 		base = 2.0f + t5 * (cap - 2.0f);
 		pulse_amp = PHASE3_PULSE_AMP_INITIAL * (1.0f - t); // pulse fades out
 	} else {
-		// Phase 4: stable at cap.
+		// Phase 4: stable at cap with subtle continuous pulse.
 		base = cap;
-		pulse_amp = 0.0f;
+		pulse_amp = PHASE4_PULSE_AMP;
 	}
 
 	float pulse = Math::sin(p_elapsed * PULSE_FREQ + p_seed_offset) * pulse_amp;
-	return MAX(base + pulse, 0.0001f);
+	return MAX(base + pulse, 0.0f);
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +205,23 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		}
 
 		float elapsed = float(p_total_time - _spawn_times[id]);
+
+		// Lifecycle death: remove spores that have exceeded their lifetime.
+		float lifetime;
+		switch (_profiles[id]) {
+			case PROFILE_STRAIN:
+				lifetime = STRAIN_LIFETIME;
+				break;
+			default:
+				lifetime = NORMAL_LIFETIME;
+				break;
+		}
+		if (elapsed > lifetime) {
+			_grid.remove(id);
+			_free_id(id);
+			continue;
+		}
+
 		float old_radius = _radii[id];
 		float new_radius = _compute_radius(elapsed, _profiles[id], _seed_offsets[id]);
 		_radii.set(id, new_radius);
