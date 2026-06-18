@@ -40,11 +40,12 @@ class AudioEffectSendInstance : public AudioEffectInstance {
 	Ref<AudioEffectSend> base;
 
 	StringName send_bus;
-	int source_bus_index = 0;
-	int channel_index = 0;
 	float mix_send_amount_db = 0.0f;
 
 public:
+	int source_bus_index = 0;
+	int channel_index = 0;
+
 	virtual void process(const AudioFrame *p_src_frames, AudioFrame *p_dst_frames, int p_frame_count) override;
 	virtual bool process_silence() const override;
 };
