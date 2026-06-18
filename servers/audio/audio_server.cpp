@@ -43,6 +43,7 @@
 #include "servers/audio/audio_driver_dummy.h"
 #include "servers/audio/audio_stream.h"
 #include "servers/audio/effects/audio_effect_compressor.h"
+#include "servers/audio/effects/audio_effect_send.h"
 
 #ifdef TOOLS_ENABLED
 #define MARK_EDITED set_edited(true);
@@ -1110,6 +1111,11 @@ void AudioServer::_update_bus_effects(int p_bus) {
 			Ref<AudioEffectInstance> fx = buses.write[p_bus]->effects.write[j].effect->instantiate();
 			if (Object::cast_to<AudioEffectCompressorInstance>(*fx)) {
 				Object::cast_to<AudioEffectCompressorInstance>(*fx)->set_current_channel(i);
+			}
+			if (Object::cast_to<AudioEffectSendInstance>(*fx)) {
+				AudioEffectSendInstance *send_ins = Object::cast_to<AudioEffectSendInstance>(*fx);
+				send_ins->source_bus_index = p_bus;
+				send_ins->channel_index = i;
 			}
 			buses.write[p_bus]->channels.write[i].effect_instances.write[j] = fx;
 		}
