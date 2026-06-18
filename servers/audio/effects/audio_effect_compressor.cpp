@@ -155,6 +155,14 @@ void AudioEffectCompressorInstance::process(const AudioFrame *p_src_frames, Audi
 				underdb = 0.0;
 			}
 
+			// Clamp underdb to prevent Math::db_to_linear overflow.
+			// At underdb=60, worst-case boost is ~43 dB (100x), which is
+			// well within float range and more than enough for any musical
+			// upward compression. Anything below ~69 dBFS gets the same boost.
+			if (underdb > 60.0f) {
+				underdb = 60.0f;
+			}
+
 			if (underdb > upward_rundb) {
 				upward_rundb = underdb + upward_atcoef * (upward_rundb - underdb);
 			} else {
