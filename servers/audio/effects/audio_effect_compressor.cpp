@@ -34,6 +34,17 @@
 #include "core/object/class_db.h"
 #include "servers/audio/audio_server.h"
 
+AudioEffectCompressorInstance::AudioEffectCompressorInstance() {
+	rundb = 0;
+	averatio = 0;
+	runratio = 0;
+	runmax = 0;
+	maxover = 0;
+	gr_meter = 1.0;
+	upward_rundb = 0;
+	current_channel = -1;
+}
+
 void AudioEffectCompressorInstance::process(const AudioFrame *p_src_frames, AudioFrame *p_dst_frames, int p_frame_count) {
 	float threshold = Math::db_to_linear(base->threshold);
 	float sample_rate = AudioServer::get_singleton()->get_mix_rate();
@@ -102,6 +113,10 @@ void AudioEffectCompressorInstance::process(const AudioFrame *p_src_frames, Audi
 			runratio = averatio + ratrelcoef * (runratio - averatio);
 		}
 
+		// Flush denormals to avoid performance issues on some CPUs.
+		if (Math::abs(rundb) < 1e-30f) { rundb = 0.0f; }
+		if (Math::abs(runratio) < 1e-30f) { runratio = 0.0f; }
+
 		overdb = rundb;
 		averatio = runratio;
 
@@ -118,6 +133,10 @@ void AudioEffectCompressorInstance::process(const AudioFrame *p_src_frames, Audi
 
 		runmax = maxover + relcoef * (runmax - maxover); // highest peak for setting att/rel decays in reltime
 		maxover = runmax;
+
+		// Flush denormals.
+		if (Math::abs(runmax) < 1e-30f) { runmax = 0.0f; }
+		if (Math::abs(maxover) < 1e-30f) { maxover = 0.0f; }
 
 		if (grv < gr_meter) {
 			gr_meter = grv;
@@ -141,6 +160,9 @@ void AudioEffectCompressorInstance::process(const AudioFrame *p_src_frames, Audi
 			} else {
 				upward_rundb = underdb + upward_relcoef * (upward_rundb - underdb);
 			}
+
+			// Flush denormals.
+			if (Math::abs(upward_rundb) < 1e-30f) { upward_rundb = 0.0f; }
 
 			float upward_boost_db = upward_rundb * (upward_ratio - 1.0f) / upward_ratio;
 			upward_boost = Math::db_to_linear(upward_boost_db);
