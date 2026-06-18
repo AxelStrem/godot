@@ -58,6 +58,7 @@ class AudioEffectSend : public AudioEffect {
 	float send_amount_db = 0.0f;
 
 protected:
+	void _validate_property(PropertyInfo &p_property) const;
 	static void _bind_methods();
 
 public:

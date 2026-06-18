@@ -30,6 +30,7 @@
 
 #include "audio_effect_send.h"
 
+#include "core/config/engine.h"
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
 #include "servers/audio/audio_server.h"
@@ -99,13 +100,28 @@ float AudioEffectSend::get_send_amount_db() const {
 	return send_amount_db;
 }
 
+void AudioEffectSend::_validate_property(PropertyInfo &p_property) const {
+	if (!Engine::get_singleton()->is_editor_hint()) {
+		return;
+	}
+	if (p_property.name == "send_bus") {
+		String buses = "";
+		for (int i = 0; i < AudioServer::get_singleton()->get_bus_count(); i++) {
+			buses += ",";
+			buses += AudioServer::get_singleton()->get_bus_name(i);
+		}
+
+		p_property.hint_string = buses;
+	}
+}
+
 void AudioEffectSend::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_send_bus", "bus"), &AudioEffectSend::set_send_bus);
 	ClassDB::bind_method(D_METHOD("get_send_bus"), &AudioEffectSend::get_send_bus);
 	ClassDB::bind_method(D_METHOD("set_send_amount_db", "amount"), &AudioEffectSend::set_send_amount_db);
 	ClassDB::bind_method(D_METHOD("get_send_amount_db"), &AudioEffectSend::get_send_amount_db);
 
-	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "send_bus"), "set_send_bus", "get_send_bus");
+	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "send_bus", PROPERTY_HINT_ENUM), "set_send_bus", "get_send_bus");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "send_amount_db", PROPERTY_HINT_RANGE, "-80,24,0.01,suffix:dB"), "set_send_amount_db", "get_send_amount_db");
 }
 
