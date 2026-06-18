@@ -40,6 +40,7 @@ class AudioEffectCompressorInstance : public AudioEffectInstance {
 	Ref<AudioEffectCompressor> base;
 
 	float rundb, averatio, runratio, runmax, maxover, gr_meter;
+	float upward_rundb;
 	int current_channel;
 
 public:
@@ -58,6 +59,11 @@ class AudioEffectCompressor : public AudioEffect {
 	float release_ms;
 	float mix;
 	StringName sidechain;
+
+	float upward_threshold_db;
+	float upward_ratio;
+	float upward_attack_us;
+	float upward_release_ms;
 
 protected:
 	void _validate_property(PropertyInfo &p_property) const;
@@ -86,6 +92,18 @@ public:
 
 	void set_sidechain(const StringName &p_sidechain);
 	StringName get_sidechain() const;
+
+	void set_upward_threshold_db(float p_threshold);
+	float get_upward_threshold_db() const;
+
+	void set_upward_ratio(float p_ratio);
+	float get_upward_ratio() const;
+
+	void set_upward_attack_us(float p_attack_us);
+	float get_upward_attack_us() const;
+
+	void set_upward_release_ms(float p_release_ms);
+	float get_upward_release_ms() const;
 
 	AudioEffectCompressor();
 };

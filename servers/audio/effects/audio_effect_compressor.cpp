@@ -50,6 +50,23 @@ void AudioEffectCompressorInstance::process(const AudioFrame *p_src_frames, Audi
 	float mix = base->mix;
 	float gr_meter_decay = std::exp(1 / (1 * sample_rate));
 
+	// Upward compression parameters.
+	float upward_threshold_db = base->upward_threshold_db;
+	float upward_threshold_linear = 0.0f;
+	float upward_atcoef = 0.0f;
+	float upward_relcoef = 0.0f;
+	float upward_ratio = 1.0f;
+	bool upward_enabled = false;
+	if (upward_threshold_db > -100.0f && base->upward_ratio > 1.0f) {
+		upward_enabled = true;
+		upward_threshold_linear = Math::db_to_linear(upward_threshold_db);
+		float upward_attime = base->upward_attack_us / 1000000.0;
+		float upward_reltime = base->upward_release_ms / 1000.0;
+		upward_atcoef = std::exp(-1 / (upward_attime * sample_rate));
+		upward_relcoef = std::exp(-1 / (upward_reltime * sample_rate));
+		upward_ratio = base->upward_ratio;
+	}
+
 	const AudioFrame *src = p_src_frames;
 
 	if (base->sidechain != StringName() && current_channel != -1) {
@@ -111,7 +128,25 @@ void AudioEffectCompressorInstance::process(const AudioFrame *p_src_frames, Audi
 			}
 		}
 
-		p_dst_frames[i] = p_src_frames[i] * grv * makeup * mix + p_src_frames[i] * (1.0 - mix);
+		// Upward compression: boost signals below the upward threshold.
+		float upward_boost = 1.0f;
+		if (upward_enabled) {
+			float underdb = 2.08136898f * Math::linear_to_db(upward_threshold_linear / peak);
+			if (underdb < 0.0) {
+				underdb = 0.0;
+			}
+
+			if (underdb > upward_rundb) {
+				upward_rundb = underdb + upward_atcoef * (upward_rundb - underdb);
+			} else {
+				upward_rundb = underdb + upward_relcoef * (upward_rundb - underdb);
+			}
+
+			float upward_boost_db = upward_rundb * (upward_ratio - 1.0f) / upward_ratio;
+			upward_boost = Math::db_to_linear(upward_boost_db);
+		}
+
+		p_dst_frames[i] = p_src_frames[i] * grv * upward_boost * makeup * mix + p_src_frames[i] * (1.0 - mix);
 	}
 }
 
@@ -125,6 +160,7 @@ Ref<AudioEffectInstance> AudioEffectCompressor::instantiate() {
 	ins->runmax = 0;
 	ins->maxover = 0;
 	ins->gr_meter = 1.0;
+	ins->upward_rundb = 0;
 	ins->current_channel = -1;
 	return ins;
 }
@@ -187,6 +223,38 @@ StringName AudioEffectCompressor::get_sidechain() const {
 	return sidechain;
 }
 
+void AudioEffectCompressor::set_upward_threshold_db(float p_threshold) {
+	upward_threshold_db = p_threshold;
+}
+
+float AudioEffectCompressor::get_upward_threshold_db() const {
+	return upward_threshold_db;
+}
+
+void AudioEffectCompressor::set_upward_ratio(float p_ratio) {
+	upward_ratio = p_ratio;
+}
+
+float AudioEffectCompressor::get_upward_ratio() const {
+	return upward_ratio;
+}
+
+void AudioEffectCompressor::set_upward_attack_us(float p_attack_us) {
+	upward_attack_us = p_attack_us;
+}
+
+float AudioEffectCompressor::get_upward_attack_us() const {
+	return upward_attack_us;
+}
+
+void AudioEffectCompressor::set_upward_release_ms(float p_release_ms) {
+	upward_release_ms = p_release_ms;
+}
+
+float AudioEffectCompressor::get_upward_release_ms() const {
+	return upward_release_ms;
+}
+
 void AudioEffectCompressor::_validate_property(PropertyInfo &p_property) const {
 	if (!Engine::get_singleton()->is_editor_hint()) {
 		return;
@@ -224,6 +292,18 @@ void AudioEffectCompressor::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_sidechain", "sidechain"), &AudioEffectCompressor::set_sidechain);
 	ClassDB::bind_method(D_METHOD("get_sidechain"), &AudioEffectCompressor::get_sidechain);
 
+	ClassDB::bind_method(D_METHOD("set_upward_threshold_db", "threshold"), &AudioEffectCompressor::set_upward_threshold_db);
+	ClassDB::bind_method(D_METHOD("get_upward_threshold_db"), &AudioEffectCompressor::get_upward_threshold_db);
+
+	ClassDB::bind_method(D_METHOD("set_upward_ratio", "ratio"), &AudioEffectCompressor::set_upward_ratio);
+	ClassDB::bind_method(D_METHOD("get_upward_ratio"), &AudioEffectCompressor::get_upward_ratio);
+
+	ClassDB::bind_method(D_METHOD("set_upward_attack_us", "attack_us"), &AudioEffectCompressor::set_upward_attack_us);
+	ClassDB::bind_method(D_METHOD("get_upward_attack_us"), &AudioEffectCompressor::get_upward_attack_us);
+
+	ClassDB::bind_method(D_METHOD("set_upward_release_ms", "release_ms"), &AudioEffectCompressor::set_upward_release_ms);
+	ClassDB::bind_method(D_METHOD("get_upward_release_ms"), &AudioEffectCompressor::get_upward_release_ms);
+
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "threshold", PROPERTY_HINT_RANGE, "-60,0,0.1"), "set_threshold", "get_threshold");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "ratio", PROPERTY_HINT_RANGE, "1,48,0.1"), "set_ratio", "get_ratio");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "gain", PROPERTY_HINT_RANGE, "-20,20,0.1"), "set_gain", "get_gain");
@@ -231,6 +311,11 @@ void AudioEffectCompressor::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "release_ms", PROPERTY_HINT_RANGE, "20,2000,1,suffix:ms"), "set_release_ms", "get_release_ms");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "mix", PROPERTY_HINT_RANGE, "0,1,0.01"), "set_mix", "get_mix");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "sidechain", PROPERTY_HINT_ENUM), "set_sidechain", "get_sidechain");
+
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "upward_threshold_db", PROPERTY_HINT_RANGE, "-200,0,0.1"), "set_upward_threshold_db", "get_upward_threshold_db");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "upward_ratio", PROPERTY_HINT_RANGE, "1,48,0.1"), "set_upward_ratio", "get_upward_ratio");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "upward_attack_us", PROPERTY_HINT_RANGE, U"20,20000,1,suffix:\u00B5s"), "set_upward_attack_us", "get_upward_attack_us");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "upward_release_ms", PROPERTY_HINT_RANGE, "20,2000,1,suffix:ms"), "set_upward_release_ms", "get_upward_release_ms");
 }
 
 AudioEffectCompressor::AudioEffectCompressor() {
@@ -240,4 +325,8 @@ AudioEffectCompressor::AudioEffectCompressor() {
 	attack_us = 20;
 	release_ms = 250;
 	mix = 1;
+	upward_threshold_db = -200.0f;
+	upward_ratio = 1.0f;
+	upward_attack_us = 5000;
+	upward_release_ms = 300;
 }
