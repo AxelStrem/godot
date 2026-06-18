@@ -149,7 +149,7 @@ void AudioEffectCompressorInstance::process(const AudioFrame *p_src_frames, Audi
 
 		// Upward compression: boost signals below the upward threshold.
 		float upward_boost = 1.0f;
-		if (upward_enabled) {
+		if (upward_enabled && peak > 1e-30f) {
 			float underdb = 2.08136898f * Math::linear_to_db(upward_threshold_linear / peak);
 			if (underdb < 0.0) {
 				underdb = 0.0;
