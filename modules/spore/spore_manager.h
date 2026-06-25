@@ -52,6 +52,10 @@ private:
 	// Cached total_time from last update for on-demand radius computation.
 	double _last_total_time = -1.0;
 
+	// Configurable startup delay (seconds). Spore sits at radius 0 while
+	// the parent tentacle grows toward it. Defaults to 1.5s.
+	float _start_delay = 1.5f;
+
 	// ---- Spatial index ----
 	SporeGrid _grid;
 
@@ -87,6 +91,8 @@ public:
 	int get_spore_state(int32_t p_id) const;
 	void set_spore_profile(int32_t p_id, int p_profile);
 	int get_spore_profile(int32_t p_id) const;
+	void set_start_delay(float p_delay);
+	float get_start_delay() const;
 
 	// ---- Per-frame update ----
 	void update(double p_delta, double p_total_time);
