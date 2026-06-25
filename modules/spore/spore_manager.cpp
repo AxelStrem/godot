@@ -21,12 +21,8 @@ static constexpr float MIN_RADIUS = 0.25f;
 static constexpr float MAX_RADIUS_NORMAL = 20.0f;
 static constexpr float MAX_RADIUS_STRAIN = 2.0f;
 
-// Initial delay: spore sits at radius 0 while the tentacle from its parent
-// grows toward it (matches SporeConfig.TENTACLE_EMERGENCE_TIME).
-static constexpr float START_DELAY = 1.5f;
-
-// Phase timing (seconds since start of growth, after START_DELAY).
-static constexpr float PHASE1_DURATION = 0.3f;   // fast burst 0→0.5 (visible)
+// Phase timing (seconds since start of growth, after start_delay).
+static constexpr float PHASE1_DURATION = 0.6f;   // slower burst 0→0.5 (visible)
 static constexpr float PHASE2_DURATION = 25.0f;  // slow pulsing growth (0.5→2.0)
 static constexpr float PHASE3_DURATION = 60.0f;  // accelerating growth (2.0→cap)
 
@@ -81,10 +77,10 @@ void SporeManager::_free_id(int32_t p_id) {
 
 float SporeManager::_compute_radius(float p_elapsed, int p_profile, float p_seed_offset) const {
 	// Phase 0: invisible delay while the parent tentacle connects.
-	if (p_elapsed < START_DELAY) {
+	if (p_elapsed < _start_delay) {
 		return 0.0f;
 	}
-	float t_elapsed = p_elapsed - START_DELAY;
+	float t_elapsed = p_elapsed - _start_delay;
 
 	float cap = (p_profile == PROFILE_STRAIN) ? MAX_RADIUS_STRAIN : MAX_RADIUS_NORMAL;
 	float base;
@@ -185,6 +181,14 @@ int SporeManager::get_spore_profile(int32_t p_id) const {
 		return PROFILE_NORMAL;
 	}
 	return _profiles[p_id];
+}
+
+void SporeManager::set_start_delay(float p_delay) {
+	_start_delay = p_delay;
+}
+
+float SporeManager::get_start_delay() const {
+	return _start_delay;
 }
 
 // ---------------------------------------------------------------------------
@@ -490,6 +494,9 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_spore_state", "id"), &SporeManager::get_spore_state);
 	ClassDB::bind_method(D_METHOD("set_spore_profile", "id", "profile"), &SporeManager::set_spore_profile);
 	ClassDB::bind_method(D_METHOD("get_spore_profile", "id"), &SporeManager::get_spore_profile);
+	ClassDB::bind_method(D_METHOD("set_start_delay", "delay"), &SporeManager::set_start_delay);
+	ClassDB::bind_method(D_METHOD("get_start_delay"), &SporeManager::get_start_delay);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "start_delay"), "set_start_delay", "get_start_delay");
 
 	// Update
 	ClassDB::bind_method(D_METHOD("update", "delta", "total_time"), &SporeManager::update);
