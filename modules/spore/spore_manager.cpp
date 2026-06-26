@@ -131,6 +131,11 @@ int32_t SporeManager::add_spore(const Vector3 &p_pos, int p_profile, int p_chamb
 	// Insert into spatial grid with initial tiny radius.
 	_grid.insert(id, p_pos, 0.0001f);
 
+	// Push to alive_ids immediately so subsequent queries in the same
+	// frame can find this spore (e.g. tentacle parent-finding for spores
+	// spawned in rapid succession via staggered timers).
+	_alive_ids.push_back(id);
+
 	return id;
 }
 
