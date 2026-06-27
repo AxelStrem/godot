@@ -53,6 +53,7 @@ int SporeManager::_allocate_id() {
 		_positions.push_back(Vector3());
 		_spawn_times.push_back(0.0f);
 		_radii.push_back(0.0001f);
+		_force_limits.push_back(0.0f);
 		_seed_offsets.push_back(0.0f);
 		_states.push_back(STATE_DEAD);
 		_profiles.push_back(PROFILE_NORMAL);
@@ -233,6 +234,16 @@ void SporeManager::update(double p_delta, double p_total_time) {
 
 		float old_radius = _radii[id];
 		float new_radius = _compute_radius(elapsed, _profiles[id], _seed_offsets[id]);
+
+		// Ward force-limit: smooth shrink toward the cap when a ward
+		// restricts this spore.  8 units/sec means a radius-20 spore
+		// shrinks to a limit of 5 in ~1.9 s — quick but not jarring.
+		float limit = _force_limits[id];
+		if (limit > 0.0f) {
+			float target = MIN(new_radius, limit);
+			new_radius = Math::move_toward(old_radius, target, 8.0f * float(p_delta));
+		}
+
 		_radii.set(id, new_radius);
 
 		// Update grid if the level changed.
@@ -414,6 +425,24 @@ bool SporeManager::is_spore_warded(int32_t p_id) const {
 }
 
 // ---------------------------------------------------------------------------
+// Force-limit (ward suppression)
+// ---------------------------------------------------------------------------
+
+void SporeManager::set_spore_force_limit(int32_t p_id, float p_limit) {
+	if (!_alive[p_id]) {
+		return;
+	}
+	_force_limits.set(p_id, MAX(p_limit, 0.0f));
+}
+
+float SporeManager::get_spore_force_limit(int32_t p_id) const {
+	if (!_alive[p_id]) {
+		return 0.0f;
+	}
+	return _force_limits[p_id];
+}
+
+// ---------------------------------------------------------------------------
 // Per-chamber queries
 // ---------------------------------------------------------------------------
 
@@ -522,6 +551,10 @@ void SporeManager::_bind_methods() {
 	// Wards
 	ClassDB::bind_method(D_METHOD("set_wards", "positions", "radii"), &SporeManager::set_wards);
 	ClassDB::bind_method(D_METHOD("is_spore_warded", "id"), &SporeManager::is_spore_warded);
+
+	// Force-limit
+	ClassDB::bind_method(D_METHOD("set_spore_force_limit", "id", "limit"), &SporeManager::set_spore_force_limit);
+	ClassDB::bind_method(D_METHOD("get_spore_force_limit", "id"), &SporeManager::get_spore_force_limit);
 
 	// Per-chamber
 	ClassDB::bind_method(D_METHOD("remove_spores_in_chamber", "chamber_id"), &SporeManager::remove_spores_in_chamber);

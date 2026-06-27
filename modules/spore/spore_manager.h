@@ -41,6 +41,7 @@ private:
 	Vector<Vector3> _positions;
 	Vector<float> _spawn_times;    // total_time when the spore was spawned
 	Vector<float> _radii;          // current computed radius (updated each frame)
+	Vector<float> _force_limits;  // per-spore max radius enforced by wards (0 = no limit)
 	Vector<float> _seed_offsets;   // unique per-spore offset for pulse phase
 	Vector<uint8_t> _states;       // SporeState
 	Vector<uint8_t> _profiles;     // Profile
@@ -112,6 +113,10 @@ public:
 	// ---- Ward management ----
 	void set_wards(const TypedArray<Vector3> &p_positions, const TypedArray<float> &p_radii);
 	bool is_spore_warded(int32_t p_id) const;
+
+	// ---- Force-limit (ward suppression) ----
+	void set_spore_force_limit(int32_t p_id, float p_limit);
+	float get_spore_force_limit(int32_t p_id) const;
 
 	// ---- For tentacle parent-finding (distance-filtered) ----
 	// Returns spore IDs within `p_radius` of `p_pos`, performing actual
