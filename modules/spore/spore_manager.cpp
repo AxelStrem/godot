@@ -21,6 +21,10 @@ static constexpr float MIN_RADIUS = 0.25f;
 static constexpr float MAX_RADIUS_NORMAL = 20.0f;
 static constexpr float MAX_RADIUS_STRAIN = 2.0f;
 
+// Minimum radius when a spore is force-limited by a ward.
+// Mirrors SporeConfig.WARD_MIN_SPORE_RADIUS in GDScript.
+static constexpr float MIN_FORCE_LIMITED_RADIUS = 0.1f;
+
 // Phase timing (seconds since start of growth, after start_delay).
 static constexpr float PHASE1_DURATION = 0.6f;   // slower burst 0→0.5 (visible)
 static constexpr float PHASE2_DURATION = 25.0f;  // slow pulsing growth (0.5→2.0)
@@ -123,6 +127,7 @@ int32_t SporeManager::add_spore(const Vector3 &p_pos, int p_profile, int p_chamb
 	_positions.set(id, p_pos);
 	_spawn_times.set(id, -1.0f); // Will be set by the first update() call.
 	_radii.set(id, 0.0001f);     // Reset stale radius from recycled ID.
+	_force_limits.set(id, 0.0f); // Reset stale force-limit from recycled ID.
 	_seed_offsets.set(id, Math::randf() * 6.2831853f);
 	_states.set(id, STATE_START_DELAY);
 	_profiles.set(id, (p_profile == PROFILE_STRAIN) ? PROFILE_STRAIN : PROFILE_NORMAL);
@@ -241,6 +246,7 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		float limit = _force_limits[id];
 		if (limit > 0.0f) {
 			float target = MIN(new_radius, limit);
+			target = MAX(target, MIN_FORCE_LIMITED_RADIUS);
 			new_radius = Math::move_toward(old_radius, target, 8.0f * float(p_delta));
 		}
 
