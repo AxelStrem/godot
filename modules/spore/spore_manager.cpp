@@ -247,7 +247,7 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		if (limit > 0.0f) {
 			float target = MIN(new_radius, limit);
 			target = MAX(target, MIN_FORCE_LIMITED_RADIUS);
-			new_radius = Math::move_toward(old_radius, target, 8.0f * float(p_delta));
+			new_radius = Math::move_toward(old_radius, target, _force_limit_shrink_speed * float(p_delta));
 		}
 
 		_radii.set(id, new_radius);
@@ -448,6 +448,14 @@ float SporeManager::get_spore_force_limit(int32_t p_id) const {
 	return _force_limits[p_id];
 }
 
+void SporeManager::set_force_limit_shrink_speed(float p_speed) {
+	_force_limit_shrink_speed = MAX(p_speed, 0.0f);
+}
+
+float SporeManager::get_force_limit_shrink_speed() const {
+	return _force_limit_shrink_speed;
+}
+
 // ---------------------------------------------------------------------------
 // Per-chamber queries
 // ---------------------------------------------------------------------------
@@ -561,6 +569,9 @@ void SporeManager::_bind_methods() {
 	// Force-limit
 	ClassDB::bind_method(D_METHOD("set_spore_force_limit", "id", "limit"), &SporeManager::set_spore_force_limit);
 	ClassDB::bind_method(D_METHOD("get_spore_force_limit", "id"), &SporeManager::get_spore_force_limit);
+	ClassDB::bind_method(D_METHOD("set_force_limit_shrink_speed", "speed"), &SporeManager::set_force_limit_shrink_speed);
+	ClassDB::bind_method(D_METHOD("get_force_limit_shrink_speed"), &SporeManager::get_force_limit_shrink_speed);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "force_limit_shrink_speed"), "set_force_limit_shrink_speed", "get_force_limit_shrink_speed");
 
 	// Per-chamber
 	ClassDB::bind_method(D_METHOD("remove_spores_in_chamber", "chamber_id"), &SporeManager::remove_spores_in_chamber);
