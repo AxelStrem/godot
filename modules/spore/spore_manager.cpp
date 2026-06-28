@@ -241,13 +241,16 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		float new_radius = _compute_radius(elapsed, _profiles[id], _seed_offsets[id]);
 
 		// Ward force-limit: smooth shrink toward the cap when a ward
-		// restricts this spore.  8 units/sec means a radius-20 spore
-		// shrinks to a limit of 5 in ~1.9 s — quick but not jarring.
+		// restricts this spore, and smooth recovery when the spore
+		// leaves the ward so it doesn't snap back to full radius.
 		float limit = _force_limits[id];
 		if (limit > 0.0f) {
 			float target = MIN(new_radius, limit);
 			target = MAX(target, MIN_FORCE_LIMITED_RADIUS);
 			new_radius = Math::move_toward(old_radius, target, _force_limit_shrink_speed * float(p_delta));
+		} else if (new_radius > old_radius + 0.001f) {
+			// Smooth recovery: grow back to natural radius gradually.
+			new_radius = Math::move_toward(old_radius, new_radius, _force_limit_shrink_speed * float(p_delta));
 		}
 
 		_radii.set(id, new_radius);
