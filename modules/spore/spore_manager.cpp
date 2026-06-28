@@ -365,6 +365,23 @@ bool SporeManager::is_any_spore_in_range(const Vector3 &p_center, float p_radius
 	return false;
 }
 
+bool SporeManager::is_any_dangerous_spore_in_range(const Vector3 &p_center, float p_radius) const {
+	// Like is_any_spore_in_range, but skips spores suppressed by a ward
+	// (force_limits[id] > 0).  Used for player damage checks so that
+	// ward-suppressed spores don't kill players.
+	float r2 = p_radius * p_radius;
+	for (int32_t id : _alive_ids) {
+		if (_force_limits[id] > 0.0f) {
+			continue;
+		}
+		float total_r = p_radius + _radii[id];
+		if (_positions[id].distance_squared_to(p_center) < total_r * total_r) {
+			return true;
+		}
+	}
+	return false;
+}
+
 // ---------------------------------------------------------------------------
 // Ward management
 // ---------------------------------------------------------------------------
@@ -561,6 +578,7 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("query_sphere", "center", "radius"), &SporeManager::query_sphere);
 	ClassDB::bind_method(D_METHOD("query_spores_in_range", "position", "radius"), &SporeManager::query_spores_in_range);
 	ClassDB::bind_method(D_METHOD("is_any_spore_in_range", "center", "radius"), &SporeManager::is_any_spore_in_range);
+	ClassDB::bind_method(D_METHOD("is_any_dangerous_spore_in_range", "center", "radius"), &SporeManager::is_any_dangerous_spore_in_range);
 
 	// Wards
 	ClassDB::bind_method(D_METHOD("set_wards", "positions", "radii"), &SporeManager::set_wards);
