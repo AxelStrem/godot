@@ -56,7 +56,7 @@ private:
 	// Configurable startup delay (seconds). Spore sits at radius 0 while
 	// the parent tentacle grows toward it. Defaults to 1.5s.
 	float _start_delay = 1.5f;
-	float _force_limit_shrink_speed = 3.0f; // units/sec radius shrinks toward ward limit
+	float _force_limit_shrink_speed = 1.5f; // units/sec radius shrinks toward ward limit
 
 	// ---- Spatial index ----
 	SporeGrid _grid;
