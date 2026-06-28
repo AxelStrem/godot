@@ -56,7 +56,7 @@ private:
 	// Configurable startup delay (seconds). Spore sits at radius 0 while
 	// the parent tentacle grows toward it. Defaults to 1.5s.
 	float _start_delay = 1.5f;
-	float _force_limit_shrink_speed = 8.0f; // units/sec radius shrinks toward ward limit
+	float _force_limit_shrink_speed = 3.0f; // units/sec radius shrinks toward ward limit
 
 	// ---- Spatial index ----
 	SporeGrid _grid;
@@ -110,6 +110,7 @@ public:
 	Vector<int32_t> query_nearby(const Vector3 &p_pos) const;
 	Vector<int32_t> query_sphere(const Vector3 &p_center, float p_radius) const;
 	bool is_any_spore_in_range(const Vector3 &p_center, float p_radius) const;
+	bool is_any_dangerous_spore_in_range(const Vector3 &p_center, float p_radius) const;
 
 	// ---- Ward management ----
 	void set_wards(const TypedArray<Vector3> &p_positions, const TypedArray<float> &p_radii);
