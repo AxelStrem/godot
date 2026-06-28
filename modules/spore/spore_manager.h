@@ -56,6 +56,7 @@ private:
 	// Configurable startup delay (seconds). Spore sits at radius 0 while
 	// the parent tentacle grows toward it. Defaults to 1.5s.
 	float _start_delay = 1.5f;
+	float _force_limit_shrink_speed = 8.0f; // units/sec radius shrinks toward ward limit
 
 	// ---- Spatial index ----
 	SporeGrid _grid;
@@ -117,6 +118,8 @@ public:
 	// ---- Force-limit (ward suppression) ----
 	void set_spore_force_limit(int32_t p_id, float p_limit);
 	float get_spore_force_limit(int32_t p_id) const;
+	void set_force_limit_shrink_speed(float p_speed);
+	float get_force_limit_shrink_speed() const;
 
 	// ---- For tentacle parent-finding (distance-filtered) ----
 	// Returns spore IDs within `p_radius` of `p_pos`, performing actual
