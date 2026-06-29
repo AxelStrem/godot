@@ -10,6 +10,7 @@
 
 #include "core/object/object.h"
 #include "core/templates/hash_map.h"
+#include "core/templates/hash_set.h"
 #include "core/templates/vector.h"
 #include "core/math/vector3.h"
 #include "core/math/vector3i.h"
@@ -57,6 +58,58 @@ private:
 	// the parent tentacle grows toward it. Defaults to 1.5s.
 	float _start_delay = 1.5f;
 	float _force_limit_shrink_speed = 1.5f; // units/sec radius shrinks toward ward limit
+
+	// ---- Cell graph (replaces GDScript spore_loc Dictionary) ----
+	// All cells live in one combined HashMap.  Chambers share the same
+	// depth map so ward-blocking affects all chambers uniformly.
+	// Entry / exit cells are per-chamber for sweep speed lookup.
+	struct Cell {
+		Vector3i grid_key;
+		Vector3 world_pos;               // precomputed from grid_key / spore_res
+		int32_t depth = -1;              // -1 = unvisited, INF-like marker = unreachable
+		int32_t chamber_id = -1;
+		bool spawned = false;            // has _activate_spore_cell been called?
+		bool blocked_by_ward = false;    // inside an active ward → depth treated as INF
+	};
+
+	HashMap<Vector3i, Cell> _cells;
+
+	// BFS seed points per chamber.
+	// Entry cells (chamber entrance) seed the BFS at depth 0.
+	// Exit cells are used to compute the initial chamber speed.
+	HashMap<int32_t, Vector<Vector3i>> _entry_cells;
+	HashMap<int32_t, Vector<Vector3i>> _exit_cells;
+
+	// Per-chamber sweep speed (depth-units per second).
+	// Computed once at init from consume_time and entry→exit depth.
+	// During sweep, speed changes as the cursor crosses chamber boundaries.
+	HashMap<int32_t, float> _chamber_speeds;
+
+	// Combined depth-sorted sweep list (all chambers merged).
+	// Sorted by depth ascending.  Sweep cursor advances through this list,
+	// switching speed when cells change chamber.
+	Vector<Vector3i> _sorted_cells;
+	float _sweep = 1.0f;               // current sweep cursor (depth-units)
+	int32_t _sweep_idx = 0;            // index into _sorted_cells
+	bool _sweep_dirty = true;          // force rebuild after init / ward change
+
+	// Grid resolution (mirrors GDScript spore_res constant, default 1.0).
+	float _spore_res = 1.0f;
+
+	// BFS neighbours: 124 Chebyshev-distance-2 offsets so the flood-fill
+	// bridges 1-cell gaps in the collision geometry.
+	Vector<Vector3i> _bfs_neighbors;
+	void _init_bfs_neighbors();
+
+	// Incremental BFS state (lazy depth computation).
+	// When the sweep cursor approaches computed_max_depth, we run
+	// another BFS wave to look ahead LOOKAHEAD depth-units.
+	float _bfs_computed_depth = 0.0f;
+	static constexpr float BFS_LOOKAHEAD = 20.0f;
+
+	// ---- BFS / sweep helpers ----
+	void _run_bfs_incremental(float p_target_depth);
+	void _build_sweep_list();
 
 	// ---- Spatial index ----
 	SporeGrid _grid;
@@ -134,6 +187,52 @@ public:
 	PackedFloat32Array get_spore_transforms_for_chamber(int p_chamber_id) const;
 	int get_spore_count_for_chamber(int p_chamber_id) const;
 	int get_spore_chamber(int32_t p_id) const;
+
+	// ---- Cell graph (replaces GDScript spore_loc / depth / sweep logic) ----
+
+	// Called during shape rendering: add a cell to the grid.
+	// If a cell already exists at grid_key, chamber_id is updated.
+	void add_cell(const Vector3i &p_grid_key, const Vector3 &p_world_pos, int p_chamber_id);
+	void remove_cell(const Vector3i &p_grid_key);
+	bool has_cell(const Vector3i &p_grid_key) const;
+
+	// Set entry/exit cells for a chamber (called after shape rendering).
+	void set_chamber_entry_cells(int p_chamber_id, const TypedArray<Vector3i> &p_keys);
+	void set_chamber_exit_cells(int p_chamber_id, const TypedArray<Vector3i> &p_keys);
+
+	// Set per-chamber sweep speed (computed from consume_time at init).
+	void set_chamber_speed(int p_chamber_id, float p_speed);
+	float get_chamber_speed(int p_chamber_id) const;
+
+	// Run the full BFS flood-fill from all entry cells.
+	// Assigns depth to every reachable cell, respects ward-blocked cells.
+	// Called once after all shapes are rendered, and again after ward changes.
+	void propagate_depths();
+
+	// Advance the sweep cursor by delta seconds.  Returns a Dictionary
+	// mapping chamber_id → Array[Vector3i] of newly activated grid keys.
+	// GDScript loops over the result and calls _activate_spore_cell for each.
+	Dictionary advance_sweeps(float p_delta);
+
+	// Mark a cell as spawned (called by GDScript after _activate_spore_cell).
+	void mark_cell_spawned(const Vector3i &p_grid_key);
+
+	// Called after ward positions/radii change.  Re-runs the BFS so that
+	// blocked cells are pushed to unreachable depth and unblocked cells
+	// recover their natural depth.
+	void on_wards_changed();
+
+	// GDScript queries for cell state.
+	int get_cell_depth(const Vector3i &p_grid_key) const;
+	int get_cell_chamber(const Vector3i &p_grid_key) const;
+	bool is_cell_blocked(const Vector3i &p_grid_key) const;
+
+	// Grid resolution (mirrors GDScript spore_res).
+	void set_spore_res(float p_res);
+	float get_spore_res() const;
+
+	// BFS neighbour count (for debugging / profiling).
+	int get_bfs_neighbor_count() const;
 };
 
 VARIANT_ENUM_CAST(SporeManager::SporeState);

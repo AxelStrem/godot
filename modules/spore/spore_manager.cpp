@@ -10,6 +10,7 @@
 
 #include "core/math/math_funcs.h"
 #include "core/variant/array.h"
+#include "core/variant/dictionary.h"
 #include "core/variant/typed_array.h"
 #include "core/object/class_db.h"
 
@@ -541,6 +542,428 @@ int SporeManager::get_spore_chamber(int32_t p_id) const {
 }
 
 // ---------------------------------------------------------------------------
+// Cell graph — BFS flood-fill, depth assignment, sweep
+// ---------------------------------------------------------------------------
+
+void SporeManager::_init_bfs_neighbors() {
+	if (!_bfs_neighbors.is_empty()) {
+		return;
+	}
+	// 5×5×5 Chebyshev-distance-2 neighbourhood (124 offsets).
+	_bfs_neighbors.reserve(124);
+	for (int x = -2; x <= 2; x++) {
+		for (int y = -2; y <= 2; y++) {
+			for (int z = -2; z <= 2; z++) {
+				if (x != 0 || y != 0 || z != 0) {
+					_bfs_neighbors.push_back(Vector3i(x, y, z));
+				}
+			}
+		}
+	}
+}
+
+void SporeManager::add_cell(const Vector3i &p_grid_key, const Vector3 &p_world_pos, int p_chamber_id) {
+	Cell *existing = _cells.getptr(p_grid_key);
+	if (existing) {
+		// Update chamber_id for boundary cells that belong to a later chamber.
+		existing->chamber_id = p_chamber_id;
+		existing->world_pos = p_world_pos;
+		return;
+	}
+	Cell c;
+	c.grid_key = p_grid_key;
+	c.world_pos = p_world_pos;
+	c.chamber_id = p_chamber_id;
+	c.depth = -1;
+	c.spawned = false;
+	c.blocked_by_ward = false;
+	_cells.insert(p_grid_key, c);
+}
+
+void SporeManager::remove_cell(const Vector3i &p_grid_key) {
+	_cells.erase(p_grid_key);
+	_sweep_dirty = true;
+}
+
+bool SporeManager::has_cell(const Vector3i &p_grid_key) const {
+	return _cells.has(p_grid_key);
+}
+
+void SporeManager::set_chamber_entry_cells(int p_chamber_id, const TypedArray<Vector3i> &p_keys) {
+	Vector<Vector3i> keys;
+	keys.resize(p_keys.size());
+	for (int i = 0; i < p_keys.size(); i++) {
+		keys.set(i, Vector3i(p_keys[i]));
+	}
+	_entry_cells[p_chamber_id] = keys;
+}
+
+void SporeManager::set_chamber_exit_cells(int p_chamber_id, const TypedArray<Vector3i> &p_keys) {
+	Vector<Vector3i> keys;
+	keys.resize(p_keys.size());
+	for (int i = 0; i < p_keys.size(); i++) {
+		keys.set(i, Vector3i(p_keys[i]));
+	}
+	_exit_cells[p_chamber_id] = keys;
+}
+
+void SporeManager::set_chamber_speed(int p_chamber_id, float p_speed) {
+	_chamber_speeds[p_chamber_id] = MAX(p_speed, 0.0f);
+}
+
+float SporeManager::get_chamber_speed(int p_chamber_id) const {
+	const float *s = _chamber_speeds.getptr(p_chamber_id);
+	return s ? *s : 1.0f;
+}
+
+// ---- BFS flood-fill ----
+
+void SporeManager::_run_bfs_incremental(float p_target_depth) {
+	if (_cells.is_empty()) {
+		return;
+	}
+
+	_init_bfs_neighbors();
+
+	// Collect seeds: entry cells (depth 0) and frontier cells
+	// at depths ≤ p_target_depth that are already visited.
+	// BFS processes one wave at a time until all cells with
+	// depth ≤ p_target_depth are assigned.
+	struct BfsFrontier {
+		Vector3i key;
+		int depth;
+	};
+	Vector<BfsFrontier> wave;
+	HashSet<Vector3i> visited;
+
+	// Seed from all entry cells.
+	for (const auto &E : _entry_cells) {
+		for (const Vector3i &key : E.value) {
+			Cell *c = _cells.getptr(key);
+			if (!c || c->blocked_by_ward) {
+				continue;
+			}
+			c->depth = 0;
+			wave.push_back({ key, 0 });
+			visited.insert(key);
+		}
+	}
+
+	// Also seed from existing frontier cells (already-visited cells
+	// that sit at the edge of the computed region).  These carry
+	// their existing depth forward so the new BFS extends outward.
+	{
+		for (const auto &E_scan : _cells) {
+			const Vector3i &key = E_scan.key;
+			const Cell &cell_ref = E_scan.value;
+			if (cell_ref.blocked_by_ward || cell_ref.depth < 0) {
+				continue;
+			}
+			if (cell_ref.depth > (int)p_target_depth) {
+				continue; // beyond target, not yet needed
+			}
+			if (visited.has(key)) {
+				continue; // already seeded from entries
+			}
+			// Check if this cell is at the frontier — it has at least
+			// one unvisited neighbour, or it's newly unblocked.
+			bool is_frontier = false;
+			for (const Vector3i &n : _bfs_neighbors) {
+				Vector3i nk = key + n;
+				const Cell *nc = _cells.getptr(nk);
+				if (nc && !nc->blocked_by_ward && nc->depth < 0) {
+					is_frontier = true;
+					break;
+				}
+			}
+			if (is_frontier) {
+				wave.push_back({ key, cell_ref.depth });
+				visited.insert(key);
+			}
+		}
+	}
+
+	if (wave.is_empty()) {
+		return;
+	}
+
+	// Run BFS waves until we hit p_target_depth or run out of cells.
+	while (!wave.is_empty()) {
+		Vector<BfsFrontier> next_wave;
+		bool reached_target = true;
+
+		for (const BfsFrontier &f : wave) {
+			int nd = f.depth + 1;
+			if (nd > (int)p_target_depth) {
+				reached_target = false;
+				continue;
+			}
+
+			for (const Vector3i &n : _bfs_neighbors) {
+				Vector3i nk = f.key + n;
+				if (visited.has(nk)) {
+					continue;
+				}
+				Cell *c = _cells.getptr(nk);
+				if (!c || c->blocked_by_ward) {
+					continue;
+				}
+				if (c->depth < 0 || c->depth > nd) {
+					c->depth = nd;
+					visited.insert(nk);
+					next_wave.push_back({ nk, nd });
+				}
+			}
+		}
+
+		wave = next_wave;
+		if (reached_target && next_wave.is_empty()) {
+			break;
+		}
+	}
+
+	_bfs_computed_depth = p_target_depth;
+	_sweep_dirty = true;
+}
+
+void SporeManager::_build_sweep_list() {
+	_sorted_cells.clear();
+
+	// Bucket cells by depth (depths are small integers, so bucket sort is fast).
+	// We use a HashMap so we don't need to find max_depth upfront.
+	HashMap<int, Vector<Vector3i>> buckets;
+	int min_depth = 0x7FFFFFFF;
+	int max_depth = -1;
+
+	for (const auto &E : _cells) {
+		if (E.value.depth > 0 && !E.value.blocked_by_ward) {
+			int d = E.value.depth;
+			buckets[d].push_back(E.key);
+			if (d < min_depth) {
+				min_depth = d;
+			}
+			if (d > max_depth) {
+				max_depth = d;
+			}
+		}
+	}
+
+	// Flatten buckets in depth order.
+	for (int d = min_depth; d <= max_depth; d++) {
+		const Vector<Vector3i> *bucket = buckets.getptr(d);
+		if (bucket) {
+			for (const Vector3i &key : *bucket) {
+				_sorted_cells.push_back(key);
+			}
+		}
+	}
+
+	// Reset sweep cursor if this is a fresh build.
+	if (_sweep_idx <= 0 || _sweep_idx > _sorted_cells.size()) {
+		_sweep_idx = 0;
+		_sweep = 1.0f;
+	}
+	_sweep_dirty = false;
+}
+
+void SporeManager::propagate_depths() {
+	// Reset all cells to unvisited.
+	for (auto &E : _cells) {
+		E.value.depth = -1;
+	}
+
+	// Run BFS to a generous depth (covers all connected cells).
+	// Use INT_MAX / 2 to avoid overflow — in practice no chamber
+	// has cells deeper than a few hundred.
+	_run_bfs_incremental(10000.0f);
+
+	// Reset sweep cursor since the sorted list is being rebuilt.
+	// Old spawned cells will be skipped by the spawned check in
+	// advance_sweeps; the sweep will "rush" through them and pick
+	// up at the first unspawned cell.
+	_sweep = 1.0f;
+	_sweep_idx = 0;
+
+	// Build the sorted sweep list.
+	_build_sweep_list();
+
+	// Compute per-chamber speeds if not already set.
+	// Speed = (median_exit_depth - 1) / consume_time, but consume_time
+	// is converted to speed on the GDScript side before calling
+	// set_chamber_speed().  We only compute defaults here.
+	for (const auto &E : _exit_cells) {
+		int chamber_id = E.key;
+		if (_chamber_speeds.has(chamber_id)) {
+			continue; // already set by GDScript
+		}
+		// Default: sweep takes ~30 depth units.
+		float speed = 1.0f;
+		_chamber_speeds[chamber_id] = speed;
+	}
+}
+
+// ---- Sweep advance ----
+
+Dictionary SporeManager::advance_sweeps(float p_delta) {
+	Dictionary result;
+
+	if (_cells.is_empty()) {
+		return result;
+	}
+
+	// Lazy BFS: if the sweep is close to computed_max_depth,
+	// run another incremental wave ahead.
+	if (_sweep + BFS_LOOKAHEAD * 0.5f > _bfs_computed_depth) {
+		_run_bfs_incremental(_bfs_computed_depth + BFS_LOOKAHEAD);
+	}
+
+	if (_sweep_dirty) {
+		_build_sweep_list();
+	}
+
+	if (_sorted_cells.is_empty()) {
+		return result;
+	}
+
+	// Determine current speed from the chamber of the next cell.
+	float speed = 1.0f;
+	if (_sweep_idx < _sorted_cells.size()) {
+		const Cell *c = _cells.getptr(_sorted_cells[_sweep_idx]);
+		if (c) {
+			const float *s = _chamber_speeds.getptr(c->chamber_id);
+			speed = s ? *s : 1.0f;
+		}
+	}
+
+	_sweep += speed * p_delta;
+
+	// Activate all cells whose depth ≤ sweep, respecting ward blocking.
+	while (_sweep_idx < _sorted_cells.size()) {
+		const Vector3i &key = _sorted_cells[_sweep_idx];
+		Cell *c = _cells.getptr(key);
+		if (!c) {
+			_sweep_idx++;
+			continue;
+		}
+
+		// Skip cells blocked by wards (they were unblocked after a
+		// re-BFS but may still be in the stale _sorted_cells list).
+		if (c->blocked_by_ward) {
+			_sweep_idx++;
+			continue;
+		}
+
+		// Update speed if this cell belongs to a different chamber
+		// than the previous one.
+		if (_sweep_idx > 0 && _sweep_idx - 1 < _sorted_cells.size()) {
+			const Cell *prev = _cells.getptr(_sorted_cells[_sweep_idx - 1]);
+			if (prev && prev->chamber_id != c->chamber_id) {
+				const float *s = _chamber_speeds.getptr(c->chamber_id);
+				speed = s ? *s : 1.0f;
+			}
+		}
+
+		if ((float)c->depth > _sweep) {
+			break;
+		}
+
+		_sweep_idx++;
+
+		if (c->spawned) {
+			continue;
+		}
+
+		// Collect into per-chamber result arrays.
+		int ch = c->chamber_id;
+		Array arr;
+		if (result.has(ch)) {
+			arr = result[ch];
+		}
+		arr.push_back(key);
+		result[ch] = arr;
+	}
+
+	return result;
+}
+
+void SporeManager::mark_cell_spawned(const Vector3i &p_grid_key) {
+	Cell *c = _cells.getptr(p_grid_key);
+	if (c) {
+		c->spawned = true;
+	}
+}
+
+void SporeManager::on_wards_changed() {
+	// Mark cells as blocked/unblocked based on current ward positions.
+	// Then re-run BFS so blocked cells get unreachable depths.
+	if (_wards.is_empty()) {
+		// No wards: unblock all cells.
+		for (auto &E : _cells) {
+			E.value.blocked_by_ward = false;
+		}
+	} else {
+		// Check every cell against all wards.
+		for (auto &E : _cells) {
+			bool blocked = false;
+			Vector3 pos = E.value.world_pos;
+			for (const Ward &w : _wards) {
+				if (pos.distance_to(w.pos) < w.radius) {
+					blocked = true;
+					break;
+				}
+			}
+			E.value.blocked_by_ward = blocked;
+		}
+	}
+
+	// Reset depths and re-run BFS from the current sweep frontier.
+	// Cells with depth > _sweep get reset to -1 so the BFS re-assigns them.
+	// Cells with depth ≤ _sweep (already swept past) keep their depth
+	// and act as BFS seeds.
+	for (auto &E : _cells) {
+		if (E.value.blocked_by_ward) {
+			E.value.depth = -1; // remove from sweep
+		} else if (E.value.depth > (int)_sweep) {
+			E.value.depth = -1; // reset for re-BFS
+		}
+		// Cells with depth ≤ _sweep keep their depth (already activated).
+	}
+
+	// Re-run BFS to fill in the reset cells.
+	_run_bfs_incremental(_bfs_computed_depth > 0 ? _bfs_computed_depth : BFS_LOOKAHEAD);
+	_sweep_dirty = true;
+}
+
+// ---- GDScript queries ----
+
+int SporeManager::get_cell_depth(const Vector3i &p_grid_key) const {
+	const Cell *c = _cells.getptr(p_grid_key);
+	return c ? c->depth : -1;
+}
+
+int SporeManager::get_cell_chamber(const Vector3i &p_grid_key) const {
+	const Cell *c = _cells.getptr(p_grid_key);
+	return c ? c->chamber_id : -1;
+}
+
+bool SporeManager::is_cell_blocked(const Vector3i &p_grid_key) const {
+	const Cell *c = _cells.getptr(p_grid_key);
+	return c ? c->blocked_by_ward : false;
+}
+
+void SporeManager::set_spore_res(float p_res) {
+	_spore_res = MAX(p_res, 0.01f);
+}
+
+float SporeManager::get_spore_res() const {
+	return _spore_res;
+}
+
+int SporeManager::get_bfs_neighbor_count() const {
+	return _bfs_neighbors.size();
+}
+
+// ---------------------------------------------------------------------------
 // Bind methods
 // ---------------------------------------------------------------------------
 
@@ -599,4 +1022,24 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_spore_transforms_for_chamber", "chamber_id"), &SporeManager::get_spore_transforms_for_chamber);
 	ClassDB::bind_method(D_METHOD("get_spore_count_for_chamber", "chamber_id"), &SporeManager::get_spore_count_for_chamber);
 	ClassDB::bind_method(D_METHOD("get_spore_chamber", "id"), &SporeManager::get_spore_chamber);
+
+	// Cell graph
+	ClassDB::bind_method(D_METHOD("add_cell", "grid_key", "world_pos", "chamber_id"), &SporeManager::add_cell);
+	ClassDB::bind_method(D_METHOD("remove_cell", "grid_key"), &SporeManager::remove_cell);
+	ClassDB::bind_method(D_METHOD("has_cell", "grid_key"), &SporeManager::has_cell);
+	ClassDB::bind_method(D_METHOD("set_chamber_entry_cells", "chamber_id", "keys"), &SporeManager::set_chamber_entry_cells);
+	ClassDB::bind_method(D_METHOD("set_chamber_exit_cells", "chamber_id", "keys"), &SporeManager::set_chamber_exit_cells);
+	ClassDB::bind_method(D_METHOD("set_chamber_speed", "chamber_id", "speed"), &SporeManager::set_chamber_speed);
+	ClassDB::bind_method(D_METHOD("get_chamber_speed", "chamber_id"), &SporeManager::get_chamber_speed);
+	ClassDB::bind_method(D_METHOD("propagate_depths"), &SporeManager::propagate_depths);
+	ClassDB::bind_method(D_METHOD("advance_sweeps", "delta"), &SporeManager::advance_sweeps);
+	ClassDB::bind_method(D_METHOD("mark_cell_spawned", "grid_key"), &SporeManager::mark_cell_spawned);
+	ClassDB::bind_method(D_METHOD("on_wards_changed"), &SporeManager::on_wards_changed);
+	ClassDB::bind_method(D_METHOD("get_cell_depth", "grid_key"), &SporeManager::get_cell_depth);
+	ClassDB::bind_method(D_METHOD("get_cell_chamber", "grid_key"), &SporeManager::get_cell_chamber);
+	ClassDB::bind_method(D_METHOD("is_cell_blocked", "grid_key"), &SporeManager::is_cell_blocked);
+	ClassDB::bind_method(D_METHOD("set_spore_res", "res"), &SporeManager::set_spore_res);
+	ClassDB::bind_method(D_METHOD("get_spore_res"), &SporeManager::get_spore_res);
+	ClassDB::bind_method(D_METHOD("get_bfs_neighbor_count"), &SporeManager::get_bfs_neighbor_count);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "spore_res"), "set_spore_res", "get_spore_res");
 }
