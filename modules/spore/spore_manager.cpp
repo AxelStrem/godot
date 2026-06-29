@@ -880,11 +880,14 @@ Dictionary SporeManager::advance_sweeps(float p_delta) {
 	// incremental BFS extension so they get discovered.  Otherwise,
 	// run when the sweep is close to computed_max_depth.
 	if (_cells_added) {
-		float target = MAX(_bfs_computed_depth, _sweep + BFS_LOOKAHEAD);
+		float target = MAX(_bfs_computed_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD * 2);
 		_run_bfs_incremental(target);
 		_cells_added = false;
 	} else if (_sweep + BFS_LOOKAHEAD * 0.5f > _bfs_computed_depth) {
-		_run_bfs_incremental(_bfs_computed_depth + BFS_LOOKAHEAD);
+		// Always extend far enough ahead of the sweep cursor so the
+		// BFS actually reaches the frontier even if _bfs_computed_depth
+		// was left stale by a ward change or other edge case.
+		_run_bfs_incremental(MAX(_bfs_computed_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD * 2));
 	}
 
 	if (_sweep_dirty) {
@@ -964,16 +967,19 @@ void SporeManager::mark_cell_spawned(const Vector3i &p_grid_key) {
 }
 
 void SporeManager::on_wards_changed() {
-	// Mark cells as blocked/unblocked based on current ward positions.
-	// Then re-run BFS so blocked cells get unreachable depths.
+	// Save old blocked state before recomputing.
+	Vector<Vector3i> changed_keys; // cells whose blocked status changed
+	HashMap<Vector3i, bool> old_blocked;
+	for (const auto &E : _cells) {
+		old_blocked[E.key] = E.value.blocked_by_ward;
+	}
+
+	// Recompute blocked_by_ward for all cells.
 	if (_wards.is_empty()) {
-		// No wards: unblock all cells.
 		for (auto &E : _cells) {
 			E.value.blocked_by_ward = false;
 		}
 	} else {
-		// Use the ward spatial grid to check only nearby wards per cell
-		// instead of brute-force O(cells × wards).
 		for (auto &E : _cells) {
 			bool blocked = false;
 			Vector3 pos = E.value.world_pos;
@@ -1003,33 +1009,25 @@ void SporeManager::on_wards_changed() {
 		}
 	}
 
-	// Reset depths and re-run BFS from the current sweep frontier.
-	// Cells with depth > _sweep get reset to -1 so the BFS re-assigns them.
-	// Cells with depth ≤ _sweep (already swept past) keep their depth
-	// and act as BFS seeds.
+	// Find cells whose blocked status actually changed, and reset their
+	// depths.  Cells unaffected by the ward keep their depths so the
+	// sweep can continue uninterrupted.
 	for (auto &E : _cells) {
-		if (E.value.blocked_by_ward) {
-			E.value.depth = -1; // remove from sweep
-		} else if (E.value.depth > (int)_sweep) {
-			E.value.depth = -1; // reset for re-BFS
+		bool was_blocked = old_blocked.has(E.key) ? old_blocked[E.key] : false;
+		if (E.value.blocked_by_ward != was_blocked) {
+			E.value.depth = -1;
+			changed_keys.push_back(E.key);
 		}
-		// Cells with depth ≤ _sweep keep their depth (already activated).
+		// Also ensure currently-blocked cells have no depth (belt-and-suspenders).
+		if (E.value.blocked_by_ward) {
+			E.value.depth = -1;
+		}
 	}
 
-	// Re-run BFS to fill in the reset cells.
-	// Clear the frontier set — ward changes invalidate all previous
-	// frontier knowledge.  We rebuild it from scratch below.
+	// Rebuild the frontier set: find all unblocked cells with valid
+	// depth that border unblocked depth=-1 cells.
 	_frontier_set.clear();
-	_run_bfs_incremental(_bfs_computed_depth > 0 ? _bfs_computed_depth : BFS_LOOKAHEAD);
-
-	// The BFS above only visited cells that needed depth assignment.
-	// Already-swept cells (depth ≤ _sweep) were skipped because they
-	// already have valid depths, so they were never added to `visited`.
-	// This means _run_bfs_incremental's own _frontier_set rebuild
-	// missed the deep frontier cells that border the remaining
-	// unvisited territory.  Do a full scan of all cells with valid
-	// depth to correctly rebuild the frontier set.
-	_frontier_set.clear();
+	float max_frontier_depth = 0.0f;
 	for (const auto &E : _cells) {
 		if (E.value.blocked_by_ward || E.value.depth < 0) {
 			continue;
@@ -1039,11 +1037,22 @@ void SporeManager::on_wards_changed() {
 			const Cell *nc = _cells.getptr(nk);
 			if (nc && !nc->blocked_by_ward && nc->depth < 0) {
 				_frontier_set.insert(E.key);
+				if ((float)E.value.depth > max_frontier_depth) {
+					max_frontier_depth = (float)E.value.depth;
+				}
 				break;
 			}
 		}
 	}
 
+	// Run one BFS extension right now, seeded from the rebuilt frontier.
+	// Target is far enough ahead to cover the deepest frontier cell plus
+	// LOOKAHEAD, so the BFS actually propagates beyond the frontier rather
+	// than filtering all seeds (depth > target → skip).
+	if (!_frontier_set.is_empty() || !changed_keys.is_empty()) {
+		float target = MAX(max_frontier_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD * 2);
+		_run_bfs_incremental(target);
+	}
 	_sweep_dirty = true;
 }
 
