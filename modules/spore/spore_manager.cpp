@@ -1018,9 +1018,32 @@ void SporeManager::on_wards_changed() {
 
 	// Re-run BFS to fill in the reset cells.
 	// Clear the frontier set — ward changes invalidate all previous
-	// frontier knowledge.  The BFS will rebuild it from scratch.
+	// frontier knowledge.  We rebuild it from scratch below.
 	_frontier_set.clear();
 	_run_bfs_incremental(_bfs_computed_depth > 0 ? _bfs_computed_depth : BFS_LOOKAHEAD);
+
+	// The BFS above only visited cells that needed depth assignment.
+	// Already-swept cells (depth ≤ _sweep) were skipped because they
+	// already have valid depths, so they were never added to `visited`.
+	// This means _run_bfs_incremental's own _frontier_set rebuild
+	// missed the deep frontier cells that border the remaining
+	// unvisited territory.  Do a full scan of all cells with valid
+	// depth to correctly rebuild the frontier set.
+	_frontier_set.clear();
+	for (const auto &E : _cells) {
+		if (E.value.blocked_by_ward || E.value.depth < 0) {
+			continue;
+		}
+		for (const Vector3i &n : _bfs_neighbors) {
+			Vector3i nk = E.key + n;
+			const Cell *nc = _cells.getptr(nk);
+			if (nc && !nc->blocked_by_ward && nc->depth < 0) {
+				_frontier_set.insert(E.key);
+				break;
+			}
+		}
+	}
+
 	_sweep_dirty = true;
 }
 
