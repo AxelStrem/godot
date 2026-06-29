@@ -783,6 +783,9 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 			}
 		}
 	}
+
+	print_line(vformat("SporeManager::_run_bfs_incremental  target=%.1f  assigned=%d  frontier=%d  sweep=%.1f",
+		p_target_depth, visited.size(), _frontier_set.size(), _sweep));
 }
 
 void SporeManager::_build_sweep_list() {
@@ -968,13 +971,12 @@ void SporeManager::mark_cell_spawned(const Vector3i &p_grid_key) {
 
 void SporeManager::on_wards_changed() {
 	// Save old blocked state before recomputing.
-	Vector<Vector3i> changed_keys; // cells whose blocked status changed
 	HashMap<Vector3i, bool> old_blocked;
 	for (const auto &E : _cells) {
 		old_blocked[E.key] = E.value.blocked_by_ward;
 	}
 
-	// Recompute blocked_by_ward for all cells.
+	// Recompute blocked_by_ward for all cells using the spatial grid.
 	if (_wards.is_empty()) {
 		for (auto &E : _cells) {
 			E.value.blocked_by_ward = false;
@@ -1009,19 +1011,54 @@ void SporeManager::on_wards_changed() {
 		}
 	}
 
-	// Find cells whose blocked status actually changed, and reset their
-	// depths.  Cells unaffected by the ward keep their depths so the
-	// sweep can continue uninterrupted.
+	// First pass: record which cells changed blocked status AND capture
+	// their old depths BEFORE we reset them.  We need the minimum depth
+	// among newly-blocked cells so we can also reset cells behind them
+	// (which may have stale depths that let the sweep bypass the ward).
+	int newly_blocked_count = 0;
+	int newly_unblocked_count = 0;
+	int min_blocked_old_depth = INT_MAX; // minimum depth among cells that became blocked
+
 	for (auto &E : _cells) {
 		bool was_blocked = old_blocked.has(E.key) ? old_blocked[E.key] : false;
 		if (E.value.blocked_by_ward != was_blocked) {
+			if (E.value.blocked_by_ward) {
+				newly_blocked_count++;
+				if (E.value.depth >= 0 && E.value.depth < min_blocked_old_depth) {
+					min_blocked_old_depth = E.value.depth;
+				}
+			} else {
+				newly_unblocked_count++;
+			}
+			// Reset depth for every cell whose blocked status changed.
 			E.value.depth = -1;
-			changed_keys.push_back(E.key);
 		}
-		// Also ensure currently-blocked cells have no depth (belt-and-suspenders).
+		// Belt-and-suspenders: all blocked cells must have no depth.
 		if (E.value.blocked_by_ward) {
 			E.value.depth = -1;
 		}
+	}
+
+	// When wards activated (cells became blocked), any cell at a depth
+	// ≥ the ward's minimum depth could now be UNREACHABLE or need a
+	// longer path around the ward.  Reset them all so the BFS recomputes
+	// correct depths — stale depths behind a ward are the #1 cause of
+	// spores "walking through" an active ward.
+	int behind_reset_count = 0;
+	if (min_blocked_old_depth < INT_MAX) {
+		for (auto &E : _cells) {
+			if (!E.value.blocked_by_ward && E.value.depth >= min_blocked_old_depth) {
+				E.value.depth = -1;
+				behind_reset_count++;
+			}
+		}
+	}
+
+	if (newly_blocked_count > 0 || newly_unblocked_count > 0) {
+		print_line(vformat("SporeManager::on_wards_changed  blocked:+%d  unblocked:+%d  min_depth=%d  behind_reset=%d",
+			newly_blocked_count, newly_unblocked_count,
+			min_blocked_old_depth < INT_MAX ? min_blocked_old_depth : -1,
+			behind_reset_count));
 	}
 
 	// Rebuild the frontier set: find all unblocked cells with valid
@@ -1047,10 +1084,11 @@ void SporeManager::on_wards_changed() {
 
 	// Run one BFS extension right now, seeded from the rebuilt frontier.
 	// Target is far enough ahead to cover the deepest frontier cell plus
-	// LOOKAHEAD, so the BFS actually propagates beyond the frontier rather
-	// than filtering all seeds (depth > target → skip).
-	if (!_frontier_set.is_empty() || !changed_keys.is_empty()) {
+	// LOOKAHEAD — otherwise seeds with depth > target get filtered out.
+	if (!_frontier_set.is_empty() || newly_blocked_count > 0 || newly_unblocked_count > 0) {
 		float target = MAX(max_frontier_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD * 2);
+		print_line(vformat("SporeManager::on_wards_changed  BFS target=%.1f  frontier=%d  max_fdepth=%.1f  sweep=%.1f",
+			target, _frontier_set.size(), max_frontier_depth, _sweep));
 		_run_bfs_incremental(target);
 	}
 	_sweep_dirty = true;
