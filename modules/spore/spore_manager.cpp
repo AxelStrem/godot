@@ -578,6 +578,19 @@ void SporeManager::add_cell(const Vector3i &p_grid_key, const Vector3 &p_world_p
 	c.spawned = false;
 	c.blocked_by_ward = false;
 	_cells.insert(p_grid_key, c);
+	_cells_added = true;
+
+	// New cell may give existing visited neighbours a new unvisited
+	// neighbour.  Add those neighbours to the frontier set so the
+	// next BFS extension can seed from them directly.
+	_init_bfs_neighbors();
+	for (const Vector3i &n : _bfs_neighbors) {
+		Vector3i nk = p_grid_key + n;
+		const Cell *nc = _cells.getptr(nk);
+		if (nc && !nc->blocked_by_ward && nc->depth >= 0) {
+			_frontier_set.insert(nk);
+		}
+	}
 }
 
 void SporeManager::remove_cell(const Vector3i &p_grid_key) {
@@ -677,35 +690,34 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 		}
 	}
 
-	// Also seed from existing frontier cells (already-visited cells
-	// that sit at the edge of the computed region).  These carry
-	// their existing depth forward so the new BFS extends outward.
-	{
-		for (const auto &E_scan : _cells) {
-			const Vector3i &key = E_scan.key;
-			const Cell &cell_ref = E_scan.value;
-			if (cell_ref.blocked_by_ward || cell_ref.depth < 0) {
+	// Seed from the incrementally maintained frontier set.
+	// This replaces the old O(cells × 124) full scan — we only check
+	// cells that are KNOWN to have unvisited neighbours.
+	if (!_frontier_set.is_empty()) {
+		for (const Vector3i &key : _frontier_set) {
+			if (visited.has(key)) {
 				continue;
 			}
-			if (cell_ref.depth > (int)p_target_depth) {
-				continue; // beyond target, not yet needed
+			const Cell *cell_ref = _cells.getptr(key);
+			if (!cell_ref || cell_ref->blocked_by_ward || cell_ref->depth < 0) {
+				continue;
 			}
-			if (visited.has(key)) {
-				continue; // already seeded from entries
+			if (cell_ref->depth > (int)p_target_depth) {
+				continue;
 			}
-			// Check if this cell is at the frontier — it has at least
-			// one unvisited neighbour, or it's newly unblocked.
-			bool is_frontier = false;
+			// Verify it still has at least one unvisited neighbour
+			// (ward changes may have invalidated it).
+			bool still_frontier = false;
 			for (const Vector3i &n : _bfs_neighbors) {
 				Vector3i nk = key + n;
 				const Cell *nc = _cells.getptr(nk);
 				if (nc && !nc->blocked_by_ward && nc->depth < 0) {
-					is_frontier = true;
+					still_frontier = true;
 					break;
 				}
 			}
-			if (is_frontier) {
-				wave.push_back({ key, cell_ref.depth });
+			if (still_frontier) {
+				wave.push_back({ key, cell_ref->depth });
 				visited.insert(key);
 			}
 		}
@@ -752,6 +764,25 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 
 	_bfs_computed_depth = p_target_depth;
 	_sweep_dirty = true;
+
+	// Rebuild _frontier_set from the visited set (cells touched in
+	// this BFS run only, NOT the whole cell graph).  Any visited cell
+	// that still has an unvisited neighbour is a frontier candidate.
+	_frontier_set.clear();
+	for (const Vector3i &key : visited) {
+		const Cell *cell_ref = _cells.getptr(key);
+		if (!cell_ref || cell_ref->blocked_by_ward || cell_ref->depth < 0) {
+			continue;
+		}
+		for (const Vector3i &n : _bfs_neighbors) {
+			Vector3i nk = key + n;
+			const Cell *nc = _cells.getptr(nk);
+			if (nc && !nc->blocked_by_ward && nc->depth < 0) {
+				_frontier_set.insert(key);
+				break;
+			}
+		}
+	}
 }
 
 void SporeManager::_build_sweep_list() {
@@ -845,9 +876,14 @@ Dictionary SporeManager::advance_sweeps(float p_delta) {
 		return result;
 	}
 
-	// Lazy BFS: if the sweep is close to computed_max_depth,
-	// run another incremental wave ahead.
-	if (_sweep + BFS_LOOKAHEAD * 0.5f > _bfs_computed_depth) {
+	// Lazy BFS: if new cells were added since last sweep, force one
+	// incremental BFS extension so they get discovered.  Otherwise,
+	// run when the sweep is close to computed_max_depth.
+	if (_cells_added) {
+		float target = MAX(_bfs_computed_depth, _sweep + BFS_LOOKAHEAD);
+		_run_bfs_incremental(target);
+		_cells_added = false;
+	} else if (_sweep + BFS_LOOKAHEAD * 0.5f > _bfs_computed_depth) {
 		_run_bfs_incremental(_bfs_computed_depth + BFS_LOOKAHEAD);
 	}
 
@@ -936,14 +972,31 @@ void SporeManager::on_wards_changed() {
 			E.value.blocked_by_ward = false;
 		}
 	} else {
-		// Check every cell against all wards.
+		// Use the ward spatial grid to check only nearby wards per cell
+		// instead of brute-force O(cells × wards).
 		for (auto &E : _cells) {
 			bool blocked = false;
 			Vector3 pos = E.value.world_pos;
-			for (const Ward &w : _wards) {
-				if (pos.distance_to(w.pos) < w.radius) {
-					blocked = true;
-					break;
+			Vector3i center_key(
+				int(Math::floor(pos.x / WARD_CELL_SIZE)),
+				int(Math::floor(pos.y / WARD_CELL_SIZE)),
+				int(Math::floor(pos.z / WARD_CELL_SIZE))
+			);
+			for (int dx = -1; dx <= 1 && !blocked; dx++) {
+				for (int dy = -1; dy <= 1 && !blocked; dy++) {
+					for (int dz = -1; dz <= 1 && !blocked; dz++) {
+						Vector3i key = center_key + Vector3i(dx, dy, dz);
+						const Vector<int32_t> *ward_ids = _ward_grid.getptr(key);
+						if (!ward_ids) {
+							continue;
+						}
+						for (int32_t wid : *ward_ids) {
+							if (pos.distance_squared_to(_wards[wid].pos) < _wards[wid].radius * _wards[wid].radius) {
+								blocked = true;
+								break;
+							}
+						}
+					}
 				}
 			}
 			E.value.blocked_by_ward = blocked;
@@ -964,6 +1017,9 @@ void SporeManager::on_wards_changed() {
 	}
 
 	// Re-run BFS to fill in the reset cells.
+	// Clear the frontier set — ward changes invalidate all previous
+	// frontier knowledge.  The BFS will rebuild it from scratch.
+	_frontier_set.clear();
 	_run_bfs_incremental(_bfs_computed_depth > 0 ? _bfs_computed_depth : BFS_LOOKAHEAD);
 	_sweep_dirty = true;
 }
@@ -996,6 +1052,10 @@ float SporeManager::get_spore_res() const {
 void SporeManager::set_start_cell(const Vector3i &p_grid_key) {
 	_start_cell = p_grid_key;
 	_has_start_cell = true;
+}
+
+void SporeManager::notify_cells_added() {
+	_cells_added = true;
 }
 
 int SporeManager::get_bfs_neighbor_count() const {
@@ -1080,6 +1140,7 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_spore_res", "res"), &SporeManager::set_spore_res);
 	ClassDB::bind_method(D_METHOD("get_spore_res"), &SporeManager::get_spore_res);
 	ClassDB::bind_method(D_METHOD("set_start_cell", "grid_key"), &SporeManager::set_start_cell);
+	ClassDB::bind_method(D_METHOD("notify_cells_added"), &SporeManager::notify_cells_added);
 	ClassDB::bind_method(D_METHOD("get_bfs_neighbor_count"), &SporeManager::get_bfs_neighbor_count);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "spore_res"), "set_spore_res", "get_spore_res");
 }
