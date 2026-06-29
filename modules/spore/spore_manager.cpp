@@ -636,10 +636,22 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 	Vector<BfsFrontier> wave;
 	HashSet<Vector3i> visited;
 
+	// Seed from the manual start cell (if set) at depth 0.
+	// This takes priority over entry-cell seeding — used when the
+	// first chamber has no level_in_pos (e.g. chamber_0 is pre-placed).
+	if (_has_start_cell) {
+		Cell *sc = _cells.getptr(_start_cell);
+		if (sc && !sc->blocked_by_ward) {
+			sc->depth = 0;
+			wave.push_back({ _start_cell, 0 });
+			visited.insert(_start_cell);
+		}
+	}
+
 	// Seed from entry cells of the first chamber only.
 	// Subsequent chambers are reached by the BFS flowing through
 	// the connected cell graph from previous chambers.
-	{
+	if (!_has_start_cell || wave.is_empty()) {
 		int first_chamber = 0x7FFFFFFF;
 		for (const auto &E : _entry_cells) {
 			if (E.key < first_chamber) {
@@ -969,6 +981,11 @@ float SporeManager::get_spore_res() const {
 	return _spore_res;
 }
 
+void SporeManager::set_start_cell(const Vector3i &p_grid_key) {
+	_start_cell = p_grid_key;
+	_has_start_cell = true;
+}
+
 int SporeManager::get_bfs_neighbor_count() const {
 	return _bfs_neighbors.size();
 }
@@ -1050,6 +1067,7 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_cell_blocked", "grid_key"), &SporeManager::is_cell_blocked);
 	ClassDB::bind_method(D_METHOD("set_spore_res", "res"), &SporeManager::set_spore_res);
 	ClassDB::bind_method(D_METHOD("get_spore_res"), &SporeManager::get_spore_res);
+	ClassDB::bind_method(D_METHOD("set_start_cell", "grid_key"), &SporeManager::set_start_cell);
 	ClassDB::bind_method(D_METHOD("get_bfs_neighbor_count"), &SporeManager::get_bfs_neighbor_count);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "spore_res"), "set_spore_res", "get_spore_res");
 }
