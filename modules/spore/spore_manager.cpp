@@ -786,10 +786,23 @@ void SporeManager::_build_sweep_list() {
 		}
 	}
 
-	// Reset sweep cursor if this is a fresh build.
-	if (_sweep_idx <= 0 || _sweep_idx > _sorted_cells.size()) {
-		_sweep_idx = 0;
-		_sweep = 0.0f;
+	// Skip past already-spawned cells so the sweep doesn't waste time
+	// re-traversing them after a re-sync (e.g. when new chambers are added).
+	_sweep_idx = 0;
+	while (_sweep_idx < _sorted_cells.size()) {
+		const Cell *c = _cells.getptr(_sorted_cells[_sweep_idx]);
+		if (!c || !c->spawned) {
+			break;
+		}
+		_sweep_idx++;
+	}
+	// Set sweep to the depth of the first unspawned cell (or 0 if none).
+	_sweep = 0.0f;
+	if (_sweep_idx < _sorted_cells.size()) {
+		const Cell *c = _cells.getptr(_sorted_cells[_sweep_idx]);
+		if (c) {
+			_sweep = (float)c->depth;
+		}
 	}
 	_sweep_dirty = false;
 }
@@ -805,14 +818,7 @@ void SporeManager::propagate_depths() {
 	// has cells deeper than a few hundred.
 	_run_bfs_incremental(10000.0f);
 
-	// Reset sweep cursor since the sorted list is being rebuilt.
-	// Old spawned cells will be skipped by the spawned check in
-	// advance_sweeps; the sweep will "rush" through them and pick
-	// up at the first unspawned cell.
-	_sweep = 0.0f;
-	_sweep_idx = 0;
-
-	// Build the sorted sweep list.
+	// Build the sorted sweep list (skips already-spawned cells).
 	_build_sweep_list();
 
 	// Compute per-chamber speeds if not already set.
