@@ -636,16 +636,26 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 	Vector<BfsFrontier> wave;
 	HashSet<Vector3i> visited;
 
-	// Seed from all entry cells.
-	for (const auto &E : _entry_cells) {
-		for (const Vector3i &key : E.value) {
-			Cell *c = _cells.getptr(key);
-			if (!c || c->blocked_by_ward) {
-				continue;
+	// Seed from entry cells of the first chamber only.
+	// Subsequent chambers are reached by the BFS flowing through
+	// the connected cell graph from previous chambers.
+	{
+		int first_chamber = 0x7FFFFFFF;
+		for (const auto &E : _entry_cells) {
+			if (E.key < first_chamber) {
+				first_chamber = E.key;
 			}
-			c->depth = 0;
-			wave.push_back({ key, 0 });
-			visited.insert(key);
+		}
+		if (_entry_cells.has(first_chamber)) {
+			for (const Vector3i &key : _entry_cells[first_chamber]) {
+				Cell *c = _cells.getptr(key);
+				if (!c || c->blocked_by_ward) {
+					continue;
+				}
+				c->depth = 0;
+				wave.push_back({ key, 0 });
+				visited.insert(key);
+			}
 		}
 	}
 
@@ -736,7 +746,7 @@ void SporeManager::_build_sweep_list() {
 	int max_depth = -1;
 
 	for (const auto &E : _cells) {
-		if (E.value.depth > 0 && !E.value.blocked_by_ward) {
+		if (E.value.depth >= 0 && !E.value.blocked_by_ward) {
 			int d = E.value.depth;
 			buckets[d].push_back(E.key);
 			if (d < min_depth) {
@@ -761,7 +771,7 @@ void SporeManager::_build_sweep_list() {
 	// Reset sweep cursor if this is a fresh build.
 	if (_sweep_idx <= 0 || _sweep_idx > _sorted_cells.size()) {
 		_sweep_idx = 0;
-		_sweep = 1.0f;
+		_sweep = 0.0f;
 	}
 	_sweep_dirty = false;
 }
@@ -781,7 +791,7 @@ void SporeManager::propagate_depths() {
 	// Old spawned cells will be skipped by the spawned check in
 	// advance_sweeps; the sweep will "rush" through them and pick
 	// up at the first unspawned cell.
-	_sweep = 1.0f;
+	_sweep = 0.0f;
 	_sweep_idx = 0;
 
 	// Build the sorted sweep list.
