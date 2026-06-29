@@ -96,6 +96,13 @@ private:
 	// Grid resolution (mirrors GDScript spore_res constant, default 1.0).
 	float _spore_res = 1.0f;
 
+	// Manual start cell for BFS seeding (set via GDScript when the
+	// first chamber has no level_in_pos, e.g. pre-placed chamber_0).
+	// When set, this cell seeds the BFS at depth 0 regardless of
+	// entry cell configuration.
+	Vector3i _start_cell;
+	bool _has_start_cell = false;
+
 	// BFS neighbours: 124 Chebyshev-distance-2 offsets so the flood-fill
 	// bridges 1-cell gaps in the collision geometry.
 	Vector<Vector3i> _bfs_neighbors;
@@ -230,6 +237,11 @@ public:
 	// Grid resolution (mirrors GDScript spore_res).
 	void set_spore_res(float p_res);
 	float get_spore_res() const;
+
+	// Manual BFS start cell.  When set, the BFS seeds from this cell
+	// at depth 0 instead of (or in addition to) entry cells.
+	// Used when the first chamber has no level_in_pos (e.g. chamber_0).
+	void set_start_cell(const Vector3i &p_grid_key);
 
 	// BFS neighbour count (for debugging / profiling).
 	int get_bfs_neighbor_count() const;
