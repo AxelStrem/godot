@@ -112,6 +112,12 @@ private:
 	// When the sweep cursor approaches computed_max_depth, we run
 	// another BFS wave to look ahead LOOKAHEAD depth-units.
 	float _bfs_computed_depth = 0.0f;
+	bool _cells_added = false;
+	// Cells known to have at least one unvisited (depth=-1) neighbour.
+	// Updated incrementally by add_cell(), _run_bfs_incremental(),
+	// and on_wards_changed().  Eliminates the O(cells × 124) frontier
+	// scan that used to run on every BFS extension.
+	HashSet<Vector3i> _frontier_set;
 	static constexpr float BFS_LOOKAHEAD = 20.0f;
 
 	// ---- BFS / sweep helpers ----
@@ -242,6 +248,10 @@ public:
 	// at depth 0 instead of (or in addition to) entry cells.
 	// Used when the first chamber has no level_in_pos (e.g. chamber_0).
 	void set_start_cell(const Vector3i &p_grid_key);
+
+	// Called by GDScript after syncing new cells (replaces full
+	// propagate_depths() for incremental chamber loading).
+	void notify_cells_added();
 
 	// BFS neighbour count (for debugging / profiling).
 	int get_bfs_neighbor_count() const;
