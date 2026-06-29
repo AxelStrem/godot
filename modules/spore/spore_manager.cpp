@@ -648,18 +648,23 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 		}
 	}
 
-	// Seed from entry cells of the first chamber only.
+	// Seed from entry cells of the first non-empty chamber.
 	// Subsequent chambers are reached by the BFS flowing through
 	// the connected cell graph from previous chambers.
 	if (!_has_start_cell || wave.is_empty()) {
-		int first_chamber = 0x7FFFFFFF;
+		// Collect chambers in sorted order.
+		Vector<int32_t> chambers;
 		for (const auto &E : _entry_cells) {
-			if (E.key < first_chamber) {
-				first_chamber = E.key;
-			}
+			chambers.push_back(E.key);
 		}
-		if (_entry_cells.has(first_chamber)) {
-			for (const Vector3i &key : _entry_cells[first_chamber]) {
+		chambers.sort();
+
+		for (int32_t ch : chambers) {
+			const Vector<Vector3i> *entries = _entry_cells.getptr(ch);
+			if (!entries || entries->is_empty()) {
+				continue;
+			}
+			for (const Vector3i &key : *entries) {
 				Cell *c = _cells.getptr(key);
 				if (!c || c->blocked_by_ward) {
 					continue;
@@ -668,6 +673,7 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 				wave.push_back({ key, 0 });
 				visited.insert(key);
 			}
+			break; // Only seed from the first non-empty chamber.
 		}
 	}
 
