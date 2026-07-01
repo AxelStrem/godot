@@ -28,6 +28,8 @@ public:
 		STATE_CONNECTING,
 		STATE_ACTIVE,
 		STATE_DYING,
+		STATE_MATURE,     // Reached full size; stays with subtle pulse (no lifetime death).
+		STATE_SHRINKING,  // Shrinking to 0 before removal (visual polish for overlap cleanup).
 	};
 
 	enum Profile {
@@ -58,6 +60,27 @@ private:
 	// the parent tentacle grows toward it. Defaults to 1.5s.
 	float _start_delay = 1.5f;
 	float _force_limit_shrink_speed = 1.5f; // units/sec radius shrinks toward ward limit
+
+	// ---- Mature phase & overlap cleanup (tunable from GDScript) ----
+	// When enabled, spores survive past their old hard lifetime and
+	// enter a mature phase at full size with subtle continuous pulse.
+	// Overlap detection periodically culls redundant spores by shrinking
+	// them first so the player sees them recede into the spore mass.
+	bool _mature_phase_enabled = true;
+
+	bool _overlap_cleanup_enabled = true;
+	float _overlap_shrink_fraction = 0.5f;   // fraction of overlapping pairs to cull (0–1)
+	float _overlap_shrink_duration = 1.0f;   // seconds to shrink a spore before freeing it
+	float _overlap_radius = 5.0f;            // centre-distance threshold for "overlapping"
+	float _overlap_interval = 3.0f;          // seconds between overlap-detection passes
+	int _overlap_min_count = 10;             // minimum spores in chamber before cleanup runs
+	float _overlap_timer = 0.0f;             // accumulator for periodic checks
+
+	// Per-spore shrink state for visual removal.
+	// _shrink_times[id] = total_time when shrinking began; -1 if not shrinking.
+	// _shrink_start_radii[id] = radius at the moment shrinking started.
+	Vector<float> _shrink_times;
+	Vector<float> _shrink_start_radii;
 
 	// ---- Cell graph (replaces GDScript spore_loc Dictionary) ----
 	// All cells live in one combined HashMap.  Chambers share the same
@@ -143,6 +166,7 @@ private:
 	void _free_id(int32_t p_id);
 	float _compute_radius(float p_elapsed, int p_profile, float p_seed_offset) const;
 	void _rebuild_ward_grid();
+	void _detect_overlaps(double p_total_time);
 
 protected:
 	static void _bind_methods();
@@ -154,7 +178,9 @@ public:
 	// ---- Spore lifecycle (called from GDScript) ----
 	int32_t add_spore(const Vector3 &p_pos, int p_profile = PROFILE_NORMAL, int p_chamber_id = -1);
 	void remove_spore(int32_t p_id);
-	void remove_spores_in_chamber(int p_chamber_id);
+	void remove_spores_in_chamber(int p_chamber_id, bool p_shrink_first = false);
+	void shrink_spore(int32_t p_id);
+	void shrink_spores_in_chamber(int p_chamber_id);
 	void set_spore_state(int32_t p_id, int p_state);
 	int get_spore_state(int32_t p_id) const;
 	void set_spore_profile(int32_t p_id, int p_profile);
@@ -187,6 +213,22 @@ public:
 	float get_spore_force_limit(int32_t p_id) const;
 	void set_force_limit_shrink_speed(float p_speed);
 	float get_force_limit_shrink_speed() const;
+
+	// ---- Mature phase & overlap cleanup config ----
+	void set_mature_phase_enabled(bool p_enabled);
+	bool is_mature_phase_enabled() const;
+	void set_overlap_cleanup_enabled(bool p_enabled);
+	bool is_overlap_cleanup_enabled() const;
+	void set_overlap_shrink_fraction(float p_fraction);
+	float get_overlap_shrink_fraction() const;
+	void set_overlap_shrink_duration(float p_duration);
+	float get_overlap_shrink_duration() const;
+	void set_overlap_radius(float p_radius);
+	float get_overlap_radius() const;
+	void set_overlap_interval(float p_interval);
+	float get_overlap_interval() const;
+	void set_overlap_min_count(int p_count);
+	int get_overlap_min_count() const;
 
 	// ---- For tentacle parent-finding (distance-filtered) ----
 	// Returns spore IDs within `p_radius` of `p_pos`, performing actual

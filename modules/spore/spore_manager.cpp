@@ -64,6 +64,8 @@ int SporeManager::_allocate_id() {
 		_profiles.push_back(PROFILE_NORMAL);
 		_chamber_ids.push_back(-1);
 		_alive.push_back(false);
+		_shrink_times.push_back(-1.0f);
+		_shrink_start_radii.push_back(0.0f);
 		return id;
 	}
 	int32_t id = _free_list[_free_list.size() - 1];
@@ -74,6 +76,7 @@ int SporeManager::_allocate_id() {
 void SporeManager::_free_id(int32_t p_id) {
 	_alive.set(p_id, false);
 	_states.set(p_id, STATE_DEAD);
+	_shrink_times.set(p_id, -1.0f);
 	_free_list.push_back(p_id);
 }
 
@@ -129,6 +132,8 @@ int32_t SporeManager::add_spore(const Vector3 &p_pos, int p_profile, int p_chamb
 	_spawn_times.set(id, -1.0f); // Will be set by the first update() call.
 	_radii.set(id, 0.0001f);     // Reset stale radius from recycled ID.
 	_force_limits.set(id, 0.0f); // Reset stale force-limit from recycled ID.
+	_shrink_times.set(id, -1.0f); // Reset stale shrink state from recycled ID.
+	_shrink_start_radii.set(id, 0.0f);
 	_seed_offsets.set(id, Math::randf() * 6.2831853f);
 	_states.set(id, STATE_START_DELAY);
 	_profiles.set(id, (p_profile == PROFILE_STRAIN) ? PROFILE_STRAIN : PROFILE_NORMAL);
@@ -154,7 +159,14 @@ void SporeManager::remove_spore(int32_t p_id) {
 	_free_id(p_id);
 }
 
-void SporeManager::remove_spores_in_chamber(int p_chamber_id) {
+void SporeManager::remove_spores_in_chamber(int p_chamber_id, bool p_shrink_first) {
+	if (p_shrink_first) {
+		// Transition to shrinking — update() will shrink them over
+		// _overlap_shrink_duration seconds and then free them.
+		shrink_spores_in_chamber(p_chamber_id);
+		return;
+	}
+
 	// Collect matching IDs first; removing while iterating would invalidate.
 	Vector<int32_t> to_remove;
 	for (int32_t id : _alive_ids) {
@@ -164,6 +176,79 @@ void SporeManager::remove_spores_in_chamber(int p_chamber_id) {
 	}
 	for (int32_t id : to_remove) {
 		remove_spore(id);
+	}
+}
+
+void SporeManager::shrink_spore(int32_t p_id) {
+	if (!_alive[p_id]) {
+		return;
+	}
+	// Don't double-shrink.
+	if (_states[p_id] == STATE_SHRINKING || _states[p_id] == STATE_DEAD) {
+		return;
+	}
+	_shrink_times.set(p_id, _last_total_time);
+	_shrink_start_radii.set(p_id, _radii[p_id]);
+	_states.set(p_id, STATE_SHRINKING);
+}
+
+void SporeManager::shrink_spores_in_chamber(int p_chamber_id) {
+	for (int32_t id : _alive_ids) {
+		if (_chamber_ids[id] == p_chamber_id) {
+			shrink_spore(id);
+		}
+	}
+}
+
+void SporeManager::_detect_overlaps(double p_total_time) {
+	// Group mature spores by chamber so O(n²) only runs per-chamber.
+	HashMap<int, Vector<int32_t>> chamber_spores;
+	for (int32_t id : _alive_ids) {
+		if (_states[id] == STATE_MATURE) {
+			chamber_spores[_chamber_ids[id]].push_back(id);
+		}
+	}
+
+	for (const auto &E : chamber_spores) {
+		const Vector<int32_t> &spores = E.value;
+		if (spores.size() < _overlap_min_count) {
+			continue;
+		}
+
+		// Find overlapping pairs: two mature spores whose centres are
+		// closer than _overlap_radius are considered redundant.
+		struct Pair {
+			int32_t a;
+			int32_t b;
+		};
+		Vector<Pair> pairs;
+
+		for (int i = 0; i < spores.size(); i++) {
+			for (int j = i + 1; j < spores.size(); j++) {
+				int32_t a_id = spores[i];
+				int32_t b_id = spores[j];
+				float dist = _positions[a_id].distance_to(_positions[b_id]);
+				if (dist < _overlap_radius) {
+					pairs.push_back({ a_id, b_id });
+				}
+			}
+		}
+
+		if (pairs.is_empty()) {
+			continue;
+		}
+
+		// Mark a fraction of overlapping spores for shrinking.
+		// Always pick the smaller spore from each pair as the victim.
+		int to_remove = MAX(1, int(pairs.size() * _overlap_shrink_fraction));
+		HashSet<int32_t> marked;
+		for (int i = 0; i < pairs.size() && marked.size() < to_remove; i++) {
+			int32_t victim = (_radii[pairs[i].a] < _radii[pairs[i].b]) ? pairs[i].a : pairs[i].b;
+			if (!marked.has(victim)) {
+				marked.insert(victim);
+				shrink_spore(victim);
+			}
+		}
 	}
 }
 
@@ -222,20 +307,45 @@ void SporeManager::update(double p_delta, double p_total_time) {
 
 		float elapsed = float(p_total_time - _spawn_times[id]);
 
-		// Lifecycle death: remove spores that have exceeded their lifetime.
-		float lifetime;
-		switch (_profiles[id]) {
-			case PROFILE_STRAIN:
-				lifetime = STRAIN_LIFETIME;
-				break;
-			default:
-				lifetime = NORMAL_LIFETIME;
-				break;
-		}
-		if (elapsed > lifetime) {
-			_grid.remove(id);
-			_free_id(id);
+		// ---- Shrinking spores (visual removal) ----
+		if (_states[id] == STATE_SHRINKING) {
+			float shrink_elapsed = float(p_total_time - _shrink_times[id]);
+			float t = MIN(shrink_elapsed / _overlap_shrink_duration, 1.0f);
+			float new_radius = _shrink_start_radii[id] * (1.0f - t);
+
+			// Update grid if level changed.
+			float old_radius = _radii[id];
+			int old_level = SporeGrid::_level_for_radius(old_radius);
+			int new_level = SporeGrid::_level_for_radius(new_radius);
+			_radii.set(id, new_radius);
+			if (old_level != new_level) {
+				_grid.migrate(id, _positions[id], old_radius, _positions[id], new_radius);
+			}
+
+			// Free when fully shrunk.
+			if (t >= 1.0f) {
+				_grid.remove(id);
+				_free_id(id);
+			}
 			continue;
+		}
+
+		// ---- Lifetime death (disabled when mature phase is on) ----
+		if (!_mature_phase_enabled) {
+			float lifetime;
+			switch (_profiles[id]) {
+				case PROFILE_STRAIN:
+					lifetime = STRAIN_LIFETIME;
+					break;
+				default:
+					lifetime = NORMAL_LIFETIME;
+					break;
+			}
+			if (elapsed > lifetime) {
+				_grid.remove(id);
+				_free_id(id);
+				continue;
+			}
 		}
 
 		float old_radius = _radii[id];
@@ -261,6 +371,31 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		int new_level = SporeGrid::_level_for_radius(new_radius);
 		if (old_level != new_level) {
 			_grid.migrate(id, _positions[id], old_radius, _positions[id], new_radius);
+		}
+
+		// ---- Transition to mature phase ----
+		// When a spore has completed all growth phases (Phase 4: at cap
+		// with subtle pulse), mark it as mature.  Only spores in ACTIVE
+		// or START_DELAY (which moved through CONNECTING→ACTIVE in
+		// GDScript) are eligible; DYING and SHRINKING are excluded.
+		if (_mature_phase_enabled) {
+			uint8_t st = _states[id];
+			if (st == STATE_ACTIVE || st == STATE_START_DELAY || st == STATE_CONNECTING) {
+				// Check if we've reached Phase 4 (past all three growth phases).
+				float growth_elapsed = elapsed - _start_delay;
+				if (growth_elapsed >= PHASE1_DURATION + PHASE2_DURATION + PHASE3_DURATION) {
+					_states.set(id, STATE_MATURE);
+				}
+			}
+		}
+	}
+
+	// ---- Periodic overlap cleanup ----
+	if (_overlap_cleanup_enabled && _mature_phase_enabled) {
+		_overlap_timer += float(p_delta);
+		if (_overlap_timer >= _overlap_interval) {
+			_overlap_timer = 0.0f;
+			_detect_overlaps(p_total_time);
 		}
 	}
 
@@ -475,6 +610,65 @@ void SporeManager::set_force_limit_shrink_speed(float p_speed) {
 
 float SporeManager::get_force_limit_shrink_speed() const {
 	return _force_limit_shrink_speed;
+}
+
+// ---- Mature phase & overlap cleanup config ----
+
+void SporeManager::set_mature_phase_enabled(bool p_enabled) {
+	_mature_phase_enabled = p_enabled;
+}
+
+bool SporeManager::is_mature_phase_enabled() const {
+	return _mature_phase_enabled;
+}
+
+void SporeManager::set_overlap_cleanup_enabled(bool p_enabled) {
+	_overlap_cleanup_enabled = p_enabled;
+}
+
+bool SporeManager::is_overlap_cleanup_enabled() const {
+	return _overlap_cleanup_enabled;
+}
+
+void SporeManager::set_overlap_shrink_fraction(float p_fraction) {
+	_overlap_shrink_fraction = CLAMP(p_fraction, 0.0f, 1.0f);
+}
+
+float SporeManager::get_overlap_shrink_fraction() const {
+	return _overlap_shrink_fraction;
+}
+
+void SporeManager::set_overlap_shrink_duration(float p_duration) {
+	_overlap_shrink_duration = MAX(p_duration, 0.1f);
+}
+
+float SporeManager::get_overlap_shrink_duration() const {
+	return _overlap_shrink_duration;
+}
+
+void SporeManager::set_overlap_radius(float p_radius) {
+	_overlap_radius = MAX(p_radius, 0.5f);
+}
+
+float SporeManager::get_overlap_radius() const {
+	return _overlap_radius;
+}
+
+void SporeManager::set_overlap_interval(float p_interval) {
+	_overlap_interval = MAX(p_interval, 0.5f);
+	_overlap_timer = 0.0f; // reset accumulator so next pass uses new interval
+}
+
+float SporeManager::get_overlap_interval() const {
+	return _overlap_interval;
+}
+
+void SporeManager::set_overlap_min_count(int p_count) {
+	_overlap_min_count = MAX(p_count, 1);
+}
+
+int SporeManager::get_overlap_min_count() const {
+	return _overlap_min_count;
 }
 
 // ---------------------------------------------------------------------------
@@ -1143,6 +1337,8 @@ void SporeManager::_bind_methods() {
 	BIND_ENUM_CONSTANT(STATE_CONNECTING);
 	BIND_ENUM_CONSTANT(STATE_ACTIVE);
 	BIND_ENUM_CONSTANT(STATE_DYING);
+	BIND_ENUM_CONSTANT(STATE_MATURE);
+	BIND_ENUM_CONSTANT(STATE_SHRINKING);
 
 	BIND_ENUM_CONSTANT(PROFILE_NORMAL);
 	BIND_ENUM_CONSTANT(PROFILE_STRAIN);
@@ -1150,6 +1346,9 @@ void SporeManager::_bind_methods() {
 	// Lifecycle
 	ClassDB::bind_method(D_METHOD("add_spore", "position", "profile", "chamber_id"), &SporeManager::add_spore, DEFVAL(PROFILE_NORMAL), DEFVAL(-1));
 	ClassDB::bind_method(D_METHOD("remove_spore", "id"), &SporeManager::remove_spore);
+	ClassDB::bind_method(D_METHOD("remove_spores_in_chamber", "chamber_id", "shrink_first"), &SporeManager::remove_spores_in_chamber, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("shrink_spore", "id"), &SporeManager::shrink_spore);
+	ClassDB::bind_method(D_METHOD("shrink_spores_in_chamber", "chamber_id"), &SporeManager::shrink_spores_in_chamber);
 	ClassDB::bind_method(D_METHOD("set_spore_state", "id", "state"), &SporeManager::set_spore_state);
 	ClassDB::bind_method(D_METHOD("get_spore_state", "id"), &SporeManager::get_spore_state);
 	ClassDB::bind_method(D_METHOD("set_spore_profile", "id", "profile"), &SporeManager::set_spore_profile);
@@ -1186,8 +1385,36 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_force_limit_shrink_speed"), &SporeManager::get_force_limit_shrink_speed);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "force_limit_shrink_speed"), "set_force_limit_shrink_speed", "get_force_limit_shrink_speed");
 
+	// Mature phase & overlap cleanup config
+	ClassDB::bind_method(D_METHOD("set_mature_phase_enabled", "enabled"), &SporeManager::set_mature_phase_enabled);
+	ClassDB::bind_method(D_METHOD("is_mature_phase_enabled"), &SporeManager::is_mature_phase_enabled);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mature_phase_enabled"), "set_mature_phase_enabled", "is_mature_phase_enabled");
+
+	ClassDB::bind_method(D_METHOD("set_overlap_cleanup_enabled", "enabled"), &SporeManager::set_overlap_cleanup_enabled);
+	ClassDB::bind_method(D_METHOD("is_overlap_cleanup_enabled"), &SporeManager::is_overlap_cleanup_enabled);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "overlap_cleanup_enabled"), "set_overlap_cleanup_enabled", "is_overlap_cleanup_enabled");
+
+	ClassDB::bind_method(D_METHOD("set_overlap_shrink_fraction", "fraction"), &SporeManager::set_overlap_shrink_fraction);
+	ClassDB::bind_method(D_METHOD("get_overlap_shrink_fraction"), &SporeManager::get_overlap_shrink_fraction);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "overlap_shrink_fraction"), "set_overlap_shrink_fraction", "get_overlap_shrink_fraction");
+
+	ClassDB::bind_method(D_METHOD("set_overlap_shrink_duration", "duration"), &SporeManager::set_overlap_shrink_duration);
+	ClassDB::bind_method(D_METHOD("get_overlap_shrink_duration"), &SporeManager::get_overlap_shrink_duration);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "overlap_shrink_duration"), "set_overlap_shrink_duration", "get_overlap_shrink_duration");
+
+	ClassDB::bind_method(D_METHOD("set_overlap_radius", "radius"), &SporeManager::set_overlap_radius);
+	ClassDB::bind_method(D_METHOD("get_overlap_radius"), &SporeManager::get_overlap_radius);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "overlap_radius"), "set_overlap_radius", "get_overlap_radius");
+
+	ClassDB::bind_method(D_METHOD("set_overlap_interval", "interval"), &SporeManager::set_overlap_interval);
+	ClassDB::bind_method(D_METHOD("get_overlap_interval"), &SporeManager::get_overlap_interval);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "overlap_interval"), "set_overlap_interval", "get_overlap_interval");
+
+	ClassDB::bind_method(D_METHOD("set_overlap_min_count", "count"), &SporeManager::set_overlap_min_count);
+	ClassDB::bind_method(D_METHOD("get_overlap_min_count"), &SporeManager::get_overlap_min_count);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "overlap_min_count"), "set_overlap_min_count", "get_overlap_min_count");
+
 	// Per-chamber
-	ClassDB::bind_method(D_METHOD("remove_spores_in_chamber", "chamber_id"), &SporeManager::remove_spores_in_chamber);
 	ClassDB::bind_method(D_METHOD("get_spore_transforms_for_chamber", "chamber_id"), &SporeManager::get_spore_transforms_for_chamber);
 	ClassDB::bind_method(D_METHOD("get_spore_count_for_chamber", "chamber_id"), &SporeManager::get_spore_count_for_chamber);
 	ClassDB::bind_method(D_METHOD("get_spore_chamber", "id"), &SporeManager::get_spore_chamber);
