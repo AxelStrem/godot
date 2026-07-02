@@ -295,6 +295,12 @@ public:
 	// propagate_depths() for incremental chamber loading).
 	void notify_cells_added();
 
+	// Force-compute depths for all cells (runs full BFS to 10000 depth
+	// units).  Does NOT reset the sweep cursor — only sets _sweep_dirty
+	// so the sweep list is rebuilt on the next advance_sweeps() call.
+	// Safe to call from GDScript at any time (e.g. console commands).
+	void ensure_depths_computed();
+
 	// BFS neighbour count (for debugging / profiling).
 	int get_bfs_neighbor_count() const;
 };
