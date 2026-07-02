@@ -685,6 +685,26 @@ float SporeManager::get_depth_noise_amplitude() const {
 	return _depth_noise_amplitude;
 }
 
+void SporeManager::set_depth_noise_frequency(float p_frequency) {
+	// Frequency changes require recomputing all cell noises and resorting.
+	_depth_noise_frequency = MAX(p_frequency, 0.001f);
+	for (auto &E : _cells) {
+		Cell &c = E.value;
+		float freq = _depth_noise_frequency;
+		float fx = (float)c.grid_key.x * freq;
+		float fy = (float)c.grid_key.y * freq;
+		float fz = (float)c.grid_key.z * freq;
+		float n = Math::sin(fx * 1.271f + fy * 3.117f + fz * 0.747f) * 0.6f;
+		n += Math::sin(fx * 2.695f + fy * 1.833f + fz * 4.219f) * 0.4f;
+		c.depth_noise = CLAMP(n, -1.0f, 1.0f);
+	}
+	_sweep_dirty = true;
+}
+
+float SporeManager::get_depth_noise_frequency() const {
+	return _depth_noise_frequency;
+}
+
 // ---------------------------------------------------------------------------
 // Per-chamber queries
 // ---------------------------------------------------------------------------
@@ -791,9 +811,10 @@ void SporeManager::add_cell(const Vector3i &p_grid_key, const Vector3 &p_world_p
 	// Multiplied by _depth_noise_amplitude at sort/activation time
 	// so amplitude changes take effect immediately.
 	{
-		float fx = (float)p_grid_key.x;
-		float fy = (float)p_grid_key.y;
-		float fz = (float)p_grid_key.z;
+		float freq = MAX(_depth_noise_frequency, 0.001f);
+		float fx = (float)p_grid_key.x * freq;
+		float fy = (float)p_grid_key.y * freq;
+		float fz = (float)p_grid_key.z * freq;
 		float n = Math::sin(fx * 1.271f + fy * 3.117f + fz * 0.747f) * 0.6f;
 		n += Math::sin(fx * 2.695f + fy * 1.833f + fz * 4.219f) * 0.4f;
 		c.depth_noise = CLAMP(n, -1.0f, 1.0f);
@@ -1451,6 +1472,10 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_depth_noise_amplitude", "amplitude"), &SporeManager::set_depth_noise_amplitude);
 	ClassDB::bind_method(D_METHOD("get_depth_noise_amplitude"), &SporeManager::get_depth_noise_amplitude);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "depth_noise_amplitude"), "set_depth_noise_amplitude", "get_depth_noise_amplitude");
+
+	ClassDB::bind_method(D_METHOD("set_depth_noise_frequency", "frequency"), &SporeManager::set_depth_noise_frequency);
+	ClassDB::bind_method(D_METHOD("get_depth_noise_frequency"), &SporeManager::get_depth_noise_frequency);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "depth_noise_frequency"), "set_depth_noise_frequency", "get_depth_noise_frequency");
 
 	// Per-chamber
 	ClassDB::bind_method(D_METHOD("get_spore_transforms_for_chamber", "chamber_id"), &SporeManager::get_spore_transforms_for_chamber);
