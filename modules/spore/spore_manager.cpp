@@ -1322,6 +1322,15 @@ void SporeManager::notify_cells_added() {
 	_cells_added = true;
 }
 
+void SporeManager::ensure_depths_computed() {
+	// Run full BFS to assign depth to every reachable cell.
+	// Does NOT touch _sweep or _sweep_idx — only sets _sweep_dirty
+	// so that advance_sweeps() rebuilds the sorted list on next call.
+	// The rebuild correctly skips already-spawned cells, so the sweep
+	// resumes exactly where it left off.
+	_run_bfs_incremental(10000.0f);
+}
+
 int SporeManager::get_bfs_neighbor_count() const {
 	return _bfs_neighbors.size();
 }
@@ -1438,6 +1447,7 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_spore_res"), &SporeManager::get_spore_res);
 	ClassDB::bind_method(D_METHOD("set_start_cell", "grid_key"), &SporeManager::set_start_cell);
 	ClassDB::bind_method(D_METHOD("notify_cells_added"), &SporeManager::notify_cells_added);
+	ClassDB::bind_method(D_METHOD("ensure_depths_computed"), &SporeManager::ensure_depths_computed);
 	ClassDB::bind_method(D_METHOD("get_bfs_neighbor_count"), &SporeManager::get_bfs_neighbor_count);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "spore_res"), "set_spore_res", "get_spore_res");
 }
