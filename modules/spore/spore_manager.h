@@ -80,8 +80,11 @@ private:
 	// Per-cell positional noise offsets the effective depth used for
 	// sweep sorting and activation, breaking up the straight-line
 	// frontier.  Amplitude is in depth-units (default 2.0 = ±2 cells).
-	// Set to 0 to disable; takes effect on next _build_sweep_list().
+	// Frequency scales the input coordinates to the noise hash
+	// (default 1.0; higher = more wiggles per unit distance).
+	// Set amplitude to 0 to disable; takes effect on next _build_sweep_list().
 	float _depth_noise_amplitude = 2.0f;
+	float _depth_noise_frequency = 1.0f;
 
 	// Per-spore shrink state for visual removal.
 	// _shrink_times[id] = total_time when shrinking began; -1 if not shrinking.
@@ -241,6 +244,8 @@ public:
 	// ---- Depth noise (frontier waviness) ----
 	void set_depth_noise_amplitude(float p_amplitude);
 	float get_depth_noise_amplitude() const;
+	void set_depth_noise_frequency(float p_frequency);
+	float get_depth_noise_frequency() const;
 
 	// ---- For tentacle parent-finding (distance-filtered) ----
 	// Returns spore IDs within `p_radius` of `p_pos`, performing actual
