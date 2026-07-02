@@ -705,6 +705,40 @@ float SporeManager::get_depth_noise_frequency() const {
 	return _depth_noise_frequency;
 }
 
+// ---- Spore handicap (rubber-banding) ----
+
+void SporeManager::set_player_chamber(int p_chamber) {
+	_player_chamber = p_chamber;
+}
+
+float SporeManager::get_spore_handicap() const {
+	return _spore_handicap;
+}
+
+void SporeManager::set_catch_up_threshold(int p_threshold) {
+	_catch_up_threshold = MAX(p_threshold, 0);
+}
+
+int SporeManager::get_catch_up_threshold() const {
+	return _catch_up_threshold;
+}
+
+void SporeManager::set_catch_up_speed_multiplier(float p_multiplier) {
+	_catch_up_speed_multiplier = MAX(p_multiplier, 1.0f);
+}
+
+float SporeManager::get_catch_up_speed_multiplier() const {
+	return _catch_up_speed_multiplier;
+}
+
+void SporeManager::set_payback_speed_multiplier(float p_multiplier) {
+	_payback_speed_multiplier = CLAMP(p_multiplier, 0.0f, 1.0f);
+}
+
+float SporeManager::get_payback_speed_multiplier() const {
+	return _payback_speed_multiplier;
+}
+
 // ---------------------------------------------------------------------------
 // Per-chamber queries
 // ---------------------------------------------------------------------------
@@ -1147,7 +1181,34 @@ Dictionary SporeManager::advance_sweeps(float p_delta) {
 		}
 	}
 
-	_sweep += speed * p_delta;
+	// ---- Spore handicap (rubber-banding) ----
+	// Determine the spore front's chamber from the next unspawned cell.
+	int spore_front_chamber = -1;
+	if (_sweep_idx < _sorted_cells.size()) {
+		const Cell *fc = _cells.getptr(_sorted_cells[_sweep_idx]);
+		if (fc) {
+			spore_front_chamber = fc->chamber_id;
+		}
+	}
+
+	float effective_speed = speed;
+
+	if (_spore_handicap > 0.001f && _player_chamber >= 0 &&
+			_player_chamber <= spore_front_chamber + _catch_up_threshold) {
+		// Payback: slow down spores and drain handicap.
+		effective_speed = speed * _payback_speed_multiplier;
+		_spore_handicap -= speed * (1.0f - _payback_speed_multiplier) * p_delta;
+		if (_spore_handicap < 0.0f) {
+			_spore_handicap = 0.0f;
+		}
+	} else if (_player_chamber >= 0 && spore_front_chamber >= 0 &&
+			_player_chamber > spore_front_chamber + _catch_up_threshold) {
+		// Catch-up: speed up spores and accumulate handicap.
+		effective_speed = speed * _catch_up_speed_multiplier;
+		_spore_handicap += speed * (_catch_up_speed_multiplier - 1.0f) * p_delta;
+	}
+
+	_sweep += effective_speed * p_delta;
 
 	// Activate all cells whose depth ≤ sweep, respecting ward blocking.
 	while (_sweep_idx < _sorted_cells.size()) {
@@ -1476,6 +1537,23 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_depth_noise_frequency", "frequency"), &SporeManager::set_depth_noise_frequency);
 	ClassDB::bind_method(D_METHOD("get_depth_noise_frequency"), &SporeManager::get_depth_noise_frequency);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "depth_noise_frequency"), "set_depth_noise_frequency", "get_depth_noise_frequency");
+
+	// Spore handicap (rubber-banding)
+	ClassDB::bind_method(D_METHOD("set_player_chamber", "chamber"), &SporeManager::set_player_chamber);
+	ClassDB::bind_method(D_METHOD("get_spore_handicap"), &SporeManager::get_spore_handicap);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "spore_handicap"), "", "get_spore_handicap");
+
+	ClassDB::bind_method(D_METHOD("set_catch_up_threshold", "threshold"), &SporeManager::set_catch_up_threshold);
+	ClassDB::bind_method(D_METHOD("get_catch_up_threshold"), &SporeManager::get_catch_up_threshold);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "catch_up_threshold"), "set_catch_up_threshold", "get_catch_up_threshold");
+
+	ClassDB::bind_method(D_METHOD("set_catch_up_speed_multiplier", "multiplier"), &SporeManager::set_catch_up_speed_multiplier);
+	ClassDB::bind_method(D_METHOD("get_catch_up_speed_multiplier"), &SporeManager::get_catch_up_speed_multiplier);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "catch_up_speed_multiplier"), "set_catch_up_speed_multiplier", "get_catch_up_speed_multiplier");
+
+	ClassDB::bind_method(D_METHOD("set_payback_speed_multiplier", "multiplier"), &SporeManager::set_payback_speed_multiplier);
+	ClassDB::bind_method(D_METHOD("get_payback_speed_multiplier"), &SporeManager::get_payback_speed_multiplier);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "payback_speed_multiplier"), "set_payback_speed_multiplier", "get_payback_speed_multiplier");
 
 	// Per-chamber
 	ClassDB::bind_method(D_METHOD("get_spore_transforms_for_chamber", "chamber_id"), &SporeManager::get_spore_transforms_for_chamber);
