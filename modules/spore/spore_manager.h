@@ -97,6 +97,12 @@ private:
 	float _catch_up_speed_multiplier = 5.0f; // speed multiplier during catch-up
 	float _payback_speed_multiplier = 0.5f;  // speed multiplier during payback
 
+	// ---- Chamber 0 speed boost ----
+	// Chamber 0 is the starting chamber; its progress sets the pace for
+	// the early game.  This multiplier is applied on top of the per-chamber
+	// speed set via set_chamber_speed().  Set to 1.0 for no change.
+	float _chamber_zero_speed_multiplier = 4.0f;
+
 	// Per-spore shrink state for visual removal.
 	// _shrink_times[id] = total_time when shrinking began; -1 if not shrinking.
 	// _shrink_start_radii[id] = radius at the moment shrinking started.
@@ -267,6 +273,10 @@ public:
 	float get_catch_up_speed_multiplier() const;
 	void set_payback_speed_multiplier(float p_multiplier);
 	float get_payback_speed_multiplier() const;
+
+	// ---- Chamber 0 speed boost ----
+	void set_chamber_zero_speed_multiplier(float p_multiplier);
+	float get_chamber_zero_speed_multiplier() const;
 
 	// ---- For tentacle parent-finding (distance-filtered) ----
 	// Returns spore IDs within `p_radius` of `p_pos`, performing actual
