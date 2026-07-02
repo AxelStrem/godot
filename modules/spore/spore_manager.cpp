@@ -739,6 +739,16 @@ float SporeManager::get_payback_speed_multiplier() const {
 	return _payback_speed_multiplier;
 }
 
+// ---- Chamber 0 speed boost ----
+
+void SporeManager::set_chamber_zero_speed_multiplier(float p_multiplier) {
+	_chamber_zero_speed_multiplier = MAX(p_multiplier, 0.0f);
+}
+
+float SporeManager::get_chamber_zero_speed_multiplier() const {
+	return _chamber_zero_speed_multiplier;
+}
+
 // ---------------------------------------------------------------------------
 // Per-chamber queries
 // ---------------------------------------------------------------------------
@@ -1178,6 +1188,9 @@ Dictionary SporeManager::advance_sweeps(float p_delta) {
 		if (c) {
 			const float *s = _chamber_speeds.getptr(c->chamber_id);
 			speed = s ? *s : 1.0f;
+			if (c->chamber_id == 0) {
+				speed *= _chamber_zero_speed_multiplier;
+			}
 		}
 	}
 
@@ -1233,6 +1246,9 @@ Dictionary SporeManager::advance_sweeps(float p_delta) {
 			if (prev && prev->chamber_id != c->chamber_id) {
 				const float *s = _chamber_speeds.getptr(c->chamber_id);
 				speed = s ? *s : 1.0f;
+				if (c->chamber_id == 0) {
+					speed *= _chamber_zero_speed_multiplier;
+				}
 			}
 		}
 
@@ -1554,6 +1570,11 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_payback_speed_multiplier", "multiplier"), &SporeManager::set_payback_speed_multiplier);
 	ClassDB::bind_method(D_METHOD("get_payback_speed_multiplier"), &SporeManager::get_payback_speed_multiplier);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "payback_speed_multiplier"), "set_payback_speed_multiplier", "get_payback_speed_multiplier");
+
+	// Chamber 0 speed boost
+	ClassDB::bind_method(D_METHOD("set_chamber_zero_speed_multiplier", "multiplier"), &SporeManager::set_chamber_zero_speed_multiplier);
+	ClassDB::bind_method(D_METHOD("get_chamber_zero_speed_multiplier"), &SporeManager::get_chamber_zero_speed_multiplier);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "chamber_zero_speed_multiplier"), "set_chamber_zero_speed_multiplier", "get_chamber_zero_speed_multiplier");
 
 	// Per-chamber
 	ClassDB::bind_method(D_METHOD("get_spore_transforms_for_chamber", "chamber_id"), &SporeManager::get_spore_transforms_for_chamber);
