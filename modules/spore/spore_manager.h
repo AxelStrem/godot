@@ -86,6 +86,17 @@ private:
 	float _depth_noise_amplitude = 2.0f;
 	float _depth_noise_frequency = 1.0f;
 
+	// ---- Spore handicap (rubber-banding) ----
+	// When the player pulls ahead of the spore front, spores temporarily
+	// speed up.  The extra depth they cover is stored as handicap.
+	// Later, when the player is close, spores slow down to "pay back"
+	// the handicap, so total clear time is unaffected.
+	float _spore_handicap = 0.0f;
+	int _player_chamber = -1;                // set by GDScript each frame (min across players in MP)
+	int _catch_up_threshold = 1;             // chambers ahead to trigger catch-up
+	float _catch_up_speed_multiplier = 5.0f; // speed multiplier during catch-up
+	float _payback_speed_multiplier = 0.5f;  // speed multiplier during payback
+
 	// Per-spore shrink state for visual removal.
 	// _shrink_times[id] = total_time when shrinking began; -1 if not shrinking.
 	// _shrink_start_radii[id] = radius at the moment shrinking started.
@@ -246,6 +257,16 @@ public:
 	float get_depth_noise_amplitude() const;
 	void set_depth_noise_frequency(float p_frequency);
 	float get_depth_noise_frequency() const;
+
+	// ---- Spore handicap (rubber-banding) ----
+	void set_player_chamber(int p_chamber);
+	float get_spore_handicap() const;
+	void set_catch_up_threshold(int p_threshold);
+	int get_catch_up_threshold() const;
+	void set_catch_up_speed_multiplier(float p_multiplier);
+	float get_catch_up_speed_multiplier() const;
+	void set_payback_speed_multiplier(float p_multiplier);
+	float get_payback_speed_multiplier() const;
 
 	// ---- For tentacle parent-finding (distance-filtered) ----
 	// Returns spore IDs within `p_radius` of `p_pos`, performing actual
