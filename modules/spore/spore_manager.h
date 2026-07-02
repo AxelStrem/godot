@@ -76,6 +76,13 @@ private:
 	int _overlap_min_count = 10;             // minimum spores in chamber before cleanup runs
 	float _overlap_timer = 0.0f;             // accumulator for periodic checks
 
+	// ---- Depth noise (frontier waviness) ----
+	// Per-cell positional noise offsets the effective depth used for
+	// sweep sorting and activation, breaking up the straight-line
+	// frontier.  Amplitude is in depth-units (default 2.0 = ±2 cells).
+	// Set to 0 to disable; takes effect on next _build_sweep_list().
+	float _depth_noise_amplitude = 2.0f;
+
 	// Per-spore shrink state for visual removal.
 	// _shrink_times[id] = total_time when shrinking began; -1 if not shrinking.
 	// _shrink_start_radii[id] = radius at the moment shrinking started.
@@ -93,6 +100,7 @@ private:
 		int32_t chamber_id = -1;
 		bool spawned = false;            // has _activate_spore_cell been called?
 		bool blocked_by_ward = false;    // inside an active ward → depth treated as INF
+		float depth_noise = 0.0f;        // normalized [-1,1] positional noise for frontier waviness
 	};
 
 	HashMap<Vector3i, Cell> _cells;
@@ -229,6 +237,10 @@ public:
 	float get_overlap_interval() const;
 	void set_overlap_min_count(int p_count);
 	int get_overlap_min_count() const;
+
+	// ---- Depth noise (frontier waviness) ----
+	void set_depth_noise_amplitude(float p_amplitude);
+	float get_depth_noise_amplitude() const;
 
 	// ---- For tentacle parent-finding (distance-filtered) ----
 	// Returns spore IDs within `p_radius` of `p_pos`, performing actual

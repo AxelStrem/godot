@@ -8,6 +8,9 @@
 
 #include "spore_manager.h"
 
+#include <algorithm>
+#include <vector>
+
 #include "core/math/math_funcs.h"
 #include "core/variant/array.h"
 #include "core/variant/dictionary.h"
@@ -671,6 +674,17 @@ int SporeManager::get_overlap_min_count() const {
 	return _overlap_min_count;
 }
 
+// ---- Depth noise ----
+
+void SporeManager::set_depth_noise_amplitude(float p_amplitude) {
+	_depth_noise_amplitude = MAX(p_amplitude, 0.0f);
+	_sweep_dirty = true; // re-sort on next advance
+}
+
+float SporeManager::get_depth_noise_amplitude() const {
+	return _depth_noise_amplitude;
+}
+
 // ---------------------------------------------------------------------------
 // Per-chamber queries
 // ---------------------------------------------------------------------------
@@ -771,6 +785,20 @@ void SporeManager::add_cell(const Vector3i &p_grid_key, const Vector3 &p_world_p
 	c.depth = -1;
 	c.spawned = false;
 	c.blocked_by_ward = false;
+
+	// Deterministic positional noise for frontier waviness.
+	// Two-octave sine hash produces smooth variation in [-1, 1].
+	// Multiplied by _depth_noise_amplitude at sort/activation time
+	// so amplitude changes take effect immediately.
+	{
+		float fx = (float)p_grid_key.x;
+		float fy = (float)p_grid_key.y;
+		float fz = (float)p_grid_key.z;
+		float n = Math::sin(fx * 1.271f + fy * 3.117f + fz * 0.747f) * 0.6f;
+		n += Math::sin(fx * 2.695f + fy * 1.833f + fz * 4.219f) * 0.4f;
+		c.depth_noise = CLAMP(n, -1.0f, 1.0f);
+	}
+
 	_cells.insert(p_grid_key, c);
 	_cells_added = true;
 
@@ -985,33 +1013,26 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 void SporeManager::_build_sweep_list() {
 	_sorted_cells.clear();
 
-	// Bucket cells by depth (depths are small integers, so bucket sort is fast).
-	// We use a HashMap so we don't need to find max_depth upfront.
-	HashMap<int, Vector<Vector3i>> buckets;
-	int min_depth = 0x7FFFFFFF;
-	int max_depth = -1;
+	float amp = _depth_noise_amplitude;
+
+	// Collect cells with their effective depth (depth + noise * amplitude).
+	// Use std::vector + std::sort instead of bucket sort because effective
+	// depths are floating-point values.
+	std::vector<std::pair<float, Vector3i>> entries;
+	entries.reserve(_cells.size());
 
 	for (const auto &E : _cells) {
 		if (E.value.depth >= 0 && !E.value.blocked_by_ward) {
-			int d = E.value.depth;
-			buckets[d].push_back(E.key);
-			if (d < min_depth) {
-				min_depth = d;
-			}
-			if (d > max_depth) {
-				max_depth = d;
-			}
+			float effective = (float)E.value.depth + E.value.depth_noise * amp;
+			entries.emplace_back(effective, E.key);
 		}
 	}
 
-	// Flatten buckets in depth order.
-	for (int d = min_depth; d <= max_depth; d++) {
-		const Vector<Vector3i> *bucket = buckets.getptr(d);
-		if (bucket) {
-			for (const Vector3i &key : *bucket) {
-				_sorted_cells.push_back(key);
-			}
-		}
+	std::sort(entries.begin(), entries.end(),
+		[](const auto &a, const auto &b) { return a.first < b.first; });
+
+	for (const auto &e : entries) {
+		_sorted_cells.push_back(e.second);
 	}
 
 	// Skip past already-spawned cells so the sweep doesn't waste time
@@ -1024,12 +1045,12 @@ void SporeManager::_build_sweep_list() {
 		}
 		_sweep_idx++;
 	}
-	// Set sweep to the depth of the first unspawned cell (or 0 if none).
+	// Set sweep to the effective depth of the first unspawned cell.
 	_sweep = 0.0f;
 	if (_sweep_idx < _sorted_cells.size()) {
 		const Cell *c = _cells.getptr(_sorted_cells[_sweep_idx]);
 		if (c) {
-			_sweep = (float)c->depth;
+			_sweep = (float)c->depth + c->depth_noise * amp;
 		}
 	}
 	_sweep_dirty = false;
@@ -1133,7 +1154,10 @@ Dictionary SporeManager::advance_sweeps(float p_delta) {
 			}
 		}
 
-		if ((float)c->depth > _sweep) {
+		// Use effective depth (with noise) for sweep boundary.
+		// This creates a wavy frontier instead of a straight line.
+		float effective_depth = (float)c->depth + c->depth_noise * _depth_noise_amplitude;
+		if (effective_depth > _sweep) {
 			break;
 		}
 
@@ -1422,6 +1446,11 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_overlap_min_count", "count"), &SporeManager::set_overlap_min_count);
 	ClassDB::bind_method(D_METHOD("get_overlap_min_count"), &SporeManager::get_overlap_min_count);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "overlap_min_count"), "set_overlap_min_count", "get_overlap_min_count");
+
+	// Depth noise (frontier waviness)
+	ClassDB::bind_method(D_METHOD("set_depth_noise_amplitude", "amplitude"), &SporeManager::set_depth_noise_amplitude);
+	ClassDB::bind_method(D_METHOD("get_depth_noise_amplitude"), &SporeManager::get_depth_noise_amplitude);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "depth_noise_amplitude"), "set_depth_noise_amplitude", "get_depth_noise_amplitude");
 
 	// Per-chamber
 	ClassDB::bind_method(D_METHOD("get_spore_transforms_for_chamber", "chamber_id"), &SporeManager::get_spore_transforms_for_chamber);
