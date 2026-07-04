@@ -190,6 +190,8 @@ class ResourceFormatSaverTextInstance {
 	HashMap<Ref<Resource>, String> internal_resources;
 	bool use_compat = true;
 
+	HashSet<String> _import_exists_cache; // Cache FileAccess::exists() results within a single save.
+
 	struct ResourceSort {
 		Ref<Resource> resource;
 		String id;
