@@ -61,22 +61,25 @@ EditorFileSystem::ScannedDirectory *EditorFileSystem::first_scan_root_dir = null
 #define CACHE_FILE_NAME "filesystem_cache10"
 
 int EditorFileSystemDirectory::find_file_index(const String &p_file) const {
-	for (int i = 0; i < files.size(); i++) {
-		if (files[i]->file == p_file) {
-			return i;
+	if (file_index_map.is_empty() || (int)file_index_map.size() != files.size()) {
+		file_index_map.clear();
+		for (int i = 0; i < files.size(); i++) {
+			file_index_map[files[i]->file] = i;
 		}
 	}
-	return -1;
+	HashMap<String, int>::ConstIterator E = file_index_map.find(p_file);
+	return E ? E->value : -1;
 }
 
 int EditorFileSystemDirectory::find_dir_index(const String &p_dir) const {
-	for (int i = 0; i < subdirs.size(); i++) {
-		if (subdirs[i]->name == p_dir) {
-			return i;
+	if (dir_index_map.is_empty() || (int)dir_index_map.size() != subdirs.size()) {
+		dir_index_map.clear();
+		for (int i = 0; i < subdirs.size(); i++) {
+			dir_index_map[subdirs[i]->name] = i;
 		}
 	}
-
-	return -1;
+	HashMap<String, int>::ConstIterator E = dir_index_map.find(p_dir);
+	return E ? E->value : -1;
 }
 
 void EditorFileSystemDirectory::force_update() {

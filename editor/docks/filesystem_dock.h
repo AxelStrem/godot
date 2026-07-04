@@ -253,6 +253,9 @@ private:
 
 	bool updating_tree = false;
 	int tree_update_id;
+	int suppress_tree_update = 0;
+	bool tree_update_pending = false;
+	bool skip_next_fs_update = false;
 	FileSystemTree *tree = nullptr;
 	FileSystemList *files = nullptr;
 	bool import_dock_needs_update = false;
@@ -269,6 +272,8 @@ private:
 	HashSet<String> cached_valid_conversion_targets;
 
 	Vector<String> prev_selection;
+
+	mutable HashMap<String, Ref<Texture2D>> thumbnail_filter_cache;
 
 	void _update_selection_changed();
 
@@ -373,6 +378,8 @@ private:
 	void _file_list_thumbnail_done(const String &p_path, const Ref<Texture2D> &p_preview, const Ref<Texture2D> &p_small_preview, int p_index, const String &p_filename);
 	void _tree_thumbnail_done(const String &p_path, const Ref<Texture2D> &p_preview, const Ref<Texture2D> &p_small_preview, int p_update_id, ObjectID p_item);
 	Ref<Texture2D> _apply_thumbnail_filter(const Ref<Texture2D> &p_thumbnail, const String &p_file_path) const;
+	void _request_thumbnails_for_dir(TreeItem *p_dir_item);
+	void _tree_item_collapsed(TreeItem *p_item);
 
 	void _update_display_mode(bool p_force = false);
 
@@ -429,6 +436,8 @@ public:
 
 	void fix_dependencies(const String &p_for_file);
 	void update_all();
+	void begin_suppress_tree_update();
+	void end_suppress_tree_update();
 
 	int get_h_split_offset() const { return split_box_offset_h; }
 	void set_h_split_offset(int p_offset) { split_box_offset_h = p_offset; }

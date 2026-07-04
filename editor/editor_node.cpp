@@ -2255,6 +2255,7 @@ void EditorNode::_find_node_types(Node *p_node, int &count_2d, int &count_3d) {
 }
 
 void EditorNode::_save_scene_with_preview(String p_file, int p_idx) {
+	FileSystemDock::get_singleton()->begin_suppress_tree_update();
 	save_scene_progress = memnew(EditorProgress("save", TTR("Saving Scene"), 4));
 
 	if (editor_data.get_edited_scene_root() != nullptr) {
@@ -2330,6 +2331,7 @@ void EditorNode::_save_scene_with_preview(String p_file, int p_idx) {
 	}
 
 	save_scene_progress->step(TTR("Saving Scene"), 4);
+
 	_save_scene(p_file, p_idx);
 
 	if (!singleton->cmdline_mode) {
@@ -2337,6 +2339,8 @@ void EditorNode::_save_scene_with_preview(String p_file, int p_idx) {
 	}
 
 	_close_save_scene_progress();
+
+	FileSystemDock::get_singleton()->end_suppress_tree_update();
 }
 
 void EditorNode::_close_save_scene_progress() {
@@ -2504,6 +2508,7 @@ void EditorNode::_save_scene(String p_file, int idx) {
 	} else {
 		sdata.instantiate();
 	}
+
 	Error err = sdata->pack(scene);
 
 	if (err != OK) {
@@ -2524,6 +2529,7 @@ void EditorNode::_save_scene(String p_file, int idx) {
 	editor_data.notify_scene_saved(p_file);
 
 	_save_external_resources();
+
 	saving_scene = p_file; // Some editors may save scenes of built-in resources as external data, so avoid saving this scene again.
 	editor_data.save_editor_external_data();
 	saving_scene = "";
@@ -3462,6 +3468,7 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
 						_discard_changes();
 					}
 					save_editor_layout_delayed();
+
 				} else {
 					show_save_accept(vformat(TTR("%s no longer exists! Please specify a new save location."), scene->get_scene_file_path().get_base_dir()), TTR("OK"));
 				}
@@ -7599,7 +7606,7 @@ void EditorNode::reload_instances_with_path_in_edited_scenes() {
 
 void EditorNode::_remove_all_not_owned_children(Node *p_node, Node *p_owner) {
 	Vector<Node *> nodes_to_remove;
-	if (p_node != p_owner && p_node->get_owner() != p_owner) {
+	if (p_node != p_owner && p_node->get_owner() != p_owner && !Node::_has_exposed_descendant_for_owner(p_node, p_owner)) {
 		nodes_to_remove.push_back(p_node);
 	}
 	for (int i = 0; i < p_node->get_child_count(); i++) {
