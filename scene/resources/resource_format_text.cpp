@@ -1686,14 +1686,23 @@ void ResourceFormatSaverTextInstance::_find_resources(const Variant &p_variant, 
 					// Only externalize if the base file is an imported asset
 					// (has a .import file), not a Godot-native scene/resource.
 					// Also ensure we're not referencing the file being saved.
-				if (base_path != local_path) {
-					if (_import_exists_cache.has(base_path)) {
-						can_externalize = true;
-					} else if (FileAccess::exists(base_path + ".import")) {
-						_import_exists_cache.insert(base_path);
-						can_externalize = true;
+					if (base_path != local_path) {
+						if (_import_exists_cache.has(base_path)) {
+							can_externalize = true;
+						} else if (FileAccess::exists(base_path + ".import")) {
+							_import_exists_cache.insert(base_path);
+							can_externalize = true;
+						}
 					}
 				}
+			}
+
+			if (!p_main && (!bundle_resources) && can_externalize) {
+				if (res->get_path() == local_path) {
+					ERR_PRINT("Circular reference to resource being saved found: '" + local_path + "' will be null next time it's loaded.");
+					return;
+				}
+
 				// Use a numeric ID as a base, because they are sorted in natural order before saving.
 				// This increases the chances of thread loading to fetch them first.
 				String id = itos(external_resources.size() + 1) + "_" + Resource::generate_scene_unique_id();
@@ -1810,6 +1819,7 @@ Error ResourceFormatSaverTextInstance::save(const String &p_path, const Ref<Reso
 
 	// Save resources.
 	use_compat = true; // _find_resources() changes this.
+	_import_exists_cache.clear();
 	_find_resources(p_resource, true);
 
 	if (packed_scene.is_valid()) {
@@ -1819,8 +1829,7 @@ Error ResourceFormatSaverTextInstance::save(const String &p_path, const Ref<Reso
 				continue;
 			}
 
-		import_exists_cache.clear();
-	_	Ref<PackedScene> instance = packed_scene->get_state()->get_node_instance(i);
+			Ref<PackedScene> instance = packed_scene->get_state()->get_node_instance(i);
 			if (instance.is_valid() && !external_resources.has(instance)) {
 				int index = external_resources.size() + 1;
 				external_resources[instance] = itos(index) + "_" + Resource::generate_scene_unique_id(); // Keep the order for improved thread loading performance.
