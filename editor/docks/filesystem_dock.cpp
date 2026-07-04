@@ -35,6 +35,7 @@
 #include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "core/io/resource_importer.h"
+#include <cstdio>
 #include "core/io/resource_loader.h"
 #include "core/io/resource_saver.h"
 #include "core/object/callable_mp.h"
@@ -346,7 +347,9 @@ void FileSystemDock::_create_tree(TreeItem *p_parent, EditorFileSystemDirectory 
 			if (main_scene_path == file_metadata) {
 				file_item->set_custom_color(0, get_theme_color(SNAME("accent_color"), EditorStringName(Editor)));
 			}
-			EditorResourcePreview::get_singleton()->queue_resource_preview(file_metadata, callable_mp(this, &FileSystemDock::_tree_thumbnail_done).bind(tree_update_id, file_item->get_instance_id()));
+			if (!subdirectory_item->is_collapsed()) {
+				EditorResourcePreview::get_singleton()->queue_resource_preview(file_metadata, callable_mp(this, &FileSystemDock::_tree_thumbnail_done).bind(tree_update_id, file_item->get_instance_id()));
+			}
 		}
 	} else {
 		if (lpath.get_base_dir() == current_path.get_base_dir()) {
@@ -898,6 +901,30 @@ void FileSystemDock::_tree_thumbnail_done(const String &p_path, const Ref<Textur
 	}
 }
 
+void FileSystemDock::_request_thumbnails_for_dir(TreeItem *p_dir_item) {
+	TreeItem *child = p_dir_item->get_first_child();
+	while (child) {
+		Variant meta = child->get_metadata(0);
+		if (meta.get_type() != Variant::STRING) {
+			child = child->get_next();
+			continue;
+		}
+		String path = meta;
+		// Only request for files (not subdirectories)
+		if (!path.ends_with("/")) {
+			EditorResourcePreview::get_singleton()->queue_resource_preview(path, callable_mp(this, &FileSystemDock::_tree_thumbnail_done).bind(tree_update_id, child->get_instance_id()));
+		}
+		child = child->get_next();
+	}
+}
+
+void FileSystemDock::_tree_item_collapsed(TreeItem *p_item) {
+	if (!p_item->is_collapsed()) {
+		// Item was expanded, request thumbnails for its file children.
+		_request_thumbnails_for_dir(p_item);
+	}
+}
+
 Ref<Texture2D> FileSystemDock::_apply_thumbnail_filter(const Ref<Texture2D> &p_thumbnail, const String &p_file_path) const {
 	if (!p_file_path.is_empty()) {
 		int index;
@@ -911,10 +938,15 @@ Ref<Texture2D> FileSystemDock::_apply_thumbnail_filter(const Ref<Texture2D> &p_t
 					const String extension = p_file_path.get_extension();
 
 					if (extension != "svg" && extension != "svgz") {
+						const Ref<Texture2D> *cached = thumbnail_filter_cache.getptr(p_file_path);
+						if (cached) {
+							return *cached;
+						}
 						Ref<CanvasTexture> thumbnail_wrapped;
 						thumbnail_wrapped.instantiate();
 						thumbnail_wrapped->set_diffuse_texture(p_thumbnail);
 						thumbnail_wrapped->set_texture_filter(CanvasItem::TextureFilter::TEXTURE_FILTER_NEAREST_WITH_MIPMAPS);
+						thumbnail_filter_cache[p_file_path] = thumbnail_wrapped;
 						return thumbnail_wrapped;
 					}
 				}
@@ -1394,12 +1426,30 @@ void FileSystemDock::_file_list_activate_file(int p_idx) {
 }
 
 void FileSystemDock::_preview_invalidated(const String &p_path) {
+	thumbnail_filter_cache.erase(p_path);
 	if (file_list_display_mode == FILE_LIST_DISPLAY_THUMBNAILS && p_path.get_base_dir() == current_path && searched_tokens.is_empty() && file_list_vb->is_visible_in_tree()) {
 		for (int i = 0; i < files->get_item_count(); i++) {
 			if (files->get_item_metadata(i) == p_path) {
 				// Re-request preview.
 				EditorResourcePreview::get_singleton()->queue_resource_preview(p_path, callable_mp(this, &FileSystemDock::_file_list_thumbnail_done).bind(i, files->get_item_text(i)));
 				break;
+			}
+		}
+	}
+	// Also update the tree item if visible.
+	if (tree->is_visible_in_tree()) {
+		HashMap<String, TreeItem *>::Iterator iter = folder_map.find(p_path.get_base_dir());
+		if (iter) {
+			TreeItem *parent = iter->value;
+			if (!parent->is_collapsed()) {
+				TreeItem *child = parent->get_first_child();
+				while (child) {
+					if (child->get_metadata(0) == p_path) {
+						EditorResourcePreview::get_singleton()->queue_resource_preview(p_path, callable_mp(this, &FileSystemDock::_tree_thumbnail_done).bind(tree_update_id, child->get_instance_id()));
+						break;
+					}
+					child = child->get_next();
+				}
 			}
 		}
 	}
@@ -1410,6 +1460,16 @@ void FileSystemDock::_fs_changed() {
 	button_hist_next->set_disabled(history_pos == history.size() - 1);
 	scanning_vb->hide();
 	split_box->show();
+
+	if (suppress_tree_update > 0) {
+		tree_update_pending = true;
+		return;
+	}
+
+	if (skip_next_fs_update) {
+		skip_next_fs_update = false;
+		return;
+	}
 
 	update_all();
 
@@ -2918,6 +2978,18 @@ void FileSystemDock::update_all() {
 
 	if (file_list_vb->is_visible()) {
 		_update_file_list(true);
+	}
+}
+
+void FileSystemDock::begin_suppress_tree_update() {
+	suppress_tree_update++;
+}
+
+void FileSystemDock::end_suppress_tree_update() {
+	suppress_tree_update--;
+	if (suppress_tree_update == 0 && tree_update_pending) {
+		tree_update_pending = false;
+		skip_next_fs_update = true;
 	}
 }
 
@@ -4453,6 +4525,7 @@ FileSystemDock::FileSystemDock() {
 	tree->connect(SceneStringName(gui_input), callable_mp(this, &FileSystemDock::_tree_gui_input));
 	tree->connect(SceneStringName(mouse_exited), callable_mp(this, &FileSystemDock::_tree_mouse_exited));
 	tree->connect("item_edited", callable_mp(this, &FileSystemDock::_rename_operation_confirm));
+	tree->connect("item_collapsed", callable_mp(this, &FileSystemDock::_tree_item_collapsed));
 
 	file_list_vb = memnew(VBoxContainer);
 	file_list_vb->set_v_size_flags(SIZE_EXPAND_FILL);

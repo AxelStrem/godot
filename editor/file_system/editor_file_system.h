@@ -79,6 +79,9 @@ class EditorFileSystemDirectory : public Object {
 
 	Vector<FileInfo *> files;
 
+	mutable HashMap<String, int> file_index_map;
+	mutable HashMap<String, int> dir_index_map;
+
 	static void _bind_methods();
 
 	friend class EditorFileSystem;
