@@ -43,6 +43,7 @@ private:
 	// IDs are recycled via a free list.
 	Vector<Vector3> _positions;
 	Vector<float> _spawn_times;    // total_time when the spore was spawned
+	Vector<float> _spawn_depths;   // sweep depth of the cell that spawned this spore (-1 = unknown)
 	Vector<float> _radii;          // current computed radius (updated each frame)
 	Vector<float> _force_limits;  // per-spore max radius enforced by wards (0 = no limit)
 	Vector<float> _seed_offsets;   // unique per-spore offset for pulse phase
@@ -60,6 +61,13 @@ private:
 	// the parent tentacle grows toward it. Defaults to 1.5s.
 	float _start_delay = 1.5f;
 	float _force_limit_shrink_speed = 1.5f; // units/sec radius shrinks toward ward limit
+
+	// Optional depth-based lifecycle acceleration: spores far behind the
+	// current sweep frontier age faster so they compact/retire sooner.
+	bool _depth_lifecycle_enabled = true;
+	float _depth_lifecycle_mid_threshold = 30.0f;
+	float _depth_lifecycle_full_threshold = 50.0f;
+	float _depth_lifecycle_mid_multiplier = 2.0f;
 
 	// ---- Mature phase & overlap cleanup (tunable from GDScript) ----
 	// When enabled, spores survive past their old hard lifetime and
@@ -204,7 +212,7 @@ public:
 	~SporeManager();
 
 	// ---- Spore lifecycle (called from GDScript) ----
-	int32_t add_spore(const Vector3 &p_pos, int p_profile = PROFILE_NORMAL, int p_chamber_id = -1);
+	int32_t add_spore(const Vector3 &p_pos, int p_profile = PROFILE_NORMAL, int p_chamber_id = -1, float p_spawn_depth = -1.0f);
 	void remove_spore(int32_t p_id);
 	void remove_spores_in_chamber(int p_chamber_id, bool p_shrink_first = false);
 	void shrink_spore(int32_t p_id);
@@ -241,6 +249,16 @@ public:
 	float get_spore_force_limit(int32_t p_id) const;
 	void set_force_limit_shrink_speed(float p_speed);
 	float get_force_limit_shrink_speed() const;
+
+	// ---- Depth-based lifecycle acceleration config ----
+	void set_depth_lifecycle_enabled(bool p_enabled);
+	bool is_depth_lifecycle_enabled() const;
+	void set_depth_lifecycle_mid_threshold(float p_threshold);
+	float get_depth_lifecycle_mid_threshold() const;
+	void set_depth_lifecycle_full_threshold(float p_threshold);
+	float get_depth_lifecycle_full_threshold() const;
+	void set_depth_lifecycle_mid_multiplier(float p_multiplier);
+	float get_depth_lifecycle_mid_multiplier() const;
 
 	// ---- Mature phase & overlap cleanup config ----
 	void set_mature_phase_enabled(bool p_enabled);
