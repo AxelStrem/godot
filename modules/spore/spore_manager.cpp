@@ -60,6 +60,7 @@ int SporeManager::_allocate_id() {
 		int32_t id = _positions.size();
 		_positions.push_back(Vector3());
 		_spawn_times.push_back(0.0f);
+		_spawn_depths.push_back(-1.0f);
 		_radii.push_back(0.0001f);
 		_force_limits.push_back(0.0f);
 		_seed_offsets.push_back(0.0f);
@@ -129,10 +130,11 @@ float SporeManager::_compute_radius(float p_elapsed, int p_profile, float p_seed
 // Public API — Spore lifecycle
 // ---------------------------------------------------------------------------
 
-int32_t SporeManager::add_spore(const Vector3 &p_pos, int p_profile, int p_chamber_id) {
+int32_t SporeManager::add_spore(const Vector3 &p_pos, int p_profile, int p_chamber_id, float p_spawn_depth) {
 	int32_t id = _allocate_id();
 	_positions.set(id, p_pos);
 	_spawn_times.set(id, -1.0f); // Will be set by the first update() call.
+	_spawn_depths.set(id, p_spawn_depth);
 	_radii.set(id, 0.0001f);     // Reset stale radius from recycled ID.
 	_force_limits.set(id, 0.0f); // Reset stale force-limit from recycled ID.
 	_shrink_times.set(id, -1.0f); // Reset stale shrink state from recycled ID.
@@ -309,6 +311,22 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		}
 
 		float elapsed = float(p_total_time - _spawn_times[id]);
+		float effective_elapsed = elapsed;
+		if (_depth_lifecycle_enabled && _spawn_depths[id] >= 0.0f && _sweep >= _spawn_depths[id] + 0.001f) {
+			float depth_gap = _sweep - _spawn_depths[id];
+			if (depth_gap >= _depth_lifecycle_full_threshold) {
+				uint8_t st = _states[id];
+				if (st == STATE_ACTIVE || st == STATE_START_DELAY || st == STATE_CONNECTING) {
+					_states.set(id, STATE_MATURE);
+				}
+				effective_elapsed = elapsed + 10000.0f;
+			} else if (depth_gap >= _depth_lifecycle_mid_threshold) {
+				float span = MAX(_depth_lifecycle_full_threshold - _depth_lifecycle_mid_threshold, 0.001f);
+				float blend = CLAMP((depth_gap - _depth_lifecycle_mid_threshold) / span, 0.0f, 1.0f);
+				float accel = 1.0f + blend * MAX(_depth_lifecycle_mid_multiplier - 1.0f, 0.0f);
+				effective_elapsed = elapsed * accel;
+			}
+		}
 
 		// ---- Shrinking spores (visual removal) ----
 		if (_states[id] == STATE_SHRINKING) {
@@ -352,7 +370,7 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		}
 
 		float old_radius = _radii[id];
-		float new_radius = _compute_radius(elapsed, _profiles[id], _seed_offsets[id]);
+		float new_radius = _compute_radius(effective_elapsed, _profiles[id], _seed_offsets[id]);
 
 		// Ward force-limit: smooth shrink toward the cap when a ward
 		// restricts this spore, and smooth recovery when the spore
@@ -385,7 +403,7 @@ void SporeManager::update(double p_delta, double p_total_time) {
 			uint8_t st = _states[id];
 			if (st == STATE_ACTIVE || st == STATE_START_DELAY || st == STATE_CONNECTING) {
 				// Check if we've reached Phase 4 (past all three growth phases).
-				float growth_elapsed = elapsed - _start_delay;
+				float growth_elapsed = effective_elapsed - _start_delay;
 				if (growth_elapsed >= PHASE1_DURATION + PHASE2_DURATION + PHASE3_DURATION) {
 					_states.set(id, STATE_MATURE);
 				}
@@ -613,6 +631,41 @@ void SporeManager::set_force_limit_shrink_speed(float p_speed) {
 
 float SporeManager::get_force_limit_shrink_speed() const {
 	return _force_limit_shrink_speed;
+}
+
+// ---- Depth-based lifecycle acceleration config ----
+
+void SporeManager::set_depth_lifecycle_enabled(bool p_enabled) {
+	_depth_lifecycle_enabled = p_enabled;
+}
+
+bool SporeManager::is_depth_lifecycle_enabled() const {
+	return _depth_lifecycle_enabled;
+}
+
+void SporeManager::set_depth_lifecycle_mid_threshold(float p_threshold) {
+	_depth_lifecycle_mid_threshold = MAX(p_threshold, 0.0f);
+	_depth_lifecycle_full_threshold = MAX(_depth_lifecycle_full_threshold, _depth_lifecycle_mid_threshold);
+}
+
+float SporeManager::get_depth_lifecycle_mid_threshold() const {
+	return _depth_lifecycle_mid_threshold;
+}
+
+void SporeManager::set_depth_lifecycle_full_threshold(float p_threshold) {
+	_depth_lifecycle_full_threshold = MAX(p_threshold, _depth_lifecycle_mid_threshold);
+}
+
+float SporeManager::get_depth_lifecycle_full_threshold() const {
+	return _depth_lifecycle_full_threshold;
+}
+
+void SporeManager::set_depth_lifecycle_mid_multiplier(float p_multiplier) {
+	_depth_lifecycle_mid_multiplier = MAX(p_multiplier, 1.0f);
+}
+
+float SporeManager::get_depth_lifecycle_mid_multiplier() const {
+	return _depth_lifecycle_mid_multiplier;
 }
 
 // ---- Mature phase & overlap cleanup config ----
@@ -1475,7 +1528,7 @@ void SporeManager::_bind_methods() {
 	BIND_ENUM_CONSTANT(PROFILE_STRAIN);
 
 	// Lifecycle
-	ClassDB::bind_method(D_METHOD("add_spore", "position", "profile", "chamber_id"), &SporeManager::add_spore, DEFVAL(PROFILE_NORMAL), DEFVAL(-1));
+	ClassDB::bind_method(D_METHOD("add_spore", "position", "profile", "chamber_id", "spawn_depth"), &SporeManager::add_spore, DEFVAL(PROFILE_NORMAL), DEFVAL(-1), DEFVAL(-1.0f));
 	ClassDB::bind_method(D_METHOD("remove_spore", "id"), &SporeManager::remove_spore);
 	ClassDB::bind_method(D_METHOD("remove_spores_in_chamber", "chamber_id", "shrink_first"), &SporeManager::remove_spores_in_chamber, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("shrink_spore", "id"), &SporeManager::shrink_spore);
@@ -1515,6 +1568,20 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_force_limit_shrink_speed", "speed"), &SporeManager::set_force_limit_shrink_speed);
 	ClassDB::bind_method(D_METHOD("get_force_limit_shrink_speed"), &SporeManager::get_force_limit_shrink_speed);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "force_limit_shrink_speed"), "set_force_limit_shrink_speed", "get_force_limit_shrink_speed");
+
+	// Depth-based lifecycle acceleration config
+	ClassDB::bind_method(D_METHOD("set_depth_lifecycle_enabled", "enabled"), &SporeManager::set_depth_lifecycle_enabled);
+	ClassDB::bind_method(D_METHOD("is_depth_lifecycle_enabled"), &SporeManager::is_depth_lifecycle_enabled);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "depth_lifecycle_enabled"), "set_depth_lifecycle_enabled", "is_depth_lifecycle_enabled");
+	ClassDB::bind_method(D_METHOD("set_depth_lifecycle_mid_threshold", "threshold"), &SporeManager::set_depth_lifecycle_mid_threshold);
+	ClassDB::bind_method(D_METHOD("get_depth_lifecycle_mid_threshold"), &SporeManager::get_depth_lifecycle_mid_threshold);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "depth_lifecycle_mid_threshold"), "set_depth_lifecycle_mid_threshold", "get_depth_lifecycle_mid_threshold");
+	ClassDB::bind_method(D_METHOD("set_depth_lifecycle_full_threshold", "threshold"), &SporeManager::set_depth_lifecycle_full_threshold);
+	ClassDB::bind_method(D_METHOD("get_depth_lifecycle_full_threshold"), &SporeManager::get_depth_lifecycle_full_threshold);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "depth_lifecycle_full_threshold"), "set_depth_lifecycle_full_threshold", "get_depth_lifecycle_full_threshold");
+	ClassDB::bind_method(D_METHOD("set_depth_lifecycle_mid_multiplier", "multiplier"), &SporeManager::set_depth_lifecycle_mid_multiplier);
+	ClassDB::bind_method(D_METHOD("get_depth_lifecycle_mid_multiplier"), &SporeManager::get_depth_lifecycle_mid_multiplier);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "depth_lifecycle_mid_multiplier"), "set_depth_lifecycle_mid_multiplier", "get_depth_lifecycle_mid_multiplier");
 
 	// Mature phase & overlap cleanup config
 	ClassDB::bind_method(D_METHOD("set_mature_phase_enabled", "enabled"), &SporeManager::set_mature_phase_enabled);
