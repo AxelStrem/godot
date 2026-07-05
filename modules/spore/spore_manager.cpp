@@ -1480,6 +1480,10 @@ bool SporeManager::is_cell_blocked(const Vector3i &p_grid_key) const {
 	return c ? c->blocked_by_ward : false;
 }
 
+float SporeManager::get_sweep_depth() const {
+	return _sweep;
+}
+
 void SporeManager::set_spore_res(float p_res) {
 	_spore_res = MAX(p_res, 0.01f);
 }
@@ -1663,6 +1667,7 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cell_depth", "grid_key"), &SporeManager::get_cell_depth);
 	ClassDB::bind_method(D_METHOD("get_cell_chamber", "grid_key"), &SporeManager::get_cell_chamber);
 	ClassDB::bind_method(D_METHOD("is_cell_blocked", "grid_key"), &SporeManager::is_cell_blocked);
+	ClassDB::bind_method(D_METHOD("get_sweep_depth"), &SporeManager::get_sweep_depth);
 	ClassDB::bind_method(D_METHOD("set_spore_res", "res"), &SporeManager::set_spore_res);
 	ClassDB::bind_method(D_METHOD("get_spore_res"), &SporeManager::get_spore_res);
 	ClassDB::bind_method(D_METHOD("set_start_cell", "grid_key"), &SporeManager::set_start_cell);

@@ -348,6 +348,10 @@ public:
 	int get_cell_chamber(const Vector3i &p_grid_key) const;
 	bool is_cell_blocked(const Vector3i &p_grid_key) const;
 
+	// Current sweep cursor (depth-units).  Exposed so GDScript can
+	// decide when chambers are safely behind the frontier.
+	float get_sweep_depth() const;
+
 	// Grid resolution (mirrors GDScript spore_res).
 	void set_spore_res(float p_res);
 	float get_spore_res() const;
