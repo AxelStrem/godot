@@ -67,8 +67,8 @@ public:
 	void add_element(WFCElement *p_element);
 	void add_branch(Node *p_root);
 	int connect_neighbors();
-	bool resolve();
-	Error resolve_branch_async(Node3D *p_root, const Transform3D &p_root_global_transform);
+	bool resolve();	bool resolve_sync();
+	bool resolve_branch_sync(Node3D *p_root, const Transform3D &p_root_global_transform);	Error resolve_branch_async(Node3D *p_root, const Transform3D &p_root_global_transform);
 	Error resolve_async();
 	void materialize();
 

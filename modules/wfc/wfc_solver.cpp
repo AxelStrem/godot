@@ -1283,6 +1283,8 @@ void WFCSolver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("connect_neighbors"), &WFCSolver::connect_neighbors);
 	ClassDB::bind_method(D_METHOD("resolve"), &WFCSolver::resolve);
 	ClassDB::bind_method(D_METHOD("resolve_branch_async", "root", "root_global_transform"), &WFCSolver::resolve_branch_async);
+	ClassDB::bind_method(D_METHOD("resolve_branch_sync", "root", "root_global_transform"), &WFCSolver::resolve_branch_sync);
+	ClassDB::bind_method(D_METHOD("resolve_sync"), &WFCSolver::resolve_sync);
 	ClassDB::bind_method(D_METHOD("resolve_async"), &WFCSolver::resolve_async);
 	ClassDB::bind_method(D_METHOD("materialize"), &WFCSolver::materialize);
 
@@ -1664,6 +1666,10 @@ bool WFCSolver::resolve() {
 		last_error = "WFCSolver is already solving asynchronously.";
 		return false;
 	}
+	return resolve_sync();
+}
+
+bool WFCSolver::resolve_sync() {
 	last_resolved_node_ids.clear();
 	if (tracked_elements.is_empty()) {
 		_add_branch_recursive(this);
@@ -1678,6 +1684,38 @@ bool WFCSolver::resolve() {
 	}
 	Vector<ConnectionBuild> preview_connections;
 
+	emit_signal(SNAME("solve_started"));
+	SolveResult result = _solve_snapshot(snapshot, graph_processor, &preview_connections);
+	_apply_preview_connections(snapshot, preview_connections);
+	last_error = result.error;
+	if (!result.success) {
+		last_resolved_node_ids.clear();
+		emit_signal(SNAME("solve_completed"), false, last_error);
+		return false;
+	}
+
+	_apply_solve_result_to_live_elements(result);
+	last_resolved_node_ids = result.node_ids;
+	if (auto_materialize) {
+		materialize();
+	}
+	last_error = String();
+	emit_signal(SNAME("solve_completed"), true, String());
+	return true;
+}
+
+bool WFCSolver::resolve_branch_sync(Node3D *p_root, const Transform3D &p_root_global_transform) {
+	last_resolved_node_ids.clear();
+
+	AuthoringSnapshot snapshot;
+	String error;
+	if (!_build_authoring_snapshot_for_branch(p_root, p_root_global_transform, catalog_set, cell_size, seed, snapshot, error)) {
+		last_error = error;
+		emit_signal(SNAME("solve_completed"), false, last_error);
+		return false;
+	}
+
+	Vector<ConnectionBuild> preview_connections;
 	emit_signal(SNAME("solve_started"));
 	SolveResult result = _solve_snapshot(snapshot, graph_processor, &preview_connections);
 	_apply_preview_connections(snapshot, preview_connections);
