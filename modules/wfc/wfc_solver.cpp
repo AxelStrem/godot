@@ -12,6 +12,7 @@
 #include "core/math/random_pcg.h"
 #include "core/object/class_db.h"
 #include "core/os/os.h"
+#include "core/os/thread.h"
 #include "core/string/print_string.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/sort_array.h"
@@ -1679,18 +1680,24 @@ bool WFCSolver::resolve_sync() {
 	String error;
 	if (!_build_authoring_snapshot(tracked_elements, catalog_set, cell_size, seed, snapshot, error)) {
 		last_error = error;
-		emit_signal(SNAME("solve_completed"), false, last_error);
+		if (Thread::is_main_thread()) {
+			emit_signal(SNAME("solve_completed"), false, last_error);
+		}
 		return false;
 	}
 	Vector<ConnectionBuild> preview_connections;
 
-	emit_signal(SNAME("solve_started"));
+	if (Thread::is_main_thread()) {
+		emit_signal(SNAME("solve_started"));
+	}
 	SolveResult result = _solve_snapshot(snapshot, graph_processor, &preview_connections);
 	_apply_preview_connections(snapshot, preview_connections);
 	last_error = result.error;
 	if (!result.success) {
 		last_resolved_node_ids.clear();
-		emit_signal(SNAME("solve_completed"), false, last_error);
+		if (Thread::is_main_thread()) {
+			emit_signal(SNAME("solve_completed"), false, last_error);
+		}
 		return false;
 	}
 
@@ -1700,7 +1707,9 @@ bool WFCSolver::resolve_sync() {
 		materialize();
 	}
 	last_error = String();
-	emit_signal(SNAME("solve_completed"), true, String());
+	if (Thread::is_main_thread()) {
+		emit_signal(SNAME("solve_completed"), true, String());
+	}
 	return true;
 }
 
@@ -1711,18 +1720,24 @@ bool WFCSolver::resolve_branch_sync(Node3D *p_root, const Transform3D &p_root_gl
 	String error;
 	if (!_build_authoring_snapshot_for_branch(p_root, p_root_global_transform, catalog_set, cell_size, seed, snapshot, error)) {
 		last_error = error;
-		emit_signal(SNAME("solve_completed"), false, last_error);
+		if (Thread::is_main_thread()) {
+			emit_signal(SNAME("solve_completed"), false, last_error);
+		}
 		return false;
 	}
 
 	Vector<ConnectionBuild> preview_connections;
-	emit_signal(SNAME("solve_started"));
+	if (Thread::is_main_thread()) {
+		emit_signal(SNAME("solve_started"));
+	}
 	SolveResult result = _solve_snapshot(snapshot, graph_processor, &preview_connections);
 	_apply_preview_connections(snapshot, preview_connections);
 	last_error = result.error;
 	if (!result.success) {
 		last_resolved_node_ids.clear();
-		emit_signal(SNAME("solve_completed"), false, last_error);
+		if (Thread::is_main_thread()) {
+			emit_signal(SNAME("solve_completed"), false, last_error);
+		}
 		return false;
 	}
 
@@ -1732,7 +1747,9 @@ bool WFCSolver::resolve_branch_sync(Node3D *p_root, const Transform3D &p_root_gl
 		materialize();
 	}
 	last_error = String();
-	emit_signal(SNAME("solve_completed"), true, String());
+	if (Thread::is_main_thread()) {
+		emit_signal(SNAME("solve_completed"), true, String());
+	}
 	return true;
 }
 
