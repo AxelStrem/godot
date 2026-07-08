@@ -1164,25 +1164,12 @@ void SporeManager::_build_sweep_list() {
 		_sweep_idx++;
 	}
 	// Set sweep to the effective depth of the first unspawned cell.
-	float prev_sweep = _sweep;
 	_sweep = 0.0f;
 	if (_sweep_idx < _sorted_cells.size()) {
 		const Cell *c = _cells.getptr(_sorted_cells[_sweep_idx]);
 		if (c) {
 			_sweep = (float)c->depth + c->depth_noise * amp;
 		}
-	}
-	// Detect a large sweep backslide (e.g. ward deactivation
-	// unblocked cells at a much lower depth than the current front).
-	// Enter catch-up mode to close the gap quickly without burst.
-	if (prev_sweep - _sweep > SWEEP_CATCH_UP_STEP) {
-		_catching_up = true;
-		_catch_up_target = prev_sweep;
-		print_line(vformat("SporeManager::_build_sweep_list  catch-up: %.1f -> %.1f  target=%.1f",
-			prev_sweep, _sweep, _catch_up_target));
-	} else if (_catching_up && _sweep >= _catch_up_target) {
-		_catching_up = false;
-		print_line(vformat("SporeManager::_build_sweep_list  catch-up complete at %.1f", _sweep));
 	}
 	_sweep_dirty = false;
 }
@@ -1288,18 +1275,6 @@ Dictionary SporeManager::advance_sweeps(float p_delta) {
 	}
 
 	_sweep += effective_speed * p_delta;
-
-	// Catch-up jump: when _sweep dropped due to ward deactivation,
-	// advance it in larger steps to close the gap.  The while-loop
-	// below activates cells at their actual depth, so this only
-	// controls the activation threshold — it doesn't cause a burst
-	// because each jump only exposes a few depth levels at a time.
-	if (_catching_up) {
-		_sweep += SWEEP_CATCH_UP_STEP;
-		if (_sweep >= _catch_up_target) {
-			_catching_up = false;
-		}
-	}
 
 	// Activate all cells whose depth ≤ sweep, respecting ward blocking.
 	while (_sweep_idx < _sorted_cells.size()) {
@@ -1476,25 +1451,67 @@ void SporeManager::on_wards_changed() {
 		}
 	}
 
-	// Run one BFS extension right now, seeded from the rebuilt frontier.
-	// Target is far enough ahead to cover the deepest frontier cell plus
-	// LOOKAHEAD — otherwise seeds with depth > target get filtered out.
+	// Save a snapshot of unvisited cells before the BFS.  When ONLY
+	// unblocking (no new blocks), we offset their post-BFS depths so
+	// the unblocked region resumes at the current sweep line instead
+	// of its natural shallow depth.  This prevents both burst and
+	// pause: the unblocked cells become the next to spawn, right after
+	// the current front.
+	HashSet<Vector3i> pre_bfs_unvisited;
+	bool do_offset = (newly_unblocked_count > 0 && newly_blocked_count == 0);
+	if (do_offset) {
+		for (const auto &E : _cells) {
+			if (E.value.depth < 0 && !E.value.blocked_by_ward) {
+				pre_bfs_unvisited.insert(E.key);
+			}
+		}
+	}
+
 	// When a ward is removed (unblocking), the cells that were cut off
 	// may extend far past max_frontier_depth.  Don't ask the BFS to
-	// reach all the way to _sweep — let the catch-up sweep mechanism
-	// handle the gap incrementally.  Only extend enough to reconnect
-	// the graph and seed the newly-unblocked region.
+	// reach all the way to _sweep — the depth offset below handles the
+	// gap.  Only extend enough to reconnect the graph and seed the
+	// newly-unblocked region.
 	float target;
-	if (newly_unblocked_count > 0 && newly_blocked_count == 0) {
-		// Only unblocking: connect the graph, don't race ahead.
+	if (do_offset) {
 		target = MAX(max_frontier_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD);
 	} else {
-		// Blocking or mixed: need a full recompute.
 		target = MAX(max_frontier_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD * 2);
 	}
 	print_line(vformat("SporeManager::on_wards_changed  BFS target=%.1f  frontier=%d  max_fdepth=%.1f  sweep=%.1f",
 		target, _frontier_set.size(), max_frontier_depth, _sweep));
 	_run_bfs_incremental(target);
+
+	// Offset newly-assigned depths so the unblocked region starts at
+	// the current sweep line.  Only offset cells whose assigned depth
+	// is below the old max_frontier_depth — those are in the shallow
+	// unblocked region.  Cells at/above max_frontier_depth are the
+	// normal frontier extension and must keep their natural depths.
+	if (do_offset && !pre_bfs_unvisited.is_empty()) {
+		int min_new_depth = INT_MAX;
+		for (const Vector3i &key : pre_bfs_unvisited) {
+			const Cell *c = _cells.getptr(key);
+			if (c && c->depth >= 0) {
+				// Only consider cells that landed in the shallow region.
+				if ((float)c->depth < max_frontier_depth && c->depth < min_new_depth) {
+					min_new_depth = c->depth;
+				}
+			}
+		}
+		if (min_new_depth < INT_MAX) {
+			int offset = (int)_sweep - min_new_depth;
+			if (offset > 0) {
+				for (const Vector3i &key : pre_bfs_unvisited) {
+					Cell *c = _cells.getptr(key);
+					if (c && c->depth >= 0 && (float)c->depth < max_frontier_depth) {
+						c->depth += offset;
+					}
+				}
+				print_line(vformat("SporeManager::on_wards_changed  depth offset +%d applied (min_was=%d sweep=%.1f)",
+					offset, min_new_depth, _sweep));
+			}
+		}
+	}
 	_sweep_dirty = true;
 }
 
