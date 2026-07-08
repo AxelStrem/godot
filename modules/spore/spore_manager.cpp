@@ -1163,12 +1163,19 @@ void SporeManager::_build_sweep_list() {
 		}
 		_sweep_idx++;
 	}
-	// Set sweep to the effective depth of the first unspawned cell.
-	_sweep = 0.0f;
+	// Don't backslide _sweep — it must be monotonic.  When a ward is
+	// removed and previously-blocked cells at low depth re-enter the
+	// sorted list, _sweep_idx will point to them but the sweep line is
+	// already far past.  Keeping _sweep at its current value lets
+	// advance_sweeps activate those catch-up cells immediately instead
+	// of waiting for _sweep to incrementally climb back up.
 	if (_sweep_idx < _sorted_cells.size()) {
 		const Cell *c = _cells.getptr(_sorted_cells[_sweep_idx]);
 		if (c) {
-			_sweep = (float)c->depth + c->depth_noise * amp;
+			float first_unspawned = (float)c->depth + c->depth_noise * amp;
+			if (first_unspawned > _sweep) {
+				_sweep = first_unspawned;
+			}
 		}
 	}
 	_sweep_dirty = false;
