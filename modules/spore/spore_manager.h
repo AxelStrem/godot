@@ -152,6 +152,14 @@ private:
 	int32_t _sweep_idx = 0;            // index into _sorted_cells
 	bool _sweep_dirty = true;          // force rebuild after init / ward change
 
+	// ---- Catch-up sweep (ward deactivation) ----
+	// When a ward deactivates, _sweep can drop far below the previous
+	// front, causing a long pause while it climbs back.  Catch-up mode
+	// advances _sweep in larger jumps to close the gap quickly.
+	static constexpr float SWEEP_CATCH_UP_STEP = 5.0f;  // sweep units to jump per frame
+	bool _catching_up = false;
+	float _catch_up_target = 0.0f;
+
 	// Grid resolution (mirrors GDScript spore_res constant, default 1.0).
 	float _spore_res = 1.0f;
 

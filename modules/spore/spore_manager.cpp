@@ -1163,20 +1163,26 @@ void SporeManager::_build_sweep_list() {
 		}
 		_sweep_idx++;
 	}
-	// Don't backslide _sweep — it must be monotonic.  When a ward is
-	// removed and previously-blocked cells at low depth re-enter the
-	// sorted list, _sweep_idx will point to them but the sweep line is
-	// already far past.  Keeping _sweep at its current value lets
-	// advance_sweeps activate those catch-up cells immediately instead
-	// of waiting for _sweep to incrementally climb back up.
+	// Set sweep to the effective depth of the first unspawned cell.
+	float prev_sweep = _sweep;
+	_sweep = 0.0f;
 	if (_sweep_idx < _sorted_cells.size()) {
 		const Cell *c = _cells.getptr(_sorted_cells[_sweep_idx]);
 		if (c) {
-			float first_unspawned = (float)c->depth + c->depth_noise * amp;
-			if (first_unspawned > _sweep) {
-				_sweep = first_unspawned;
-			}
+			_sweep = (float)c->depth + c->depth_noise * amp;
 		}
+	}
+	// Detect a large sweep backslide (e.g. ward deactivation
+	// unblocked cells at a much lower depth than the current front).
+	// Enter catch-up mode to close the gap quickly without burst.
+	if (prev_sweep - _sweep > SWEEP_CATCH_UP_STEP) {
+		_catching_up = true;
+		_catch_up_target = prev_sweep;
+		print_line(vformat("SporeManager::_build_sweep_list  catch-up: %.1f -> %.1f  target=%.1f",
+			prev_sweep, _sweep, _catch_up_target));
+	} else if (_catching_up && _sweep >= _catch_up_target) {
+		_catching_up = false;
+		print_line(vformat("SporeManager::_build_sweep_list  catch-up complete at %.1f", _sweep));
 	}
 	_sweep_dirty = false;
 }
@@ -1282,6 +1288,18 @@ Dictionary SporeManager::advance_sweeps(float p_delta) {
 	}
 
 	_sweep += effective_speed * p_delta;
+
+	// Catch-up jump: when _sweep dropped due to ward deactivation,
+	// advance it in larger steps to close the gap.  The while-loop
+	// below activates cells at their actual depth, so this only
+	// controls the activation threshold — it doesn't cause a burst
+	// because each jump only exposes a few depth levels at a time.
+	if (_catching_up) {
+		_sweep += SWEEP_CATCH_UP_STEP;
+		if (_sweep >= _catch_up_target) {
+			_catching_up = false;
+		}
+	}
 
 	// Activate all cells whose depth ≤ sweep, respecting ward blocking.
 	while (_sweep_idx < _sorted_cells.size()) {
@@ -1461,12 +1479,22 @@ void SporeManager::on_wards_changed() {
 	// Run one BFS extension right now, seeded from the rebuilt frontier.
 	// Target is far enough ahead to cover the deepest frontier cell plus
 	// LOOKAHEAD — otherwise seeds with depth > target get filtered out.
-	if (!_frontier_set.is_empty() || newly_blocked_count > 0 || newly_unblocked_count > 0) {
-		float target = MAX(max_frontier_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD * 2);
-		print_line(vformat("SporeManager::on_wards_changed  BFS target=%.1f  frontier=%d  max_fdepth=%.1f  sweep=%.1f",
-			target, _frontier_set.size(), max_frontier_depth, _sweep));
-		_run_bfs_incremental(target);
+	// When a ward is removed (unblocking), the cells that were cut off
+	// may extend far past max_frontier_depth.  Don't ask the BFS to
+	// reach all the way to _sweep — let the catch-up sweep mechanism
+	// handle the gap incrementally.  Only extend enough to reconnect
+	// the graph and seed the newly-unblocked region.
+	float target;
+	if (newly_unblocked_count > 0 && newly_blocked_count == 0) {
+		// Only unblocking: connect the graph, don't race ahead.
+		target = MAX(max_frontier_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD);
+	} else {
+		// Blocking or mixed: need a full recompute.
+		target = MAX(max_frontier_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD * 2);
 	}
+	print_line(vformat("SporeManager::on_wards_changed  BFS target=%.1f  frontier=%d  max_fdepth=%.1f  sweep=%.1f",
+		target, _frontier_set.size(), max_frontier_depth, _sweep));
+	_run_bfs_incremental(target);
 	_sweep_dirty = true;
 }
 
