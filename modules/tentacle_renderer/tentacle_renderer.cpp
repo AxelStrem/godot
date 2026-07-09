@@ -414,6 +414,13 @@ RID TentacleRenderer::render(const Transform3D &p_camera_transform, const Projec
 	return _color_texture;
 }
 
+PackedByteArray TentacleRenderer::get_color_texture_data() const {
+	ERR_FAIL_COND_V(!_initialized, PackedByteArray());
+	ERR_FAIL_NULL_V(_rd, PackedByteArray());
+
+	return _rd->texture_get_data(_color_texture, 0);
+}
+
 // ============================================================================
 // Lifecycle
 // ============================================================================
@@ -443,5 +450,8 @@ void TentacleRenderer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("clear_tentacles"), &TentacleRenderer::clear_tentacles);
 	ClassDB::bind_method(D_METHOD("render", "camera_transform", "camera_projection", "time"), &TentacleRenderer::render);
 	ClassDB::bind_method(D_METHOD("get_color_texture"), &TentacleRenderer::get_color_texture);
+	ClassDB::bind_method(D_METHOD("get_color_texture_data"), &TentacleRenderer::get_color_texture_data);
 	ClassDB::bind_method(D_METHOD("is_initialized"), &TentacleRenderer::is_initialized);
+	ClassDB::bind_method(D_METHOD("get_size"), &TentacleRenderer::get_size);
+	ClassDB::bind_method(D_METHOD("get_active_count"), &TentacleRenderer::get_active_count);
 }

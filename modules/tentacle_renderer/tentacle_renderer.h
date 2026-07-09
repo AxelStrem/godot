@@ -102,7 +102,10 @@ public:
 
 	// ---- Access ----
 	RID get_color_texture() const { return _color_texture; }
+	PackedByteArray get_color_texture_data() const;
 	bool is_initialized() const { return _initialized; }
+	Vector2i get_size() const { return _size; }
+	int get_active_count() const { return _active_count; }
 
 	TentacleRenderer();
 	~TentacleRenderer();
