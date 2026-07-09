@@ -120,7 +120,7 @@ void TentacleRenderer::_create_textures() {
 		tf.format = RD::DATA_FORMAT_R8G8B8A8_UNORM;
 		tf.width = _size.x;
 		tf.height = _size.y;
-		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT;
+		tf.usage_bits = RD::TEXTURE_USAGE_SAMPLING_BIT | RD::TEXTURE_USAGE_COLOR_ATTACHMENT_BIT | RD::TEXTURE_USAGE_CAN_COPY_FROM_BIT;
 		tf.texture_type = RD::TEXTURE_TYPE_2D;
 
 		RD::TextureView tv;
