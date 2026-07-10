@@ -47,7 +47,7 @@ void TentacleCluster::_rebuild_mesh() {
 	// Layout per tentacle:  2*(nseg+1) vertices,  6*nseg triangle indices.
 	// Vertex attributes: POSITION (world-space guide point),
 	//                    NORMAL   (tentacle direction, normalized),
-	//                    TANGENT  (progress, thickness, noise_seed),
+	//                    TANGENT  (progress, thickness, noise_seed, born_at),
 	//                    COLOR    (.r = side_flag, −1.0 left / +1.0 right).
 	const int verts_per_tentacle = 2 * (nseg + 1);
 	const int idxs_per_tentacle = 6 * nseg;
@@ -94,8 +94,8 @@ void TentacleCluster::_rebuild_mesh() {
 			tan_w[li * 4 + 0] = progress;
 			tan_w[li * 4 + 1] = entry.thickness;
 			tan_w[li * 4 + 2] = noise_seed;
-		tan_w[li * 4 + 3] = 0.0f; // unused
-		col_w[li] = Color(-1.0f, 0.0f, 0.0f, 0.0f); // side_flag
+			tan_w[li * 4 + 3] = entry.born_at;
+			col_w[li] = Color(-1.0f, 0.0f, 0.0f, 0.0f); // side_flag
 
 		// Right vertex (side = +1)
 		int ri = li + 1;
@@ -104,7 +104,7 @@ void TentacleCluster::_rebuild_mesh() {
 		tan_w[ri * 4 + 0] = progress;
 		tan_w[ri * 4 + 1] = entry.thickness;
 		tan_w[ri * 4 + 2] = noise_seed;
-		tan_w[ri * 4 + 3] = 0.0f; // unused
+		tan_w[ri * 4 + 3] = entry.born_at;
 		col_w[ri] = Color(1.0f, 0.0f, 0.0f, 0.0f); // side_flag
 		}
 
@@ -146,7 +146,7 @@ void TentacleCluster::_rebuild_mesh() {
 // Public API
 // ============================================================================
 
-void TentacleCluster::add_tentacle(int p_id, const Vector3 &p_start, const Vector3 &p_end, float p_thickness) {
+void TentacleCluster::add_tentacle(int p_id, const Vector3 &p_start, const Vector3 &p_end, float p_born_at, float p_thickness) {
 	ERR_FAIL_COND_MSG(_id_to_index.has(p_id),
 			vformat("TentacleCluster: tentacle %d already exists in this cluster.", p_id));
 
@@ -155,6 +155,7 @@ void TentacleCluster::add_tentacle(int p_id, const Vector3 &p_start, const Vecto
 	entry.start = p_start;
 	entry.end = p_end;
 	entry.thickness = p_thickness;
+	entry.born_at = p_born_at;
 	entry.segments = _lod_segments();
 
 	_id_to_index[p_id] = _tentacles.size();
@@ -220,7 +221,7 @@ void TentacleCluster::set_lod(LODLevel p_lod) {
 // ============================================================================
 
 void TentacleCluster::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("add_tentacle", "id", "start", "end", "thickness"), &TentacleCluster::add_tentacle, DEFVAL(0.3f));
+	ClassDB::bind_method(D_METHOD("add_tentacle", "id", "start", "end", "born_at", "thickness"), &TentacleCluster::add_tentacle, DEFVAL(0.3f));
 	ClassDB::bind_method(D_METHOD("remove_tentacle", "id"), &TentacleCluster::remove_tentacle);
 	ClassDB::bind_method(D_METHOD("has_tentacle", "id"), &TentacleCluster::has_tentacle);
 	ClassDB::bind_method(D_METHOD("clear"), &TentacleCluster::clear);
