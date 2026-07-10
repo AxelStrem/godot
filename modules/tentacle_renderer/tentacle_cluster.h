@@ -42,6 +42,7 @@ private:
 		Vector3 start;
 		Vector3 end;
 		float thickness = 0.3f;
+		float born_at = 0.0f; // sim_time when spawned (for gradual extension)
 		int segments = 64; // current LOD segment count for this entry
 	};
 
@@ -65,7 +66,7 @@ protected:
 
 public:
 	// ---- Tentacle management ----
-	void add_tentacle(int p_id, const Vector3 &p_start, const Vector3 &p_end, float p_thickness = 0.3f);
+	void add_tentacle(int p_id, const Vector3 &p_start, const Vector3 &p_end, float p_born_at, float p_thickness = 0.3f);
 	void remove_tentacle(int p_id);
 	bool has_tentacle(int p_id) const;
 	void clear();
