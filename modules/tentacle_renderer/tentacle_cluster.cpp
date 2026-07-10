@@ -47,9 +47,9 @@ void TentacleCluster::_rebuild_mesh() {
 	// Layout per tentacle:  2*(nseg+1) vertices,  6*nseg triangle indices.
 	// Vertex attributes: POSITION (world-space guide point),
 	//                    NORMAL   (tentacle direction, normalized),
-	//                    TANGENT  (progress, thickness, noise_seed, unused),
-	//                    TEX_UV2  (.x = side_flag, .y = born_at).
-	// (UV2 is full float; COLOR is RGBA8 so we can't store born_at there.)
+	//                    TANGENT  (progress, thickness, noise_seed, born_at),
+	//                    TEX_UV   (.x = side_flag).
+	// (UV is full float; COLOR is RGBA8 so we can't store born_at there.)
 	const int verts_per_tentacle = 2 * (nseg + 1);
 	const int idxs_per_tentacle = 6 * nseg;
 	const int total_verts = _tentacles.size() * verts_per_tentacle;
@@ -58,19 +58,19 @@ void TentacleCluster::_rebuild_mesh() {
 	PackedVector3Array positions;
 	PackedVector3Array normals;
 	PackedFloat32Array tangents;
-	PackedVector2Array uv2s;
+	PackedVector2Array uvs;
 	PackedInt32Array indices;
 
 	positions.resize(total_verts);
 	normals.resize(total_verts);
 	tangents.resize(total_verts * 4); // 4 floats per vertex
-	uv2s.resize(total_verts);
+	uvs.resize(total_verts);
 	indices.resize(total_idxs);
 
 	Vector3 *pos_w = positions.ptrw();
 	Vector3 *nrm_w = normals.ptrw();
 	float *tan_w = tangents.ptrw();
-	Vector2 *uv2_w = uv2s.ptrw();
+	Vector2 *uv_w = uvs.ptrw();
 	int32_t *idx_w = indices.ptrw();
 
 	int base_vert = 0;
@@ -95,8 +95,8 @@ void TentacleCluster::_rebuild_mesh() {
 			tan_w[li * 4 + 0] = progress;
 			tan_w[li * 4 + 1] = entry.thickness;
 			tan_w[li * 4 + 2] = noise_seed;
-			tan_w[li * 4 + 3] = 0.0f; // unused
-		uv2_w[li] = Vector2(-1.0f, entry.born_at); // side_flag, born_at
+		tan_w[li * 4 + 3] = entry.born_at;
+	uv_w[li] = Vector2(-1.0f, entry.born_at); // side_flag, born_at
 
 	// Right vertex (side = +1)
 		int ri = li + 1;
@@ -105,8 +105,8 @@ void TentacleCluster::_rebuild_mesh() {
 		tan_w[ri * 4 + 0] = progress;
 		tan_w[ri * 4 + 1] = entry.thickness;
 		tan_w[ri * 4 + 2] = noise_seed;
-		tan_w[ri * 4 + 3] = 0.0f; // unused
-		uv2_w[ri] = Vector2(1.0f, entry.born_at); // side_flag, born_at
+		tan_w[ri * 4 + 3] = entry.born_at;
+		uv_w[ri] = Vector2(1.0f, entry.born_at); // side_flag, born_at
 		}
 
 		// Triangle indices — two per segment.
@@ -136,7 +136,7 @@ void TentacleCluster::_rebuild_mesh() {
 	arrays[Mesh::ARRAY_VERTEX] = positions;
 	arrays[Mesh::ARRAY_NORMAL] = normals;
 	arrays[Mesh::ARRAY_TANGENT] = tangents;
-	arrays[Mesh::ARRAY_TEX_UV2] = uv2s;
+	arrays[Mesh::ARRAY_TEX_UV] = uvs;
 	arrays[Mesh::ARRAY_INDEX] = indices;
 
 	_mesh->clear_surfaces();
