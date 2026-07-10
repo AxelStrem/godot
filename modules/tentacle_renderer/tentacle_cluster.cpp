@@ -47,8 +47,8 @@ void TentacleCluster::_rebuild_mesh() {
 	// Layout per tentacle:  2*(nseg+1) vertices,  6*nseg triangle indices.
 	// Vertex attributes: POSITION (world-space guide point),
 	//                    NORMAL   (tentacle direction, normalized),
-	//                    TANGENT  (progress, thickness, noise_seed, born_at),
-	//                    COLOR    (.r = side_flag, −1.0 left / +1.0 right).
+	//                    TANGENT  (progress, thickness, noise_seed, unused),
+	//                    COLOR    (.r = side_flag, .b = born_at).
 	const int verts_per_tentacle = 2 * (nseg + 1);
 	const int idxs_per_tentacle = 6 * nseg;
 	const int total_verts = _tentacles.size() * verts_per_tentacle;
@@ -94,18 +94,18 @@ void TentacleCluster::_rebuild_mesh() {
 			tan_w[li * 4 + 0] = progress;
 			tan_w[li * 4 + 1] = entry.thickness;
 			tan_w[li * 4 + 2] = noise_seed;
-			tan_w[li * 4 + 3] = entry.born_at;
-			col_w[li] = Color(-1.0f, 0.0f, 0.0f, 0.0f); // side_flag
+			tan_w[li * 4 + 3] = 0.0f; // unused
+			col_w[li] = Color(-1.0f, 0.0f, entry.born_at, 0.0f); // side_flag, born_at
 
 		// Right vertex (side = +1)
-		int ri = li + 1;
-		pos_w[ri] = pt;
-		nrm_w[ri] = dir;
-		tan_w[ri * 4 + 0] = progress;
-		tan_w[ri * 4 + 1] = entry.thickness;
-		tan_w[ri * 4 + 2] = noise_seed;
-		tan_w[ri * 4 + 3] = entry.born_at;
-		col_w[ri] = Color(1.0f, 0.0f, 0.0f, 0.0f); // side_flag
+			int ri = li + 1;
+			pos_w[ri] = pt;
+			nrm_w[ri] = dir;
+			tan_w[ri * 4 + 0] = progress;
+			tan_w[ri * 4 + 1] = entry.thickness;
+			tan_w[ri * 4 + 2] = noise_seed;
+			tan_w[ri * 4 + 3] = 0.0f; // unused
+			col_w[ri] = Color(1.0f, 0.0f, entry.born_at, 0.0f); // side_flag, born_at
 		}
 
 		// Triangle indices — two per segment.
