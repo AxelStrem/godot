@@ -45,11 +45,12 @@ void TentacleCluster::_rebuild_mesh() {
 
 	// ---- Build vertex & index arrays ----
 	// Layout per tentacle:  2*(nseg+1) vertices,  6*nseg triangle indices.
-	// Vertex attributes: POSITION (world-space guide point),
+	// Vertex attributes: POSITION (local-space guide point relative to _origin),
 	//                    NORMAL   (tentacle direction, normalized),
 	//                    TANGENT  (progress, thickness, noise_seed, born_at),
-	//                    TEX_UV   (.x = side_flag).
-	// (UV is full float; COLOR is RGBA8 so we can't store born_at there.)
+	//                    TEX_UV   (.x = side_flag, .y = born_at).
+	// Cluster Node3D positioned at _origin → MODEL_MATRIX translates to world.
+	// Shader uses local VERTEX for noise (small numbers, high precision).
 	const int verts_per_tentacle = 2 * (nseg + 1);
 	const int idxs_per_tentacle = 6 * nseg;
 	const int total_verts = _tentacles.size() * verts_per_tentacle;
@@ -90,17 +91,17 @@ void TentacleCluster::_rebuild_mesh() {
 
 			// Left vertex (side = -1)
 			int li = base_vert + 2 * i;
-			pos_w[li] = pt;
-			nrm_w[li] = dir;
-			tan_w[li * 4 + 0] = progress;
-			tan_w[li * 4 + 1] = entry.thickness;
-			tan_w[li * 4 + 2] = noise_seed;
+		pos_w[li] = pt - _origin;
+		nrm_w[li] = dir;
+		tan_w[li * 4 + 0] = progress;
+		tan_w[li * 4 + 1] = entry.thickness;
+		tan_w[li * 4 + 2] = noise_seed;
 		tan_w[li * 4 + 3] = entry.born_at;
 	uv_w[li] = Vector2(-1.0f, entry.born_at); // side_flag, born_at
 
 	// Right vertex (side = +1)
 		int ri = li + 1;
-		pos_w[ri] = pt;
+		pos_w[ri] = pt - _origin;
 		nrm_w[ri] = dir;
 		tan_w[ri * 4 + 0] = progress;
 		tan_w[ri * 4 + 1] = entry.thickness;
@@ -192,6 +193,17 @@ void TentacleCluster::clear() {
 	_rebuild_mesh();
 }
 
+void TentacleCluster::set_origin(const Vector3 &p_origin) {
+	if (_origin == p_origin) {
+		return;
+	}
+	_origin = p_origin;
+	// Rebuild with new local-space positions.
+	if (!_tentacles.is_empty()) {
+		_rebuild_mesh();
+	}
+}
+
 void TentacleCluster::set_lod(LODLevel p_lod) {
 	if (_current_lod == p_lod) {
 		return;
@@ -227,6 +239,7 @@ void TentacleCluster::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_tentacle", "id"), &TentacleCluster::has_tentacle);
 	ClassDB::bind_method(D_METHOD("clear"), &TentacleCluster::clear);
 	ClassDB::bind_method(D_METHOD("get_tentacle_count"), &TentacleCluster::get_tentacle_count);
+	ClassDB::bind_method(D_METHOD("set_origin", "origin"), &TentacleCluster::set_origin);
 
 	ClassDB::bind_method(D_METHOD("set_lod", "lod"), &TentacleCluster::set_lod);
 	ClassDB::bind_method(D_METHOD("get_lod"), &TentacleCluster::get_lod);

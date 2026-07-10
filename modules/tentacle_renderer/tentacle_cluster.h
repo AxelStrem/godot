@@ -52,6 +52,7 @@ private:
 
 	Ref<ArrayMesh> _mesh;
 	LODLevel _current_lod = LOD_HIGH;
+	Vector3 _origin; // cluster center in world space; mesh stores local positions relative to this
 
 	// Per-LOD segment counts.
 	static const int SEGMENTS_PER_LOD[4];
@@ -75,6 +76,10 @@ public:
 	// ---- LOD ----
 	void set_lod(LODLevel p_lod);
 	LODLevel get_lod() const { return _current_lod; }
+
+	// ---- Origin (grid cell center for local-space vertices) ----
+	void set_origin(const Vector3 &p_origin);
+	Vector3 get_origin() const { return _origin; }
 
 	TentacleCluster();
 	~TentacleCluster();
