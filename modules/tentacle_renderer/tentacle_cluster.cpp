@@ -48,7 +48,7 @@ void TentacleCluster::_rebuild_mesh() {
 	// Vertex attributes: POSITION (world-space guide point),
 	//                    NORMAL   (tentacle direction, normalized),
 	//                    TANGENT  (progress, thickness, noise_seed),
-	//                    CUSTOM0  (side_flag, 0, 0, 0).
+	//                    COLOR    (.r = side_flag, −1.0 left / +1.0 right).
 	const int verts_per_tentacle = 2 * (nseg + 1);
 	const int idxs_per_tentacle = 6 * nseg;
 	const int total_verts = _tentacles.size() * verts_per_tentacle;
@@ -57,19 +57,19 @@ void TentacleCluster::_rebuild_mesh() {
 	PackedVector3Array positions;
 	PackedVector3Array normals;
 	PackedFloat32Array tangents;
-	PackedColorArray custom0s;
+	PackedColorArray colors;
 	PackedInt32Array indices;
 
 	positions.resize(total_verts);
 	normals.resize(total_verts);
 	tangents.resize(total_verts * 4); // 4 floats per vertex
-	custom0s.resize(total_verts);
+	colors.resize(total_verts);
 	indices.resize(total_idxs);
 
 	Vector3 *pos_w = positions.ptrw();
 	Vector3 *nrm_w = normals.ptrw();
 	float *tan_w = tangents.ptrw();
-	Color *c0_w = custom0s.ptrw();
+	Color *col_w = colors.ptrw();
 	int32_t *idx_w = indices.ptrw();
 
 	int base_vert = 0;
@@ -95,7 +95,7 @@ void TentacleCluster::_rebuild_mesh() {
 			tan_w[li * 4 + 1] = entry.thickness;
 			tan_w[li * 4 + 2] = noise_seed;
 		tan_w[li * 4 + 3] = 0.0f; // unused
-		c0_w[li] = Color(-1.0f, 0.0f, 0.0f, 0.0f); // side_flag
+		col_w[li] = Color(-1.0f, 0.0f, 0.0f, 0.0f); // side_flag
 
 		// Right vertex (side = +1)
 		int ri = li + 1;
@@ -105,7 +105,7 @@ void TentacleCluster::_rebuild_mesh() {
 		tan_w[ri * 4 + 1] = entry.thickness;
 		tan_w[ri * 4 + 2] = noise_seed;
 		tan_w[ri * 4 + 3] = 0.0f; // unused
-		c0_w[ri] = Color(1.0f, 0.0f, 0.0f, 0.0f); // side_flag
+		col_w[ri] = Color(1.0f, 0.0f, 0.0f, 0.0f); // side_flag
 		}
 
 		// Triangle indices — two per segment.
@@ -135,7 +135,7 @@ void TentacleCluster::_rebuild_mesh() {
 	arrays[Mesh::ARRAY_VERTEX] = positions;
 	arrays[Mesh::ARRAY_NORMAL] = normals;
 	arrays[Mesh::ARRAY_TANGENT] = tangents;
-	arrays[Mesh::ARRAY_CUSTOM0] = custom0s;
+	arrays[Mesh::ARRAY_COLOR] = colors;
 	arrays[Mesh::ARRAY_INDEX] = indices;
 
 	_mesh->clear_surfaces();
