@@ -8,6 +8,7 @@
 
 #include "register_types.h"
 
+#include "tentacle_cluster.h"
 #include "tentacle_renderer.h"
 
 #include "core/object/class_db.h"
@@ -18,6 +19,7 @@ void initialize_tentacle_renderer_module(ModuleInitializationLevel p_level) {
 	}
 
 	GDREGISTER_CLASS(TentacleRenderer);
+	GDREGISTER_CLASS(TentacleCluster);
 }
 
 void uninitialize_tentacle_renderer_module(ModuleInitializationLevel p_level) {

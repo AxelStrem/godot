@@ -5,6 +5,10 @@ Import("env")
 Import("env_modules")
 
 env_tentacle = env_modules.Clone()
-env_tentacle.add_source_files(env.modules_sources, "*.cpp")
+env_tentacle.add_source_files(env.modules_sources, [
+    "register_types.cpp",
+    "tentacle_cluster.cpp",
+    "tentacle_renderer.cpp",
+])
 env_tentacle.GLSL_HEADER("tentacle.glsl")
 env_tentacle.Depends(Glob("*.glsl.gen.h"), ["#glsl_builders.py"])
