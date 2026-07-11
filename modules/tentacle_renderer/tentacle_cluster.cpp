@@ -45,10 +45,12 @@ void TentacleCluster::_rebuild_mesh() {
 
 	// ---- Build vertex & index arrays ----
 	// Layout per tentacle:  2*(nseg+1) vertices,  6*nseg triangle indices.
-	// Vertex attributes: POSITION (local-space guide point relative to _origin),
+	// Vertex attributes: POSITION (local-space relative to _origin),
 	//                    NORMAL   (tentacle direction, normalized),
-	//                    TANGENT  (progress, thickness, noise_seed, born_at),
-	//                    TEX_UV   (.x = side_flag, .y = born_at).
+	//                    TEX_UV   (.x = side_flag, .y = born_at),
+	//                    TEX_UV2  (.x = progress,   .y = thickness).
+	// TANGENT is NOT used — Godot transforms it by MODEL, corrupting data.
+	// Shader derives noise_seed from born_at (unique per spawn).
 	// Cluster Node3D positioned at _origin → MODEL_MATRIX translates to world.
 	// Shader uses local VERTEX for noise (small numbers, high precision).
 	const int verts_per_tentacle = 2 * (nseg + 1);
@@ -58,20 +60,23 @@ void TentacleCluster::_rebuild_mesh() {
 
 	PackedVector3Array positions;
 	PackedVector3Array normals;
-	PackedFloat32Array tangents;
+	PackedFloat32Array tangents; // kept for array format, all zeros
 	PackedVector2Array uvs;
+	PackedVector2Array uv2s;
 	PackedInt32Array indices;
 
 	positions.resize(total_verts);
 	normals.resize(total_verts);
-	tangents.resize(total_verts * 4); // 4 floats per vertex
+	tangents.resize(total_verts * 4); // 4 floats per vertex, all zero
 	uvs.resize(total_verts);
+	uv2s.resize(total_verts);
 	indices.resize(total_idxs);
 
 	Vector3 *pos_w = positions.ptrw();
 	Vector3 *nrm_w = normals.ptrw();
 	float *tan_w = tangents.ptrw();
 	Vector2 *uv_w = uvs.ptrw();
+	Vector2 *uv2_w = uv2s.ptrw();
 	int32_t *idx_w = indices.ptrw();
 
 	int base_vert = 0;
@@ -83,31 +88,32 @@ void TentacleCluster::_rebuild_mesh() {
 		Vector3 end = entry.end;
 		Vector3 dir = (end - start).normalized();
 
-		float noise_seed = _hash_to_float(entry.id);
-
 		for (int i = 0; i <= entry.segments; i++) {
 			float progress = float(i) / float(MAX(entry.segments, 1));
 			Vector3 pt = start.lerp(end, progress);
 
 			// Left vertex (side = -1)
 			int li = base_vert + 2 * i;
-		pos_w[li] = pt - _origin;
-		nrm_w[li] = dir;
-		tan_w[li * 4 + 0] = progress;
-		tan_w[li * 4 + 1] = entry.thickness;
-		tan_w[li * 4 + 2] = noise_seed;
-		tan_w[li * 4 + 3] = entry.born_at;
-	uv_w[li] = Vector2(-1.0f, entry.born_at); // side_flag, born_at
+			pos_w[li] = pt - _origin;
+			nrm_w[li] = dir;
+			// TANGENT zeroed — not used (Godot transforms it).
+			tan_w[li * 4 + 0] = 0.0f;
+			tan_w[li * 4 + 1] = 0.0f;
+			tan_w[li * 4 + 2] = 0.0f;
+			tan_w[li * 4 + 3] = 0.0f;
+			uv_w[li]  = Vector2(-1.0f, entry.born_at);      // (side_flag, born_at)
+			uv2_w[li] = Vector2(progress, entry.thickness);  // (progress, thickness)
 
-	// Right vertex (side = +1)
-		int ri = li + 1;
-		pos_w[ri] = pt - _origin;
-		nrm_w[ri] = dir;
-		tan_w[ri * 4 + 0] = progress;
-		tan_w[ri * 4 + 1] = entry.thickness;
-		tan_w[ri * 4 + 2] = noise_seed;
-		tan_w[ri * 4 + 3] = entry.born_at;
-		uv_w[ri] = Vector2(1.0f, entry.born_at); // side_flag, born_at
+			// Right vertex (side = +1)
+			int ri = li + 1;
+			pos_w[ri] = pt - _origin;
+			nrm_w[ri] = dir;
+			tan_w[ri * 4 + 0] = 0.0f;
+			tan_w[ri * 4 + 1] = 0.0f;
+			tan_w[ri * 4 + 2] = 0.0f;
+			tan_w[ri * 4 + 3] = 0.0f;
+			uv_w[ri]  = Vector2(1.0f, entry.born_at);       // (side_flag, born_at)
+			uv2_w[ri] = Vector2(progress, entry.thickness);  // (progress, thickness)
 		}
 
 		// Triangle indices — two per segment.
@@ -138,6 +144,7 @@ void TentacleCluster::_rebuild_mesh() {
 	arrays[Mesh::ARRAY_NORMAL] = normals;
 	arrays[Mesh::ARRAY_TANGENT] = tangents;
 	arrays[Mesh::ARRAY_TEX_UV] = uvs;
+	arrays[Mesh::ARRAY_TEX_UV2] = uv2s;
 	arrays[Mesh::ARRAY_INDEX] = indices;
 
 	_mesh->clear_surfaces();
