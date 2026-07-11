@@ -11,7 +11,7 @@
 #include "core/math/vector3.h"
 #include "core/object/class_db.h"
 #include "core/templates/hashfuncs.h"
-#include "scene/resources/mesh.h"
+#include "scene/resources/multimesh.h"
 
 // Per-LOD segment counts (must match the declaration in .h).
 const int TentacleCluster::SEGMENTS_PER_LOD[4] = { 64, 32, 16, 0 };
@@ -31,124 +31,98 @@ float TentacleCluster::_hash_to_float(int p_id) {
 	return float(h % 20000u) * 0.001f - 10.0f;
 }
 
-void TentacleCluster::_rebuild_mesh() {
-	if (!_mesh.is_valid()) {
-		_mesh.instantiate();
-		set_mesh(_mesh);
-	}
-
+// Build (or rebuild) the shared ArrayMesh for the current LOD.
+// This is a straight Z-aligned strip from (0,0,0) to (0,0,1) with
+// both left/right vertices at each centerline point.
+// The mesh is instanced by MultiMesh — the instance transform maps
+// (0,0,progress) → start + dir · progress · length in world space.
+void TentacleCluster::_create_shared_mesh() {
 	int nseg = _lod_segments();
-	if (nseg < 2 || _tentacles.is_empty()) {
-		_mesh->clear_surfaces();
+	if (nseg < 2) {
+		if (_shared_mesh.is_valid()) {
+			_shared_mesh->clear_surfaces();
+		}
 		return;
 	}
 
-	// ---- Build vertex & index arrays ----
-	// Layout per tentacle:  2*(nseg+1) vertices,  6*nseg triangle indices.
-	// Vertex attributes: POSITION (local-space relative to _origin),
-	//                    NORMAL   (tentacle direction, normalized),
-	//                    TEX_UV   (.x = side_flag, .y = born_at),
-	//                    TEX_UV2  (.x = progress,   .y = thickness).
-	// TANGENT is NOT used — Godot transforms it by MODEL, corrupting data.
-	// Shader derives noise_seed from born_at (unique per spawn).
-	// Cluster Node3D positioned at _origin → MODEL_MATRIX translates to world.
-	// Shader uses local VERTEX for noise (small numbers, high precision).
-	const int verts_per_tentacle = 2 * (nseg + 1);
-	const int idxs_per_tentacle = 6 * nseg;
-	const int total_verts = _tentacles.size() * verts_per_tentacle;
-	const int total_idxs = _tentacles.size() * idxs_per_tentacle;
+	if (!_shared_mesh.is_valid()) {
+		_shared_mesh.instantiate();
+	} else if (_shared_mesh->get_surface_count() > 0) {
+		_shared_mesh->clear_surfaces();
+	}
+
+	const int vert_count = 2 * (nseg + 1);
+	const int idx_count = 6 * nseg;
 
 	PackedVector3Array positions;
 	PackedVector3Array normals;
-	PackedFloat32Array tangents; // kept for array format, all zeros
 	PackedVector2Array uvs;
-	PackedVector2Array uv2s;
 	PackedInt32Array indices;
 
-	positions.resize(total_verts);
-	normals.resize(total_verts);
-	tangents.resize(total_verts * 4); // 4 floats per vertex, all zero
-	uvs.resize(total_verts);
-	uv2s.resize(total_verts);
-	indices.resize(total_idxs);
+	positions.resize(vert_count);
+	normals.resize(vert_count);
+	uvs.resize(vert_count);
+	indices.resize(idx_count);
 
 	Vector3 *pos_w = positions.ptrw();
 	Vector3 *nrm_w = normals.ptrw();
-	float *tan_w = tangents.ptrw();
 	Vector2 *uv_w = uvs.ptrw();
-	Vector2 *uv2_w = uv2s.ptrw();
 	int32_t *idx_w = indices.ptrw();
 
-	int base_vert = 0;
-	int base_idx = 0;
+	// Build a Z-aligned strip: each segment has a left (-1) and right (+1) vertex.
+	// NORMAL = forward (0,0,1) so the shader can use it as the billboard tangent.
+	for (int i = 0; i <= nseg; i++) {
+		float progress = float(i) / float(nseg);
+		int li = 2 * i;
+		int ri = 2 * i + 1;
 
-	for (int t = 0; t < _tentacles.size(); t++) {
-		const TentacleEntry &entry = _tentacles[t];
-		Vector3 start = entry.start;
-		Vector3 end = entry.end;
-		Vector3 dir = (end - start).normalized();
-
-		for (int i = 0; i <= entry.segments; i++) {
-			float progress = float(i) / float(MAX(entry.segments, 1));
-			Vector3 pt = start.lerp(end, progress);
-
-			// Left vertex (side = -1)
-			int li = base_vert + 2 * i;
-			pos_w[li] = pt - _origin;
-			nrm_w[li] = dir;
-			// TANGENT zeroed — not used (Godot transforms it).
-			tan_w[li * 4 + 0] = 0.0f;
-			tan_w[li * 4 + 1] = 0.0f;
-			tan_w[li * 4 + 2] = 0.0f;
-			tan_w[li * 4 + 3] = 0.0f;
-			uv_w[li]  = Vector2(-1.0f, entry.born_at);      // (side_flag, born_at)
-			uv2_w[li] = Vector2(progress, entry.thickness);  // (progress, thickness)
-
-			// Right vertex (side = +1)
-			int ri = li + 1;
-			pos_w[ri] = pt - _origin;
-			nrm_w[ri] = dir;
-			tan_w[ri * 4 + 0] = 0.0f;
-			tan_w[ri * 4 + 1] = 0.0f;
-			tan_w[ri * 4 + 2] = 0.0f;
-			tan_w[ri * 4 + 3] = 0.0f;
-			uv_w[ri]  = Vector2(1.0f, entry.born_at);       // (side_flag, born_at)
-			uv2_w[ri] = Vector2(progress, entry.thickness);  // (progress, thickness)
-		}
-
-		// Triangle indices — two per segment.
-		// Segment i:  vertices at 2i (L), 2i+1 (R), 2(i+1) (L), 2(i+1)+1 (R).
-		// Triangles:  (L0, R0, L1) and (R0, R1, L1).
-		for (int i = 0; i < entry.segments; i++) {
-			int i0 = base_vert + 2 * i;       // L_i
-			int i1 = i0 + 1;                   // R_i
-			int i2 = i0 + 2;                   // L_{i+1}
-			int i3 = i0 + 3;                   // R_{i+1}
-			int bi = base_idx + 6 * i;
-			idx_w[bi + 0] = i0;
-			idx_w[bi + 1] = i1;
-			idx_w[bi + 2] = i2;
-			idx_w[bi + 3] = i1;
-			idx_w[bi + 4] = i3;
-			idx_w[bi + 5] = i2;
-		}
-
-		base_vert += verts_per_tentacle;
-		base_idx += idxs_per_tentacle;
+		pos_w[li] = Vector3(0, 0, progress);
+		pos_w[ri] = Vector3(0, 0, progress);
+		nrm_w[li] = Vector3(0, 0, 1);
+		nrm_w[ri] = Vector3(0, 0, 1);
+		uv_w[li] = Vector2(-1, 0); // left  side-flag (unused, kept for format)
+		uv_w[ri] = Vector2(1, 0);  // right side-flag (unused, kept for format)
 	}
 
-	// ---- Upload to ArrayMesh ----
+	for (int i = 0; i < nseg; i++) {
+		int i0 = 2 * i;
+		int i1 = i0 + 1;
+		int i2 = i0 + 2;
+		int i3 = i0 + 3;
+		int bi = 6 * i;
+		idx_w[bi + 0] = i0;
+		idx_w[bi + 1] = i1;
+		idx_w[bi + 2] = i2;
+		idx_w[bi + 3] = i1;
+		idx_w[bi + 4] = i3;
+		idx_w[bi + 5] = i2;
+	}
+
 	Array arrays;
 	arrays.resize(Mesh::ARRAY_MAX);
 	arrays[Mesh::ARRAY_VERTEX] = positions;
 	arrays[Mesh::ARRAY_NORMAL] = normals;
-	arrays[Mesh::ARRAY_TANGENT] = tangents;
 	arrays[Mesh::ARRAY_TEX_UV] = uvs;
-	arrays[Mesh::ARRAY_TEX_UV2] = uv2s;
 	arrays[Mesh::ARRAY_INDEX] = indices;
 
-	_mesh->clear_surfaces();
-	_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays, Array(), Dictionary(), 0);
+	_shared_mesh->add_surface_from_arrays(Mesh::PRIMITIVE_TRIANGLES, arrays, Array(), Dictionary(), 0);
+
+	// Bind to the MultiMesh (preserves existing instance data).
+	if (_multimesh.is_valid()) {
+		_multimesh->set_mesh(_shared_mesh);
+	}
+}
+
+// Upload all cached transforms and custom data to the MultiMesh.
+// Called after every add/remove because set_instance_count() reallocates
+// the GPU buffer, destroying all previously-uploaded data.
+void TentacleCluster::_sync_multimesh() {
+	int count = _cached_transforms.size();
+	_multimesh->set_instance_count(count);
+	for (int i = 0; i < count; i++) {
+		_multimesh->set_instance_transform(i, _cached_transforms[i]);
+		_multimesh->set_instance_custom_data(i, _cached_custom_data[i]);
+	}
 }
 
 // ============================================================================
@@ -159,35 +133,58 @@ void TentacleCluster::add_tentacle(int p_id, const Vector3 &p_start, const Vecto
 	ERR_FAIL_COND_MSG(_id_to_index.has(p_id),
 			vformat("TentacleCluster: tentacle %d already exists in this cluster.", p_id));
 
-	TentacleEntry entry;
-	entry.id = p_id;
-	entry.start = p_start;
-	entry.end = p_end;
-	entry.thickness = p_thickness;
-	entry.born_at = p_born_at;
-	entry.segments = _lod_segments();
+	Vector3 dir = (p_end - p_start).normalized();
+	float len = p_start.distance_to(p_end);
 
-	_id_to_index[p_id] = _tentacles.size();
-	_tentacles.append(entry);
+	// Build an orthonormal basis where Z = tentacle direction.
+	Vector3 up = Vector3(0, 1, 0);
+	if (Math::abs(dir.dot(up)) > 0.999f) {
+		up = Vector3(1, 0, 0);
+	}
+	Vector3 right = dir.cross(up).normalized();
+	up = right.cross(dir).normalized();
 
-	_rebuild_mesh();
+	Transform3D xform;
+	xform.origin = p_start;
+	// Build orthonormal basis with length baked into the Z column (dir * len).
+	// NOTE: Do NOT use Basis::scaled() — it left-multiplies (S * M), scaling
+	// global axes. We need the local Z axis (column 2) scaled, which is simply
+	// Basis(right, up, dir * len).
+	xform.basis = Basis(right, up, dir * len);
+
+	Color custom = Color(p_born_at, _hash_to_float(p_id), p_thickness, 0);
+
+	int idx = _cached_transforms.size();
+	_cached_transforms.push_back(xform);
+	_cached_custom_data.push_back(custom);
+	_index_to_id.push_back(p_id);
+	_id_to_index[p_id] = idx;
+
+	_sync_multimesh();
 }
 
 void TentacleCluster::remove_tentacle(int p_id) {
 	ERR_FAIL_COND(!_id_to_index.has(p_id));
 
 	int idx = _id_to_index[p_id];
+	int last = _cached_transforms.size() - 1;
+
+	// Swap-remove in our local caches (MultiMesh data is re-uploaded below).
+	if (idx != last) {
+		_cached_transforms.set(idx, _cached_transforms[last]);
+		_cached_custom_data.set(idx, _cached_custom_data[last]);
+
+		int moved_id = _index_to_id[last];
+		_index_to_id.set(idx, moved_id);
+		_id_to_index[moved_id] = idx;
+	}
+
+	_cached_transforms.resize(last);
+	_cached_custom_data.resize(last);
+	_index_to_id.resize(last);
 	_id_to_index.erase(p_id);
 
-	// Swap-remove for O(1) removal.
-	int last_idx = _tentacles.size() - 1;
-	if (idx != last_idx) {
-		_tentacles.set(idx, _tentacles[last_idx]);
-		_id_to_index[_tentacles[idx].id] = idx;
-	}
-	_tentacles.resize(last_idx);
-
-	_rebuild_mesh();
+	_sync_multimesh();
 }
 
 bool TentacleCluster::has_tentacle(int p_id) const {
@@ -195,20 +192,11 @@ bool TentacleCluster::has_tentacle(int p_id) const {
 }
 
 void TentacleCluster::clear() {
-	_tentacles.clear();
+	_cached_transforms.clear();
+	_cached_custom_data.clear();
+	_index_to_id.clear();
 	_id_to_index.clear();
-	_rebuild_mesh();
-}
-
-void TentacleCluster::set_origin(const Vector3 &p_origin) {
-	if (_origin == p_origin) {
-		return;
-	}
-	_origin = p_origin;
-	// Rebuild with new local-space positions.
-	if (!_tentacles.is_empty()) {
-		_rebuild_mesh();
-	}
+	_multimesh->set_instance_count(0);
 }
 
 void TentacleCluster::set_lod(LODLevel p_lod) {
@@ -220,19 +208,8 @@ void TentacleCluster::set_lod(LODLevel p_lod) {
 	if (p_lod == LOD_CULLED) {
 		hide();
 	} else {
+		_create_shared_mesh(); // rebuild shared mesh with new segment count
 		show();
-		// Update per-entry segment counts and rebuild.
-		int new_seg = _lod_segments();
-		bool changed = false;
-		for (TentacleEntry &e : _tentacles) {
-			if (e.segments != new_seg) {
-				e.segments = new_seg;
-				changed = true;
-			}
-		}
-		if (changed) {
-			_rebuild_mesh();
-		}
 	}
 }
 
@@ -259,6 +236,13 @@ void TentacleCluster::_bind_methods() {
 
 TentacleCluster::TentacleCluster() {
 	set_cast_shadows_setting(SHADOW_CASTING_SETTING_OFF);
+
+	_multimesh.instantiate();
+	_multimesh->set_transform_format(MultiMesh::TRANSFORM_3D);
+	_multimesh->set_use_custom_data(true);
+	set_multimesh(_multimesh);
+
+	_create_shared_mesh();
 }
 
 TentacleCluster::~TentacleCluster() {

@@ -5,27 +5,27 @@
 /*                             GODOT ENGINE                               */
 /*                        https://godotengine.org                         */
 /**************************************************************************/
-/*  A MeshInstance3D that holds a batch of GPU-simulated tentacles.       */
-/*  The CPU generates straight-line guide points only; noise wiggle,      */
-/*  billboarding, and taper happen in the spatial vertex shader.          */
+/*  A MultiMeshInstance3D that batches GPU-simulated tentacles.           */
+/*  One shared ArrayMesh (straight strip) is instanced per tentacle.      */
+/*  Noise wiggle, billboarding, and taper happen in the vertex shader.    */
 /*                                                                        */
-/*  One cluster covers a ~20×20 m world region.  Tentacles are static     */
-/*  after spawn so the mesh is only rebuilt on add/remove/LOD change.     */
+/*  One cluster covers a ~20×20 m world region.  Add/remove is O(1)      */
+/*  GPU buffer writes (swap-remove).  LOD changes swap the shared mesh.   */
 /**************************************************************************/
 
 #pragma once
 
-#include "scene/3d/mesh_instance_3d.h"
+#include "scene/3d/multimesh_instance_3d.h"
+#include "scene/resources/multimesh.h"
 
 #include "core/math/vector3.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/vector.h"
 
-class Material;
 class ArrayMesh;
 
-class TentacleCluster : public MeshInstance3D {
-	GDCLASS(TentacleCluster, MeshInstance3D);
+class TentacleCluster : public MultiMeshInstance3D {
+	GDCLASS(TentacleCluster, MultiMeshInstance3D);
 
 public:
 	// ---- LOD levels ----
@@ -33,32 +33,32 @@ public:
 		LOD_HIGH = 0,   // 64 segments, full noise   (near)
 		LOD_MEDIUM = 1, // 32 segments, half noise
 		LOD_LOW = 2,    // 16 segments, no noise (straight lines)
-		LOD_CULLED = 3 // hidden entirely (distance)
+		LOD_CULLED = 3  // hidden entirely (distance)
 	};
 
 private:
-	struct TentacleEntry {
-		int id = 0;
-		Vector3 start;
-		Vector3 end;
-		float thickness = 0.3f;
-		float born_at = 0.0f; // sim_time when spawned (for gradual extension)
-		int segments = 64; // current LOD segment count for this entry
-	};
+	Ref<ArrayMesh> _shared_mesh;
+	Ref<MultiMesh> _multimesh;
 
-	// ---- Data ----
-	Vector<TentacleEntry> _tentacles;
-	HashMap<int, int> _id_to_index; // tentacle id → index in _tentacles
+	// Per-instance tracking: tentacle id ↔ MultiMesh instance index.
+	HashMap<int, int> _id_to_index;
+	Vector<int> _index_to_id;   // parallel to MultiMesh instances
 
-	Ref<ArrayMesh> _mesh;
+	// Local caches — MultiMesh::set_instance_count() reallocates the GPU
+	// buffer (zeroing everything), so we must keep our own copies and
+	// re-upload after every resize.
+	Vector<Transform3D> _cached_transforms;
+	Vector<Color> _cached_custom_data;
+
 	LODLevel _current_lod = LOD_HIGH;
-	Vector3 _origin; // cluster center in world space; mesh stores local positions relative to this
+	Vector3 _origin; // grid cell center (for LOD distance checks only)
 
 	// Per-LOD segment counts.
 	static const int SEGMENTS_PER_LOD[4];
 
 	// ---- Helpers ----
-	void _rebuild_mesh();
+	void _create_shared_mesh();
+	void _sync_multimesh();
 	int _lod_segments() const;
 	static float _hash_to_float(int p_id);
 
@@ -71,14 +71,14 @@ public:
 	void remove_tentacle(int p_id);
 	bool has_tentacle(int p_id) const;
 	void clear();
-	int get_tentacle_count() const { return _tentacles.size(); }
+	int get_tentacle_count() const { return _index_to_id.size(); }
 
 	// ---- LOD ----
 	void set_lod(LODLevel p_lod);
 	LODLevel get_lod() const { return _current_lod; }
 
-	// ---- Origin (grid cell center for local-space vertices) ----
-	void set_origin(const Vector3 &p_origin);
+	// ---- Origin (grid cell center for LOD checks) ----
+	void set_origin(const Vector3 &p_origin) { _origin = p_origin; }
 	Vector3 get_origin() const { return _origin; }
 
 	TentacleCluster();
