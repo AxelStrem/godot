@@ -29,11 +29,14 @@ class TentacleCluster : public MultiMeshInstance3D {
 
 public:
 	// ---- LOD levels ----
+	// Per-level settings (segments, noise) are driven by the shared
+	// ShaderMaterial from GDScript; the C++ side only controls segment count.
 	enum LODLevel {
-		LOD_HIGH = 0,   // 64 segments, full noise   (near)
-		LOD_MEDIUM = 1, // 32 segments, half noise
-		LOD_LOW = 2,    // 16 segments, no noise (straight lines)
-		LOD_CULLED = 3  // hidden entirely (distance)
+		LOD_HIGH = 0,     // 96 segments (near)
+		LOD_MEDIUM = 1,   // 48 segments
+		LOD_LOW = 2,      // 16 segments
+		LOD_VERY_LOW = 3, //  8 segments (straight lines)
+		LOD_CULLED = 4    // hidden entirely (distance)
 	};
 
 private:
@@ -54,7 +57,7 @@ private:
 	Vector3 _origin; // grid cell center (for LOD distance checks only)
 
 	// Per-LOD segment counts.
-	static const int SEGMENTS_PER_LOD[4];
+	static const int SEGMENTS_PER_LOD[5];
 
 	// ---- Helpers ----
 	void _create_shared_mesh();

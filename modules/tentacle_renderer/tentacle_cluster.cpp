@@ -14,7 +14,8 @@
 #include "scene/resources/multimesh.h"
 
 // Per-LOD segment counts (must match the declaration in .h).
-const int TentacleCluster::SEGMENTS_PER_LOD[4] = { 64, 32, 16, 0 };
+// Only CULLED gets 0 segments; the other four are active.
+const int TentacleCluster::SEGMENTS_PER_LOD[5] = { 96, 48, 16, 8, 0 };
 
 // ============================================================================
 // Internal helpers
@@ -231,6 +232,7 @@ void TentacleCluster::_bind_methods() {
 	BIND_ENUM_CONSTANT(LOD_HIGH);
 	BIND_ENUM_CONSTANT(LOD_MEDIUM);
 	BIND_ENUM_CONSTANT(LOD_LOW);
+	BIND_ENUM_CONSTANT(LOD_VERY_LOW);
 	BIND_ENUM_CONSTANT(LOD_CULLED);
 }
 
