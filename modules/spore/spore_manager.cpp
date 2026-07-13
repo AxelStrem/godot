@@ -156,6 +156,32 @@ int32_t SporeManager::add_spore(const Vector3 &p_pos, int p_profile, int p_chamb
 	return id;
 }
 
+int32_t SporeManager::add_spore_with_time(const Vector3 &p_pos, int p_profile, int p_chamber_id, float p_spawn_depth, double p_spawn_time) {
+	int32_t id = _allocate_id();
+	_positions.set(id, p_pos);
+	_spawn_times.set(id, (float)p_spawn_time);
+	_spawn_depths.set(id, p_spawn_depth);
+	_radii.set(id, 0.0001f);     // Reset stale radius from recycled ID; update() will grow it.
+	_force_limits.set(id, 0.0f); // Reset stale force-limit from recycled ID.
+	_shrink_times.set(id, -1.0f); // Reset stale shrink state from recycled ID.
+	_shrink_start_radii.set(id, 0.0f);
+	_seed_offsets.set(id, Math::randf() * 6.2831853f);
+	_states.set(id, STATE_START_DELAY);
+	_profiles.set(id, (p_profile == PROFILE_STRAIN) ? PROFILE_STRAIN : PROFILE_NORMAL);
+	_chamber_ids.set(id, p_chamber_id);
+	_alive.set(id, true);
+
+	// Insert into spatial grid with initial tiny radius.
+	_grid.insert(id, p_pos, 0.0001f);
+
+	// Push to alive_ids immediately so subsequent queries in the same
+	// frame can find this spore (e.g. tentacle parent-finding for spores
+	// spawned in rapid succession via staggered timers).
+	_alive_ids.push_back(id);
+
+	return id;
+}
+
 void SporeManager::remove_spore(int32_t p_id) {
 	if (!_alive[p_id]) {
 		return;
@@ -329,6 +355,10 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		}
 
 		// ---- Shrinking spores (visual removal) ----
+		// In client mode, spores are never freed locally — the host
+		// controls all despawns via RPC.  Radius shrinkage still
+		// happens so the visual matches the host while the spore
+		// recedes, but the final free is suppressed.
 		if (_states[id] == STATE_SHRINKING) {
 			float shrink_elapsed = float(p_total_time - _shrink_times[id]);
 			float t = MIN(shrink_elapsed / _overlap_shrink_duration, 1.0f);
@@ -343,16 +373,17 @@ void SporeManager::update(double p_delta, double p_total_time) {
 				_grid.migrate(id, _positions[id], old_radius, _positions[id], new_radius);
 			}
 
-			// Free when fully shrunk.
-			if (t >= 1.0f) {
+			// Free when fully shrunk (host only).
+			if (!_client_mode && t >= 1.0f) {
 				_grid.remove(id);
 				_free_id(id);
 			}
 			continue;
 		}
 
-		// ---- Lifetime death (disabled when mature phase is on) ----
-		if (!_mature_phase_enabled) {
+		// ---- Lifetime death (disabled when mature phase is on,
+		//      and never runs in client mode) ----
+		if (!_client_mode && !_mature_phase_enabled) {
 			float lifetime;
 			switch (_profiles[id]) {
 				case PROFILE_STRAIN:
@@ -399,7 +430,9 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		// with subtle pulse), mark it as mature.  Only spores in ACTIVE
 		// or START_DELAY (which moved through CONNECTING→ACTIVE in
 		// GDScript) are eligible; DYING and SHRINKING are excluded.
-		if (_mature_phase_enabled) {
+		// Skipped in client mode — the host controls all despawns,
+		// and mature state is only needed for overlap cleanup.
+		if (!_client_mode && _mature_phase_enabled) {
 			uint8_t st = _states[id];
 			if (st == STATE_ACTIVE || st == STATE_START_DELAY || st == STATE_CONNECTING) {
 				// Check if we've reached Phase 4 (past all three growth phases).
@@ -411,8 +444,9 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		}
 	}
 
-	// ---- Periodic overlap cleanup ----
-	if (_overlap_cleanup_enabled && _mature_phase_enabled) {
+	// ---- Periodic overlap cleanup (host only) ----
+	// In client mode, the host controls all despawns via RPC.
+	if (!_client_mode && _overlap_cleanup_enabled && _mature_phase_enabled) {
 		_overlap_timer += float(p_delta);
 		if (_overlap_timer >= _overlap_interval) {
 			_overlap_timer = 0.0f;
@@ -1536,6 +1570,18 @@ float SporeManager::get_sweep_depth() const {
 	return _sweep;
 }
 
+void SporeManager::set_sweep(float p_sweep) {
+	_sweep = p_sweep;
+}
+
+void SporeManager::set_client_mode(bool p_enabled) {
+	_client_mode = p_enabled;
+}
+
+bool SporeManager::is_client_mode() const {
+	return _client_mode;
+}
+
 void SporeManager::set_spore_res(float p_res) {
 	_spore_res = MAX(p_res, 0.01f);
 }
@@ -1585,6 +1631,7 @@ void SporeManager::_bind_methods() {
 
 	// Lifecycle
 	ClassDB::bind_method(D_METHOD("add_spore", "position", "profile", "chamber_id", "spawn_depth"), &SporeManager::add_spore, DEFVAL(PROFILE_NORMAL), DEFVAL(-1), DEFVAL(-1.0f));
+	ClassDB::bind_method(D_METHOD("add_spore_with_time", "position", "profile", "chamber_id", "spawn_depth", "spawn_time"), &SporeManager::add_spore_with_time);
 	ClassDB::bind_method(D_METHOD("remove_spore", "id"), &SporeManager::remove_spore);
 	ClassDB::bind_method(D_METHOD("remove_spores_in_chamber", "chamber_id", "shrink_first"), &SporeManager::remove_spores_in_chamber, DEFVAL(false));
 	ClassDB::bind_method(D_METHOD("shrink_spore", "id"), &SporeManager::shrink_spore);
@@ -1599,6 +1646,11 @@ void SporeManager::_bind_methods() {
 
 	// Update
 	ClassDB::bind_method(D_METHOD("update", "delta", "total_time"), &SporeManager::update);
+
+	// Client mode (multiplayer)
+	ClassDB::bind_method(D_METHOD("set_client_mode", "enabled"), &SporeManager::set_client_mode);
+	ClassDB::bind_method(D_METHOD("is_client_mode"), &SporeManager::is_client_mode);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "client_mode"), "set_client_mode", "is_client_mode");
 
 	// Getters
 	ClassDB::bind_method(D_METHOD("get_spore_radius", "id"), &SporeManager::get_spore_radius);
@@ -1720,6 +1772,7 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_cell_chamber", "grid_key"), &SporeManager::get_cell_chamber);
 	ClassDB::bind_method(D_METHOD("is_cell_blocked", "grid_key"), &SporeManager::is_cell_blocked);
 	ClassDB::bind_method(D_METHOD("get_sweep_depth"), &SporeManager::get_sweep_depth);
+	ClassDB::bind_method(D_METHOD("set_sweep", "sweep"), &SporeManager::set_sweep);
 	ClassDB::bind_method(D_METHOD("set_spore_res", "res"), &SporeManager::set_spore_res);
 	ClassDB::bind_method(D_METHOD("get_spore_res"), &SporeManager::get_spore_res);
 	ClassDB::bind_method(D_METHOD("set_start_cell", "grid_key"), &SporeManager::set_start_cell);

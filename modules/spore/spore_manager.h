@@ -117,6 +117,14 @@ private:
 	Vector<float> _shrink_times;
 	Vector<float> _shrink_start_radii;
 
+	// ---- Client mode (multiplayer) ----
+	// When true, the SporeManager runs on a non-authority peer.  It
+	// computes radii and applies ward force-limits so that spore visuals
+	// match the host, but it NEVER despawns spores (no overlap pruning,
+	// no mature-phase transitions, no lifetime death, no shrinking).
+	// All spore spawn/despawn is driven by the host via RPC.
+	bool _client_mode = false;
+
 	// ---- Cell graph (replaces GDScript spore_loc Dictionary) ----
 	// All cells live in one combined HashMap.  Chambers share the same
 	// depth map so ward-blocking affects all chambers uniformly.
@@ -213,6 +221,8 @@ public:
 
 	// ---- Spore lifecycle (called from GDScript) ----
 	int32_t add_spore(const Vector3 &p_pos, int p_profile = PROFILE_NORMAL, int p_chamber_id = -1, float p_spawn_depth = -1.0f);
+	// Overload that accepts an explicit spawn_time (used by RPC on clients).
+	int32_t add_spore_with_time(const Vector3 &p_pos, int p_profile, int p_chamber_id, float p_spawn_depth, double p_spawn_time);
 	void remove_spore(int32_t p_id);
 	void remove_spores_in_chamber(int p_chamber_id, bool p_shrink_first = false);
 	void shrink_spore(int32_t p_id);
@@ -223,6 +233,10 @@ public:
 	int get_spore_profile(int32_t p_id) const;
 	void set_start_delay(float p_delay);
 	float get_start_delay() const;
+
+	// ---- Client mode (multiplayer) ----
+	void set_client_mode(bool p_enabled);
+	bool is_client_mode() const;
 
 	// ---- Per-frame update ----
 	void update(double p_delta, double p_total_time);
@@ -351,6 +365,11 @@ public:
 	// Current sweep cursor (depth-units).  Exposed so GDScript can
 	// decide when chambers are safely behind the frontier.
 	float get_sweep_depth() const;
+
+	// Set the sweep cursor directly (used on client peers to sync
+	// lifecycle acceleration from the host).  Only meaningful when
+	// depth_lifecycle_enabled is true.
+	void set_sweep(float p_sweep);
 
 	// Grid resolution (mirrors GDScript spore_res).
 	void set_spore_res(float p_res);
