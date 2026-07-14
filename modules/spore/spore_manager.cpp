@@ -355,10 +355,10 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		}
 
 		// ---- Shrinking spores (visual removal) ----
-		// In client mode, spores are never freed locally — the host
-		// controls all despawns via RPC.  Radius shrinkage still
-		// happens so the visual matches the host while the spore
-		// recedes, but the final free is suppressed.
+		// Radius shrinks toward zero so the spore recedes visually.
+		// When fully shrunk the spore is freed — deterministic on
+		// both host and client because shrink times and durations
+		// are identical.
 		if (_states[id] == STATE_SHRINKING) {
 			float shrink_elapsed = float(p_total_time - _shrink_times[id]);
 			float t = MIN(shrink_elapsed / _overlap_shrink_duration, 1.0f);
@@ -373,17 +373,16 @@ void SporeManager::update(double p_delta, double p_total_time) {
 				_grid.migrate(id, _positions[id], old_radius, _positions[id], new_radius);
 			}
 
-			// Free when fully shrunk (host only).
-			if (!_client_mode && t >= 1.0f) {
+			// Free when fully shrunk.
+			if (t >= 1.0f) {
 				_grid.remove(id);
 				_free_id(id);
 			}
 			continue;
 		}
 
-		// ---- Lifetime death (disabled when mature phase is on,
-		//      and never runs in client mode) ----
-		if (!_client_mode && !_mature_phase_enabled) {
+		// ---- Lifetime death (disabled when mature phase is on) ----
+		if (!_mature_phase_enabled) {
 			float lifetime;
 			switch (_profiles[id]) {
 				case PROFILE_STRAIN:
@@ -430,9 +429,7 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		// with subtle pulse), mark it as mature.  Only spores in ACTIVE
 		// or START_DELAY (which moved through CONNECTING→ACTIVE in
 		// GDScript) are eligible; DYING and SHRINKING are excluded.
-		// Skipped in client mode — the host controls all despawns,
-		// and mature state is only needed for overlap cleanup.
-		if (!_client_mode && _mature_phase_enabled) {
+		if (_mature_phase_enabled) {
 			uint8_t st = _states[id];
 			if (st == STATE_ACTIVE || st == STATE_START_DELAY || st == STATE_CONNECTING) {
 				// Check if we've reached Phase 4 (past all three growth phases).
@@ -444,9 +441,8 @@ void SporeManager::update(double p_delta, double p_total_time) {
 		}
 	}
 
-	// ---- Periodic overlap cleanup (host only) ----
-	// In client mode, the host controls all despawns via RPC.
-	if (!_client_mode && _overlap_cleanup_enabled && _mature_phase_enabled) {
+	// ---- Periodic overlap cleanup ----
+	if (_overlap_cleanup_enabled && _mature_phase_enabled) {
 		_overlap_timer += float(p_delta);
 		if (_overlap_timer >= _overlap_interval) {
 			_overlap_timer = 0.0f;

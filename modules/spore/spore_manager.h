@@ -119,10 +119,10 @@ private:
 
 	// ---- Client mode (multiplayer) ----
 	// When true, the SporeManager runs on a non-authority peer.  It
-	// computes radii and applies ward force-limits so that spore visuals
-	// match the host, but it NEVER despawns spores (no overlap pruning,
-	// no mature-phase transitions, no lifetime death, no shrinking).
-	// All spore spawn/despawn is driven by the host via RPC.
+	// computes radii and applies ward force-limits.  Spore despawns
+	// (shrink-to-free, lifetime death, overlap pruning) are
+	// deterministic — both host and client reach the same conclusions
+	// because spawn positions, spawn times, and sweep depth are synced.
 	bool _client_mode = false;
 
 	// ---- Cell graph (replaces GDScript spore_loc Dictionary) ----
