@@ -368,6 +368,10 @@ public:
 	// GDScript feeds this directly to MultiMeshInstance3D.buffer.
 	PackedFloat32Array get_spore_transforms_for_chamber(int p_chamber_id) const;
 	int get_spore_count_for_chamber(int p_chamber_id) const;
+	// Returns alternating (age, radius) for each spore in the chamber.
+	// GDScript uses this for INSTANCE_CUSTOM on the MultiMesh to drive the
+	// spore fragment shader.
+	PackedFloat32Array get_spore_ages_for_chamber(int p_chamber_id) const;
 	int get_spore_chamber(int32_t p_id) const;
 
 	// ---- Cell graph (replaces GDScript spore_loc / depth / sweep logic) ----
