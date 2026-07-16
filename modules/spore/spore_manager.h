@@ -62,12 +62,19 @@ private:
 	float _start_delay = 1.5f;
 	float _force_limit_shrink_speed = 1.5f; // units/sec radius shrinks toward ward limit
 
+	// ---- Growth phase timing & radius caps (tunable from GDScript) ----
+	float _max_radius_normal = 35.0f;
+	float _max_radius_strain = 2.0f;
+	float _phase1_duration = 0.6f;
+	float _phase2_duration = 25.0f;
+	float _phase3_duration = 20.0f;
+
 	// Optional depth-based lifecycle acceleration: spores far behind the
 	// current sweep frontier age faster so they compact/retire sooner.
 	bool _depth_lifecycle_enabled = true;
-	float _depth_lifecycle_mid_threshold = 30.0f;
-	float _depth_lifecycle_full_threshold = 50.0f;
-	float _depth_lifecycle_mid_multiplier = 2.0f;
+	float _depth_lifecycle_mid_threshold = 15.0f;
+	float _depth_lifecycle_full_threshold = 30.0f;
+	float _depth_lifecycle_mid_multiplier = 30.0f;
 
 	// ---- Mature phase & overlap cleanup (tunable from GDScript) ----
 	// When enabled, spores survive past their old hard lifetime and
@@ -76,13 +83,27 @@ private:
 	// them first so the player sees them recede into the spore mass.
 	bool _mature_phase_enabled = true;
 
-	bool _overlap_cleanup_enabled = true;
+	bool _overlap_cleanup_enabled = false;   // superseded by prune-based lifecycle
 	float _overlap_shrink_fraction = 0.5f;   // fraction of overlapping pairs to cull (0–1)
 	float _overlap_shrink_duration = 1.0f;   // seconds to shrink a spore before freeing it
 	float _overlap_radius = 5.0f;            // centre-distance threshold for "overlapping"
 	float _overlap_interval = 3.0f;          // seconds between overlap-detection passes
 	int _overlap_min_count = 10;             // minimum spores in chamber before cleanup runs
 	float _overlap_timer = 0.0f;             // accumulator for periodic checks
+
+	// ---- Prune-based lifecycle (primary cleanup mechanism) ----
+	// When enabled, each spore gets a deterministic prune deadline at spawn.
+	// A fraction (_prune_fraction_immortal) are immortal (deadline = -1).
+	// The remaining get an exponentially-distributed deadline offset from
+	// _prune_min_elapsed.  When effective_elapsed crosses the deadline, the
+	// spore transitions to SHRINKING and frees after _overlap_shrink_duration.
+	// Deadlines are derived from spawn position + depth hash so host and
+	// client reach the same conclusion deterministically.
+	bool _prune_enabled = true;
+	float _prune_fraction_immortal = 0.1f;   // fraction of spores that never prune (0–1)
+	float _prune_mean_elapsed = 30.0f;       // mean of exponential deadline distribution (seconds)
+	float _prune_min_elapsed = 3.0f;         // minimum effective elapsed before pruning can start
+	Vector<float> _prune_elapsed;            // per-spore deadline, -1 = immortal
 
 	// ---- Depth noise (frontier waviness) ----
 	// Per-cell positional noise offsets the effective depth used for
@@ -211,6 +232,7 @@ private:
 	float _compute_radius(float p_elapsed, int p_profile, float p_seed_offset) const;
 	void _rebuild_ward_grid();
 	void _detect_overlaps(double p_total_time);
+	void _assign_prune_deadline(int32_t p_id, const Vector3 &p_pos, float p_spawn_depth);
 
 protected:
 	static void _bind_methods();
@@ -234,6 +256,18 @@ public:
 	void set_start_delay(float p_delay);
 	float get_start_delay() const;
 
+	// ---- Growth phase timing & radius caps ----
+	void set_max_radius_normal(float p_radius);
+	float get_max_radius_normal() const;
+	void set_max_radius_strain(float p_radius);
+	float get_max_radius_strain() const;
+	void set_phase1_duration(float p_duration);
+	float get_phase1_duration() const;
+	void set_phase2_duration(float p_duration);
+	float get_phase2_duration() const;
+	void set_phase3_duration(float p_duration);
+	float get_phase3_duration() const;
+
 	// ---- Client mode (multiplayer) ----
 	void set_client_mode(bool p_enabled);
 	bool is_client_mode() const;
@@ -247,6 +281,9 @@ public:
 	bool is_spore_alive(int32_t p_id) const;
 	int get_spore_count() const;
 	int get_active_spore_count() const;
+
+	// ---- Diagnostic queries ----
+	PackedVector3Array get_all_spore_positions() const;
 
 	// ---- Spatial queries ----
 	Vector<int32_t> query_nearby(const Vector3 &p_pos) const;
@@ -289,6 +326,16 @@ public:
 	float get_overlap_interval() const;
 	void set_overlap_min_count(int p_count);
 	int get_overlap_min_count() const;
+
+	// ---- Prune-based lifecycle config ----
+	void set_prune_enabled(bool p_enabled);
+	bool is_prune_enabled() const;
+	void set_prune_fraction_immortal(float p_fraction);
+	float get_prune_fraction_immortal() const;
+	void set_prune_mean_elapsed(float p_mean);
+	float get_prune_mean_elapsed() const;
+	void set_prune_min_elapsed(float p_min);
+	float get_prune_min_elapsed() const;
 
 	// ---- Depth noise (frontier waviness) ----
 	void set_depth_noise_amplitude(float p_amplitude);

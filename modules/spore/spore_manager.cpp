@@ -22,17 +22,10 @@
 // ---------------------------------------------------------------------------
 
 static constexpr float MIN_RADIUS = 0.25f;
-static constexpr float MAX_RADIUS_NORMAL = 20.0f;
-static constexpr float MAX_RADIUS_STRAIN = 2.0f;
 
 // Minimum radius when a spore is force-limited by a ward.
 // Mirrors SporeConfig.WARD_MIN_SPORE_RADIUS in GDScript.
 static constexpr float MIN_FORCE_LIMITED_RADIUS = 0.1f;
-
-// Phase timing (seconds since start of growth, after start_delay).
-static constexpr float PHASE1_DURATION = 0.6f;   // slower burst 0→0.5 (visible)
-static constexpr float PHASE2_DURATION = 25.0f;  // slow pulsing growth (0.5→2.0)
-static constexpr float PHASE3_DURATION = 60.0f;  // accelerating growth (2.0→cap)
 
 static constexpr float PULSE_FREQ = 3.0f;         // pulse oscillations per second
 static constexpr float PHASE2_PULSE_AMP = 0.1f;   // pulse amplitude during phase 2
@@ -70,6 +63,7 @@ int SporeManager::_allocate_id() {
 		_alive.push_back(false);
 		_shrink_times.push_back(-1.0f);
 		_shrink_start_radii.push_back(0.0f);
+		_prune_elapsed.push_back(-1.0f);
 		return id;
 	}
 	int32_t id = _free_list[_free_list.size() - 1];
@@ -95,24 +89,24 @@ float SporeManager::_compute_radius(float p_elapsed, int p_profile, float p_seed
 	}
 	float t_elapsed = p_elapsed - _start_delay;
 
-	float cap = (p_profile == PROFILE_STRAIN) ? MAX_RADIUS_STRAIN : MAX_RADIUS_NORMAL;
+	float cap = (p_profile == PROFILE_STRAIN) ? _max_radius_strain : _max_radius_normal;
 	float base;
 	float pulse_amp;
 
-	if (t_elapsed < PHASE1_DURATION) {
+	if (t_elapsed < _phase1_duration) {
 		// Phase 1: fast burst into view.
-		float t = t_elapsed / PHASE1_DURATION;
+		float t = t_elapsed / _phase1_duration;
 		base = t * 0.5f;
 		pulse_amp = 0.0f;
-	} else if (t_elapsed < PHASE1_DURATION + PHASE2_DURATION) {
+	} else if (t_elapsed < _phase1_duration + _phase2_duration) {
 		// Phase 2: slow pulsing growth 0.5 → 2.0.
-		float t = (t_elapsed - PHASE1_DURATION) / PHASE2_DURATION;
+		float t = (t_elapsed - _phase1_duration) / _phase2_duration;
 		base = 0.5f + t * 1.5f;
 		pulse_amp = PHASE2_PULSE_AMP;
-	} else if (t_elapsed < PHASE1_DURATION + PHASE2_DURATION + PHASE3_DURATION) {
+	} else if (t_elapsed < _phase1_duration + _phase2_duration + _phase3_duration) {
 		// Phase 3: accelerating growth 2.0 → cap.
-		float phase3_elapsed = t_elapsed - PHASE1_DURATION - PHASE2_DURATION;
-		float t = phase3_elapsed / PHASE3_DURATION;
+		float phase3_elapsed = t_elapsed - _phase1_duration - _phase2_duration;
+		float t = phase3_elapsed / _phase3_duration;
 		float t5 = t * t * t * t * t; // ease-in quintic (very slow start, ramps late)
 		base = 2.0f + t5 * (cap - 2.0f);
 		pulse_amp = PHASE3_PULSE_AMP_INITIAL * (1.0f - t); // pulse fades out
@@ -145,6 +139,8 @@ int32_t SporeManager::add_spore(const Vector3 &p_pos, int p_profile, int p_chamb
 	_chamber_ids.set(id, p_chamber_id);
 	_alive.set(id, true);
 
+	_assign_prune_deadline(id, p_pos, p_spawn_depth);
+
 	// Insert into spatial grid with initial tiny radius.
 	_grid.insert(id, p_pos, 0.0001f);
 
@@ -170,6 +166,8 @@ int32_t SporeManager::add_spore_with_time(const Vector3 &p_pos, int p_profile, i
 	_profiles.set(id, (p_profile == PROFILE_STRAIN) ? PROFILE_STRAIN : PROFILE_NORMAL);
 	_chamber_ids.set(id, p_chamber_id);
 	_alive.set(id, true);
+
+	_assign_prune_deadline(id, p_pos, p_spawn_depth);
 
 	// Insert into spatial grid with initial tiny radius.
 	_grid.insert(id, p_pos, 0.0001f);
@@ -319,6 +317,46 @@ float SporeManager::get_start_delay() const {
 	return _start_delay;
 }
 
+void SporeManager::set_max_radius_normal(float p_radius) {
+	_max_radius_normal = MAX(p_radius, 0.5f);
+}
+
+float SporeManager::get_max_radius_normal() const {
+	return _max_radius_normal;
+}
+
+void SporeManager::set_max_radius_strain(float p_radius) {
+	_max_radius_strain = MAX(p_radius, 0.1f);
+}
+
+float SporeManager::get_max_radius_strain() const {
+	return _max_radius_strain;
+}
+
+void SporeManager::set_phase1_duration(float p_duration) {
+	_phase1_duration = MAX(p_duration, 0.01f);
+}
+
+float SporeManager::get_phase1_duration() const {
+	return _phase1_duration;
+}
+
+void SporeManager::set_phase2_duration(float p_duration) {
+	_phase2_duration = MAX(p_duration, 0.01f);
+}
+
+float SporeManager::get_phase2_duration() const {
+	return _phase2_duration;
+}
+
+void SporeManager::set_phase3_duration(float p_duration) {
+	_phase3_duration = MAX(p_duration, 0.01f);
+}
+
+float SporeManager::get_phase3_duration() const {
+	return _phase3_duration;
+}
+
 // ---------------------------------------------------------------------------
 // Per-frame update
 // ---------------------------------------------------------------------------
@@ -349,9 +387,22 @@ void SporeManager::update(double p_delta, double p_total_time) {
 			} else if (depth_gap >= _depth_lifecycle_mid_threshold) {
 				float span = MAX(_depth_lifecycle_full_threshold - _depth_lifecycle_mid_threshold, 0.001f);
 				float blend = CLAMP((depth_gap - _depth_lifecycle_mid_threshold) / span, 0.0f, 1.0f);
-				float accel = 1.0f + blend * MAX(_depth_lifecycle_mid_multiplier - 1.0f, 0.0f);
+				// Quadratic blend: ramps slowly at first, then hard.
+				// At gap 60% through the mid→full window, accel is already
+				// 36% of max, ensuring spores behind the frontier age out fast.
+				float accel_blend = blend * blend;
+				float accel = 1.0f + accel_blend * MAX(_depth_lifecycle_mid_multiplier - 1.0f, 0.0f);
 				effective_elapsed = elapsed * accel;
 			}
+		}
+
+		// ---- Prune-based lifecycle ----
+		// If the spore has an active prune deadline and it has passed,
+		// transition to shrinking.  Shrinking handles radius reduction
+		// and eventual free deterministically on all peers.
+		if (_prune_enabled && _prune_elapsed[id] > 0.0f && effective_elapsed >= _prune_elapsed[id] && _states[id] != STATE_SHRINKING) {
+			shrink_spore(id);
+			continue;
 		}
 
 		// ---- Shrinking spores (visual removal) ----
@@ -434,7 +485,7 @@ void SporeManager::update(double p_delta, double p_total_time) {
 			if (st == STATE_ACTIVE || st == STATE_START_DELAY || st == STATE_CONNECTING) {
 				// Check if we've reached Phase 4 (past all three growth phases).
 				float growth_elapsed = effective_elapsed - _start_delay;
-				if (growth_elapsed >= PHASE1_DURATION + PHASE2_DURATION + PHASE3_DURATION) {
+				if (growth_elapsed >= _phase1_duration + _phase2_duration + _phase3_duration) {
 					_states.set(id, STATE_MATURE);
 				}
 			}
@@ -494,6 +545,16 @@ int SporeManager::get_active_spore_count() const {
 		}
 	}
 	return count;
+}
+
+PackedVector3Array SporeManager::get_all_spore_positions() const {
+	PackedVector3Array result;
+	result.resize(_alive_ids.size());
+	int idx = 0;
+	for (int32_t id : _alive_ids) {
+		result.set(idx++, _positions[id]);
+	}
+	return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -755,6 +816,65 @@ void SporeManager::set_overlap_min_count(int p_count) {
 
 int SporeManager::get_overlap_min_count() const {
 	return _overlap_min_count;
+}
+
+// ---- Prune-based lifecycle config ----
+
+void SporeManager::set_prune_enabled(bool p_enabled) {
+	_prune_enabled = p_enabled;
+}
+
+bool SporeManager::is_prune_enabled() const {
+	return _prune_enabled;
+}
+
+void SporeManager::set_prune_fraction_immortal(float p_fraction) {
+	_prune_fraction_immortal = CLAMP(p_fraction, 0.0f, 1.0f);
+}
+
+float SporeManager::get_prune_fraction_immortal() const {
+	return _prune_fraction_immortal;
+}
+
+void SporeManager::set_prune_mean_elapsed(float p_mean) {
+	_prune_mean_elapsed = MAX(p_mean, 1.0f);
+}
+
+float SporeManager::get_prune_mean_elapsed() const {
+	return _prune_mean_elapsed;
+}
+
+void SporeManager::set_prune_min_elapsed(float p_min) {
+	_prune_min_elapsed = MAX(p_min, 0.0f);
+}
+
+float SporeManager::get_prune_min_elapsed() const {
+	return _prune_min_elapsed;
+}
+
+void SporeManager::_assign_prune_deadline(int32_t p_id, const Vector3 &p_pos, float p_spawn_depth) {
+	if (!_prune_enabled) {
+		_prune_elapsed.set(p_id, -1.0f);
+		return;
+	}
+	// Deterministic pseudo-random from spawn position + depth so
+	// host and client compute the same deadline for the same spore.
+	float h = p_pos.x * 12.9898f + p_pos.y * 78.233f + p_pos.z * 37.719f + p_spawn_depth * 45.641f;
+	h -= Math::floor(h);
+	float r = h * 13.2436f + 7.1823f;
+	r -= Math::floor(r);
+	if (r < _prune_fraction_immortal) {
+		_prune_elapsed.set(p_id, -1.0f);
+		return;
+	}
+	// Second hash for the exponential distribution.
+	h = p_pos.x * 93.121f + p_pos.y * 51.337f + p_pos.z * 17.419f + p_spawn_depth * 29.773f;
+	h -= Math::floor(h);
+	float r2 = h * 7.913f + 3.141f;
+	r2 -= Math::floor(r2);
+	// Exponential CDF inverse: -mean * ln(1 - U)
+	float deadline = _prune_min_elapsed - _prune_mean_elapsed * Math::log(1.0f - r2);
+	_prune_elapsed.set(p_id, MAX(deadline, _prune_min_elapsed));
 }
 
 // ---- Depth noise ----
@@ -1640,6 +1760,27 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_start_delay"), &SporeManager::get_start_delay);
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "start_delay"), "set_start_delay", "get_start_delay");
 
+	// Growth phase timing & radius caps
+	ClassDB::bind_method(D_METHOD("set_max_radius_normal", "radius"), &SporeManager::set_max_radius_normal);
+	ClassDB::bind_method(D_METHOD("get_max_radius_normal"), &SporeManager::get_max_radius_normal);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_radius_normal"), "set_max_radius_normal", "get_max_radius_normal");
+
+	ClassDB::bind_method(D_METHOD("set_max_radius_strain", "radius"), &SporeManager::set_max_radius_strain);
+	ClassDB::bind_method(D_METHOD("get_max_radius_strain"), &SporeManager::get_max_radius_strain);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_radius_strain"), "set_max_radius_strain", "get_max_radius_strain");
+
+	ClassDB::bind_method(D_METHOD("set_phase1_duration", "duration"), &SporeManager::set_phase1_duration);
+	ClassDB::bind_method(D_METHOD("get_phase1_duration"), &SporeManager::get_phase1_duration);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "phase1_duration"), "set_phase1_duration", "get_phase1_duration");
+
+	ClassDB::bind_method(D_METHOD("set_phase2_duration", "duration"), &SporeManager::set_phase2_duration);
+	ClassDB::bind_method(D_METHOD("get_phase2_duration"), &SporeManager::get_phase2_duration);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "phase2_duration"), "set_phase2_duration", "get_phase2_duration");
+
+	ClassDB::bind_method(D_METHOD("set_phase3_duration", "duration"), &SporeManager::set_phase3_duration);
+	ClassDB::bind_method(D_METHOD("get_phase3_duration"), &SporeManager::get_phase3_duration);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "phase3_duration"), "set_phase3_duration", "get_phase3_duration");
+
 	// Update
 	ClassDB::bind_method(D_METHOD("update", "delta", "total_time"), &SporeManager::update);
 
@@ -1654,6 +1795,7 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_spore_alive", "id"), &SporeManager::is_spore_alive);
 	ClassDB::bind_method(D_METHOD("get_spore_count"), &SporeManager::get_spore_count);
 	ClassDB::bind_method(D_METHOD("get_active_spore_count"), &SporeManager::get_active_spore_count);
+	ClassDB::bind_method(D_METHOD("get_all_spore_positions"), &SporeManager::get_all_spore_positions);
 
 	// Spatial queries
 	ClassDB::bind_method(D_METHOD("query_nearby", "position"), &SporeManager::query_nearby);
@@ -1715,6 +1857,23 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_overlap_min_count", "count"), &SporeManager::set_overlap_min_count);
 	ClassDB::bind_method(D_METHOD("get_overlap_min_count"), &SporeManager::get_overlap_min_count);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "overlap_min_count"), "set_overlap_min_count", "get_overlap_min_count");
+
+	// Prune-based lifecycle config
+	ClassDB::bind_method(D_METHOD("set_prune_enabled", "enabled"), &SporeManager::set_prune_enabled);
+	ClassDB::bind_method(D_METHOD("is_prune_enabled"), &SporeManager::is_prune_enabled);
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "prune_enabled"), "set_prune_enabled", "is_prune_enabled");
+
+	ClassDB::bind_method(D_METHOD("set_prune_fraction_immortal", "fraction"), &SporeManager::set_prune_fraction_immortal);
+	ClassDB::bind_method(D_METHOD("get_prune_fraction_immortal"), &SporeManager::get_prune_fraction_immortal);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "prune_fraction_immortal"), "set_prune_fraction_immortal", "get_prune_fraction_immortal");
+
+	ClassDB::bind_method(D_METHOD("set_prune_mean_elapsed", "mean"), &SporeManager::set_prune_mean_elapsed);
+	ClassDB::bind_method(D_METHOD("get_prune_mean_elapsed"), &SporeManager::get_prune_mean_elapsed);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "prune_mean_elapsed"), "set_prune_mean_elapsed", "get_prune_mean_elapsed");
+
+	ClassDB::bind_method(D_METHOD("set_prune_min_elapsed", "min_elapsed"), &SporeManager::set_prune_min_elapsed);
+	ClassDB::bind_method(D_METHOD("get_prune_min_elapsed"), &SporeManager::get_prune_min_elapsed);
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "prune_min_elapsed"), "set_prune_min_elapsed", "get_prune_min_elapsed");
 
 	// Depth noise (frontier waviness)
 	ClassDB::bind_method(D_METHOD("set_depth_noise_amplitude", "amplitude"), &SporeManager::set_depth_noise_amplitude);
