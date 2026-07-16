@@ -1021,6 +1021,53 @@ PackedFloat32Array SporeManager::get_spore_ages_for_chamber(int p_chamber_id) co
 	return result;
 }
 
+PackedFloat32Array SporeManager::get_spore_buffer_for_chamber(int p_chamber_id) const {
+	// Interleaved layout: 16 floats per instance.
+	// [0..11] = 3x4 transform matrix (column-major, scale=radius)
+	// [12..15] = color (age, radius, 0, 1) for the billboard shader.
+	int count = 0;
+	for (int32_t id : _alive_ids) {
+		if (_chamber_ids[id] == p_chamber_id) {
+			count++;
+		}
+	}
+
+	PackedFloat32Array buffer;
+	buffer.resize(count * 16);
+	float *ptr = buffer.ptrw();
+	int idx = 0;
+	for (int32_t id : _alive_ids) {
+		if (_chamber_ids[id] != p_chamber_id) {
+			continue;
+		}
+		const Vector3 &pos = _positions[id];
+		float r = _radii[id];
+		float age = static_cast<float>(_last_total_time - static_cast<double>(_spawn_times[id]));
+		// Column 0: (r, 0, 0), origin.x
+		ptr[idx + 0] = r;
+		ptr[idx + 1] = 0.0f;
+		ptr[idx + 2] = 0.0f;
+		ptr[idx + 3] = pos.x;
+		// Column 1: (0, r, 0), origin.y
+		ptr[idx + 4] = 0.0f;
+		ptr[idx + 5] = r;
+		ptr[idx + 6] = 0.0f;
+		ptr[idx + 7] = pos.y;
+		// Column 2: (0, 0, r), origin.z
+		ptr[idx + 8] = 0.0f;
+		ptr[idx + 9] = 0.0f;
+		ptr[idx + 10] = r;
+		ptr[idx + 11] = pos.z;
+		// Color: (age, radius, 0, 1)
+		ptr[idx + 12] = age;
+		ptr[idx + 13] = r;
+		ptr[idx + 14] = 0.0f;
+		ptr[idx + 15] = 1.0f;
+		idx += 16;
+	}
+	return buffer;
+}
+
 int SporeManager::get_spore_chamber(int32_t p_id) const {
 	if (!_alive[p_id]) {
 		return -1;
@@ -1922,6 +1969,7 @@ void SporeManager::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_spore_transforms_for_chamber", "chamber_id"), &SporeManager::get_spore_transforms_for_chamber);
 	ClassDB::bind_method(D_METHOD("get_spore_count_for_chamber", "chamber_id"), &SporeManager::get_spore_count_for_chamber);
 	ClassDB::bind_method(D_METHOD("get_spore_ages_for_chamber", "chamber_id"), &SporeManager::get_spore_ages_for_chamber);
+	ClassDB::bind_method(D_METHOD("get_spore_buffer_for_chamber", "chamber_id"), &SporeManager::get_spore_buffer_for_chamber);
 	ClassDB::bind_method(D_METHOD("get_spore_chamber", "id"), &SporeManager::get_spore_chamber);
 
 	// Cell graph

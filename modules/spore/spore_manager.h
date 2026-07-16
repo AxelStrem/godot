@@ -372,6 +372,10 @@ public:
 	// GDScript uses this for INSTANCE_CUSTOM on the MultiMesh to drive the
 	// spore fragment shader.
 	PackedFloat32Array get_spore_ages_for_chamber(int p_chamber_id) const;
+	// Returns interleaved transform + color: 16 floats per spore.
+	// [0..11] = 3x4 transform (scale=radius), [12..15] = (age, radius, 0, 1).
+	// GDScript feeds this directly to MultiMesh.set_buffer() with use_colors=true.
+	PackedFloat32Array get_spore_buffer_for_chamber(int p_chamber_id) const;
 	int get_spore_chamber(int32_t p_id) const;
 
 	// ---- Cell graph (replaces GDScript spore_loc / depth / sweep logic) ----
