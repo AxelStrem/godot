@@ -549,10 +549,8 @@ int SporeManager::get_active_spore_count() const {
 
 PackedVector3Array SporeManager::get_all_spore_positions() const {
 	PackedVector3Array result;
-	result.resize(_alive_ids.size());
-	int idx = 0;
 	for (int32_t id : _alive_ids) {
-		result.set(idx++, _positions[id]);
+		result.push_back(_positions[id]);
 	}
 	return result;
 }
