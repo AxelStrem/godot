@@ -1007,6 +1007,20 @@ int SporeManager::get_spore_count_for_chamber(int p_chamber_id) const {
 	return count;
 }
 
+PackedFloat32Array SporeManager::get_spore_ages_for_chamber(int p_chamber_id) const {
+	PackedFloat32Array result;
+	for (int32_t id : _alive_ids) {
+		if (_chamber_ids[id] == p_chamber_id) {
+			// age = total seconds since spawn (drives fragment shader color)
+			float age = static_cast<float>(_last_total_time - static_cast<double>(_spawn_times[id]));
+			result.push_back(age);
+			// radius = current world radius (drives billboard scale)
+			result.push_back(_radii[id]);
+		}
+	}
+	return result;
+}
+
 int SporeManager::get_spore_chamber(int32_t p_id) const {
 	if (!_alive[p_id]) {
 		return -1;
@@ -1907,6 +1921,7 @@ void SporeManager::_bind_methods() {
 	// Per-chamber
 	ClassDB::bind_method(D_METHOD("get_spore_transforms_for_chamber", "chamber_id"), &SporeManager::get_spore_transforms_for_chamber);
 	ClassDB::bind_method(D_METHOD("get_spore_count_for_chamber", "chamber_id"), &SporeManager::get_spore_count_for_chamber);
+	ClassDB::bind_method(D_METHOD("get_spore_ages_for_chamber", "chamber_id"), &SporeManager::get_spore_ages_for_chamber);
 	ClassDB::bind_method(D_METHOD("get_spore_chamber", "id"), &SporeManager::get_spore_chamber);
 
 	// Cell graph
