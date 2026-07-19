@@ -71,7 +71,16 @@ protected:
 public:
 	// ---- Tentacle management ----
 	void add_tentacle(int p_id, const Vector3 &p_start, const Vector3 &p_end, float p_born_at, float p_thickness = 0.3f);
+	/// Append a tentacle without syncing the GPU buffer.  Call sync() afterwards
+	/// to upload all changes in one batch.
+	void add_tentacle_no_sync(int p_id, const Vector3 &p_start, const Vector3 &p_end, float p_born_at, float p_thickness = 0.3f);
 	void remove_tentacle(int p_id);
+	/// Swap-remove without syncing the GPU buffer.  Call sync() afterwards
+	/// to upload all changes in one batch.
+	void remove_tentacle_no_sync(int p_id);
+	/// Upload all cached transforms and custom data to the MultiMesh.
+	/// Call after one or more add_tentacle_no_sync() or remove_tentacle_no_sync() to batch the GPU update.
+	void sync();
 	bool has_tentacle(int p_id) const;
 	void clear();
 	int get_tentacle_count() const { return _index_to_id.size(); }

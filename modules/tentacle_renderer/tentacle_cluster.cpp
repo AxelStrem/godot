@@ -131,6 +131,11 @@ void TentacleCluster::_sync_multimesh() {
 // ============================================================================
 
 void TentacleCluster::add_tentacle(int p_id, const Vector3 &p_start, const Vector3 &p_end, float p_born_at, float p_thickness) {
+	add_tentacle_no_sync(p_id, p_start, p_end, p_born_at, p_thickness);
+	sync();
+}
+
+void TentacleCluster::add_tentacle_no_sync(int p_id, const Vector3 &p_start, const Vector3 &p_end, float p_born_at, float p_thickness) {
 	ERR_FAIL_COND_MSG(_id_to_index.has(p_id),
 			vformat("TentacleCluster: tentacle %d already exists in this cluster.", p_id));
 
@@ -160,11 +165,14 @@ void TentacleCluster::add_tentacle(int p_id, const Vector3 &p_start, const Vecto
 	_cached_custom_data.push_back(custom);
 	_index_to_id.push_back(p_id);
 	_id_to_index[p_id] = idx;
-
-	_sync_multimesh();
 }
 
 void TentacleCluster::remove_tentacle(int p_id) {
+	remove_tentacle_no_sync(p_id);
+	sync();
+}
+
+void TentacleCluster::remove_tentacle_no_sync(int p_id) {
 	ERR_FAIL_COND(!_id_to_index.has(p_id));
 
 	int idx = _id_to_index[p_id];
@@ -184,7 +192,9 @@ void TentacleCluster::remove_tentacle(int p_id) {
 	_cached_custom_data.resize(last);
 	_index_to_id.resize(last);
 	_id_to_index.erase(p_id);
+}
 
+void TentacleCluster::sync() {
 	_sync_multimesh();
 }
 
@@ -220,7 +230,10 @@ void TentacleCluster::set_lod(LODLevel p_lod) {
 
 void TentacleCluster::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_tentacle", "id", "start", "end", "born_at", "thickness"), &TentacleCluster::add_tentacle, DEFVAL(0.3f));
+	ClassDB::bind_method(D_METHOD("add_tentacle_no_sync", "id", "start", "end", "born_at", "thickness"), &TentacleCluster::add_tentacle_no_sync, DEFVAL(0.3f));
 	ClassDB::bind_method(D_METHOD("remove_tentacle", "id"), &TentacleCluster::remove_tentacle);
+	ClassDB::bind_method(D_METHOD("remove_tentacle_no_sync", "id"), &TentacleCluster::remove_tentacle_no_sync);
+	ClassDB::bind_method(D_METHOD("sync"), &TentacleCluster::sync);
 	ClassDB::bind_method(D_METHOD("has_tentacle", "id"), &TentacleCluster::has_tentacle);
 	ClassDB::bind_method(D_METHOD("clear"), &TentacleCluster::clear);
 	ClassDB::bind_method(D_METHOD("get_tentacle_count"), &TentacleCluster::get_tentacle_count);
