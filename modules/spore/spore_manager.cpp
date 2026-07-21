@@ -1552,6 +1552,10 @@ void SporeManager::propagate_depths() {
 		}
 	}
 
+	// Full re-initialization — discard stale spore frontier entries.
+	// Will be rebuilt as cells re-spawn.
+	_spore_frontier.clear();
+
 	// Run BFS to a generous depth (covers all connected cells).
 	// Use INT_MAX / 2 to avoid overflow — in practice no chamber
 	// has cells deeper than a few hundred.
@@ -1853,6 +1857,11 @@ void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
 			if (E.value.dead || E.value.blocked_by_ward) {
 				continue;
 			}
+			// Spore frontier cells are anchored — their depth is final.
+			// Only reset AHEAD cells.
+			if (_spore_frontier.has(E.key)) {
+				continue;
+			}
 			if (E.value.depth >= min_blocked_old_depth) {
 				E.value.depth = -1;
 				behind_reset_count++;
@@ -1976,7 +1985,6 @@ void SporeManager::on_ward_deactivated(const Vector3 &p_center, float p_radius) 
 			Cell *c = _cells.getptr(key);
 			if (c) {
 				c->depth = (int)_sweep;
-				c->spawned = false; // Will re-spawn when sweep reaches them.
 				_spore_frontier.insert(key);
 			}
 		}
