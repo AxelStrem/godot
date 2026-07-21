@@ -201,6 +201,11 @@ private:
 	// When the sweep cursor approaches computed_max_depth, we run
 	// another BFS wave to look ahead LOOKAHEAD depth-units.
 	float _bfs_computed_depth = 0.0f;
+	// Maximum depth ever reached by any BFS run.  Monotonically
+	// increases; never reset by ward operations.  Used as the
+	// target for ensure_depths_computed() / propagate_depths()
+	// so we don't need a hardcoded sentinel like 10000.
+	float _bfs_global_max_depth = 0.0f;
 	bool _cells_added = false;
 	// Cells known to have at least one unvisited (depth=-1) neighbour.
 	// Updated incrementally by add_cell(), _run_bfs_incremental(),
