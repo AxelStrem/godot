@@ -648,6 +648,10 @@ void SporeManager::_rebuild_ward_grid() {
 }
 
 void SporeManager::set_wards(const TypedArray<Vector3> &p_positions, const TypedArray<float> &p_radii) {
+	// Save old wards for diffing.
+	Vector<Ward> old_wards = _wards;
+
+	// Rebuild ward list and spatial grid from the new data.
 	_wards.clear();
 	int count = MIN(p_positions.size(), p_radii.size());
 	_wards.reserve(count);
@@ -658,6 +662,112 @@ void SporeManager::set_wards(const TypedArray<Vector3> &p_positions, const Typed
 		_wards.push_back(w);
 	}
 	_rebuild_ward_grid();
+
+	// Diff: match old wards to new wards by position proximity.
+	// Unmatched old wards were removed → on_ward_deactivated.
+	// Unmatched new wards are fresh placements → on_ward_activated.
+	// Matched wards that moved or changed radius → deactivate old + activate new.
+
+	const float MATCH_TOLERANCE = 2.0f; // max distance to consider "same ward"
+	HashSet<int> matched_old;
+	HashSet<int> matched_new;
+
+	for (int oi = 0; oi < old_wards.size(); oi++) {
+		const Ward &ow = old_wards[oi];
+		int best_ni = -1;
+		float best_dist2 = MATCH_TOLERANCE * MATCH_TOLERANCE;
+		for (int ni = 0; ni < _wards.size(); ni++) {
+			if (matched_new.has(ni)) {
+				continue;
+			}
+			float d2 = ow.pos.distance_squared_to(_wards[ni].pos);
+			if (d2 < best_dist2) {
+				best_dist2 = d2;
+				best_ni = ni;
+			}
+		}
+		if (best_ni >= 0) {
+			matched_old.insert(oi);
+			matched_new.insert(best_ni);
+			// If the ward moved or radius changed, treat as deactivate + activate.
+			const Ward &nw = _wards[best_ni];
+			if (best_dist2 > 0.01f || Math::abs(ow.radius - nw.radius) > 0.1f) {
+				on_ward_deactivated(ow.pos, ow.radius);
+				on_ward_activated(nw.pos, nw.radius);
+			}
+		} else {
+			// Old ward no longer exists.
+			on_ward_deactivated(ow.pos, ow.radius);
+		}
+	}
+
+	for (int ni = 0; ni < _wards.size(); ni++) {
+		if (!matched_new.has(ni)) {
+			// New ward that wasn't matched to any old ward.
+			on_ward_activated(_wards[ni].pos, _wards[ni].radius);
+		}
+	}
+}
+
+Vector<Vector3i> SporeManager::_query_cells_in_ward_sphere(const Vector3 &p_center, float p_radius) const {
+	// Enumerate all integer grid positions within the sphere.
+	// Cells live on a regular grid with spacing _spore_res (default 1.0),
+	// so we iterate grid keys in [center - radius, center + radius] and
+	// do cheap _cells.getptr lookups.  Most grid slots are empty, so the
+	// real cost is O(ward_volume / spore_res³) lookups, not O(all cells).
+	Vector<Vector3i> result;
+	float r2 = p_radius * p_radius;
+	float inv_res = 1.0f / _spore_res;
+	int r_cells = (int)Math::ceil(p_radius * inv_res);
+	Vector3i center_cell(
+		(int)Math::round(p_center.x * inv_res),
+		(int)Math::round(p_center.y * inv_res),
+		(int)Math::round(p_center.z * inv_res)
+	);
+	for (int dx = -r_cells; dx <= r_cells; dx++) {
+		for (int dy = -r_cells; dy <= r_cells; dy++) {
+			for (int dz = -r_cells; dz <= r_cells; dz++) {
+				Vector3i key = center_cell + Vector3i(dx, dy, dz);
+				const Cell *c = _cells.getptr(key);
+				if (!c) {
+					continue;
+				}
+				// Verify the cell's world position is actually within the sphere.
+				if (c->world_pos.distance_squared_to(p_center) <= r2) {
+					result.push_back(key);
+				}
+			}
+		}
+	}
+	return result;
+}
+
+bool SporeManager::_is_position_warded(const Vector3 &p_pos) const {
+	if (_wards.is_empty()) {
+		return false;
+	}
+	Vector3i center_key(
+		int(Math::floor(p_pos.x / WARD_CELL_SIZE)),
+		int(Math::floor(p_pos.y / WARD_CELL_SIZE)),
+		int(Math::floor(p_pos.z / WARD_CELL_SIZE))
+	);
+	for (int dx = -1; dx <= 1; dx++) {
+		for (int dy = -1; dy <= 1; dy++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				Vector3i key = center_key + Vector3i(dx, dy, dz);
+				const Vector<int32_t> *ward_ids = _ward_grid.getptr(key);
+				if (!ward_ids) {
+					continue;
+				}
+				for (int32_t wid : *ward_ids) {
+					if (p_pos.distance_squared_to(_wards[wid].pos) < _wards[wid].radius * _wards[wid].radius) {
+						return true;
+					}
+				}
+			}
+		}
+	}
+	return false;
 }
 
 bool SporeManager::is_spore_warded(int32_t p_id) const {
@@ -1110,7 +1220,8 @@ void SporeManager::add_cell(const Vector3i &p_grid_key, const Vector3 &p_world_p
 	c.chamber_id = p_chamber_id;
 	c.depth = -1;
 	c.spawned = false;
-	c.blocked_by_ward = false;
+	c.blocked_by_ward = _is_position_warded(p_world_pos);
+	c.dead = false;
 
 	// Deterministic positional noise for frontier waviness.
 	// Two-octave sine hash produces smooth variation in [-1, 1].
@@ -1248,7 +1359,7 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 				continue;
 			}
 			const Cell *cell_ref = _cells.getptr(key);
-			if (!cell_ref || cell_ref->blocked_by_ward || cell_ref->depth < 0) {
+			if (!cell_ref || cell_ref->dead || cell_ref->blocked_by_ward || cell_ref->depth < 0) {
 				continue;
 			}
 			if (cell_ref->depth > (int)p_target_depth) {
@@ -1294,7 +1405,7 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 					continue;
 				}
 				Cell *c = _cells.getptr(nk);
-				if (!c || c->blocked_by_ward) {
+				if (!c || c->dead || c->blocked_by_ward) {
 					continue;
 				}
 				if (c->depth < 0 || c->depth > nd) {
@@ -1320,7 +1431,7 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 	_frontier_set.clear();
 	for (const Vector3i &key : visited) {
 		const Cell *cell_ref = _cells.getptr(key);
-		if (!cell_ref || cell_ref->blocked_by_ward || cell_ref->depth < 0) {
+		if (!cell_ref || cell_ref->dead || cell_ref->blocked_by_ward || cell_ref->depth < 0) {
 			continue;
 		}
 		for (const Vector3i &n : _bfs_neighbors) {
@@ -1337,6 +1448,52 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 		p_target_depth, visited.size(), _frontier_set.size(), _sweep));
 }
 
+void SporeManager::_run_clean_bfs_from() {
+	// Reset all non-dead, non-spore-frontier cell depths to -1.
+	// This discards stale BFS depths from before a ward was placed/removed
+	// and ensures the re-flood finds the current shortest paths.
+	int reset_count = 0;
+	for (auto &E : _cells) {
+		if (E.value.dead) {
+			continue;
+		}
+		if (_spore_frontier.has(E.key)) {
+			continue; // Anchor cells keep their existing depth.
+		}
+		if (E.value.depth >= 0) {
+			E.value.depth = -1;
+			reset_count++;
+		}
+	}
+
+	// Rebuild _frontier_set exclusively from spore frontier cells.
+	_init_bfs_neighbors();
+	_frontier_set.clear();
+	for (const Vector3i &key : _spore_frontier) {
+		const Cell *c = _cells.getptr(key);
+		if (!c || c->dead || c->blocked_by_ward || c->depth < 0) {
+			continue;
+		}
+		for (const Vector3i &n : _bfs_neighbors) {
+			Vector3i nk = key + n;
+			const Cell *nc = _cells.getptr(nk);
+			if (nc && !nc->dead && !nc->blocked_by_ward && nc->depth < 0) {
+				_frontier_set.insert(key);
+				break;
+			}
+		}
+	}
+
+	// The spore frontier anchors sit at or near _sweep.  Run BFS
+	// far enough ahead to cover a generous lookahead window.
+	_bfs_computed_depth = _sweep;
+	float target = _sweep + BFS_LOOKAHEAD * 3.0f;
+	_run_bfs_incremental(target);
+
+	print_line(vformat("SporeManager::_run_clean_bfs_from  reset=%d  frontier=%d  target=%.1f",
+		reset_count, _frontier_set.size(), target));
+}
+
 void SporeManager::_build_sweep_list() {
 	_sorted_cells.clear();
 
@@ -1349,6 +1506,9 @@ void SporeManager::_build_sweep_list() {
 	entries.reserve(_cells.size());
 
 	for (const auto &E : _cells) {
+		if (E.value.dead) {
+			continue;
+		}
 		if (E.value.depth >= 0 && !E.value.blocked_by_ward) {
 			float effective = (float)E.value.depth + E.value.depth_noise * amp;
 			entries.emplace_back(effective, E.key);
@@ -1384,10 +1544,17 @@ void SporeManager::_build_sweep_list() {
 }
 
 void SporeManager::propagate_depths() {
-	// Reset all cells to unvisited.
+	// Reset all non-dead cells to unvisited.  Dead cells are immutable:
+	// their spores have already spawned and their depth is final.
 	for (auto &E : _cells) {
-		E.value.depth = -1;
+		if (!E.value.dead) {
+			E.value.depth = -1;
+		}
 	}
+
+	// Full re-initialization — discard stale spore frontier entries.
+	// Will be rebuilt as cells re-spawn.
+	_spore_frontier.clear();
 
 	// Run BFS to a generous depth (covers all connected cells).
 	// Use INT_MAX / 2 to avoid overflow — in practice no chamber
@@ -1494,6 +1661,12 @@ Dictionary SporeManager::advance_sweeps(float p_delta) {
 			continue;
 		}
 
+		// Skip dead cells (should not appear in _sorted_cells, but guard anyway).
+		if (c->dead) {
+			_sweep_idx++;
+			continue;
+		}
+
 		// Skip cells blocked by wards (they were unblocked after a
 		// re-BFS but may still be in the stale _sorted_cells list).
 		if (c->blocked_by_ward) {
@@ -1542,186 +1715,317 @@ Dictionary SporeManager::advance_sweeps(float p_delta) {
 
 void SporeManager::mark_cell_spawned(const Vector3i &p_grid_key) {
 	Cell *c = _cells.getptr(p_grid_key);
-	if (c) {
-		c->spawned = true;
+	if (!c) {
+		return;
+	}
+	if (c->spawned) {
+		return; // Already spawned, nothing to do.
+	}
+	c->spawned = true;
+	_update_spore_frontier_for_spawn(p_grid_key);
+}
+
+SporeManager::CellZone SporeManager::_classify_cell(const Vector3i &p_key) const {
+	const Cell *c = _cells.getptr(p_key);
+	if (!c) {
+		return CellZone::DEAD; // Non-existent cells are irrelevant.
+	}
+	if (c->dead) {
+		return CellZone::DEAD;
+	}
+	if (!c->spawned) {
+		return CellZone::AHEAD;
+	}
+	// Spawned and not dead: check if it still borders unspawned territory.
+	for (const Vector3i &n : _bfs_neighbors) {
+		Vector3i nk = p_key + n;
+		const Cell *nc = _cells.getptr(nk);
+		if (nc && !nc->blocked_by_ward && !nc->spawned) {
+			return CellZone::SPORE_FRONTIER;
+		}
+	}
+	return CellZone::DEAD;
+}
+
+void SporeManager::_update_spore_frontier_for_spawn(const Vector3i &p_key) {
+	// Classify the newly-spawned cell.
+	CellZone zone = _classify_cell(p_key);
+	Cell *c = _cells.getptr(p_key);
+	if (!c) {
+		return;
+	}
+
+	switch (zone) {
+		case CellZone::SPORE_FRONTIER:
+			_spore_frontier.insert(p_key);
+			break;
+		case CellZone::DEAD:
+			c->dead = true;
+			break;
+		case CellZone::AHEAD:
+			// Should not happen — we just set spawned=true.
+			break;
+	}
+
+	// Re-classify neighbors that were in the spore frontier.
+	// They may have lost their last unspawned neighbor (this cell).
+	for (const Vector3i &n : _bfs_neighbors) {
+		Vector3i nk = p_key + n;
+		if (!_spore_frontier.has(nk)) {
+			continue;
+		}
+		CellZone nz = _classify_cell(nk);
+		if (nz == CellZone::DEAD) {
+			_spore_frontier.erase(nk);
+			Cell *nc = _cells.getptr(nk);
+			if (nc) {
+				nc->dead = true;
+			}
+		}
+		// If still SPORE_FRONTIER, it stays in the set.
 	}
 }
 
-void SporeManager::on_wards_changed() {
-	// Save old blocked state before recomputing.
-	HashMap<Vector3i, bool> old_blocked;
-	for (const auto &E : _cells) {
-		old_blocked[E.key] = E.value.blocked_by_ward;
-	}
+void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
+	// Query only the cells inside this ward's sphere — O(ward_volume),
+	// not O(all_cells).  Dead cells are implicitly excluded because
+	// _query_cells_in_ward_sphere doesn't filter by zone; we classify below.
+	Vector<Vector3i> affected = _query_cells_in_ward_sphere(p_center, p_radius);
 
-	// Recompute blocked_by_ward for all cells using the spatial grid.
-	if (_wards.is_empty()) {
-		for (auto &E : _cells) {
-			E.value.blocked_by_ward = false;
+	bool any_frontier_affected = false;
+	Vector<Vector3i> cells_to_block;
+	int min_blocked_old_depth = INT_MAX;
+
+	for (const Vector3i &key : affected) {
+		Cell *c = _cells.getptr(key);
+		if (!c) {
+			continue;
 		}
-	} else {
-		for (auto &E : _cells) {
-			bool blocked = false;
-			Vector3 pos = E.value.world_pos;
-			Vector3i center_key(
-				int(Math::floor(pos.x / WARD_CELL_SIZE)),
-				int(Math::floor(pos.y / WARD_CELL_SIZE)),
-				int(Math::floor(pos.z / WARD_CELL_SIZE))
-			);
-			for (int dx = -1; dx <= 1 && !blocked; dx++) {
-				for (int dy = -1; dy <= 1 && !blocked; dy++) {
-					for (int dz = -1; dz <= 1 && !blocked; dz++) {
-						Vector3i key = center_key + Vector3i(dx, dy, dz);
-						const Vector<int32_t> *ward_ids = _ward_grid.getptr(key);
-						if (!ward_ids) {
-							continue;
-						}
-						for (int32_t wid : *ward_ids) {
-							if (pos.distance_squared_to(_wards[wid].pos) < _wards[wid].radius * _wards[wid].radius) {
-								blocked = true;
-								break;
-							}
-						}
-					}
-				}
-			}
-			E.value.blocked_by_ward = blocked;
+		if (c->blocked_by_ward) {
+			continue; // Already blocked, nothing to do.
+		}
+
+		CellZone zone = _classify_cell(key);
+		if (zone == CellZone::DEAD) {
+			continue; // Dead cells are immutable — ignore.
+		}
+
+		cells_to_block.push_back(key);
+
+		if (zone == CellZone::SPORE_FRONTIER) {
+			any_frontier_affected = true;
+		}
+		if (c->depth >= 0 && c->depth < min_blocked_old_depth) {
+			min_blocked_old_depth = c->depth;
 		}
 	}
 
-	// First pass: record which cells changed blocked status AND capture
-	// their old depths BEFORE we reset them.  We need the minimum depth
-	// among newly-blocked cells so we can also reset cells behind them
-	// (which may have stale depths that let the sweep bypass the ward).
-	int newly_blocked_count = 0;
-	int newly_unblocked_count = 0;
-	int min_blocked_old_depth = INT_MAX; // minimum depth among cells that became blocked
-
-	for (auto &E : _cells) {
-		bool was_blocked = old_blocked.has(E.key) ? old_blocked[E.key] : false;
-		if (E.value.blocked_by_ward != was_blocked) {
-			if (E.value.blocked_by_ward) {
-				newly_blocked_count++;
-				if (E.value.depth >= 0 && E.value.depth < min_blocked_old_depth) {
-					min_blocked_old_depth = E.value.depth;
-				}
-			} else {
-				newly_unblocked_count++;
-			}
-			// Reset depth for every cell whose blocked status changed.
-			E.value.depth = -1;
-		}
-		// Belt-and-suspenders: all blocked cells must have no depth.
-		if (E.value.blocked_by_ward) {
-			E.value.depth = -1;
-		}
+	if (cells_to_block.is_empty()) {
+		return; // Ward fully inside dead zone — nothing to do.
 	}
 
-	// When wards activated (cells became blocked), any cell at a depth
-	// ≥ the ward's minimum depth could now be UNREACHABLE or need a
-	// longer path around the ward.  Reset them all so the BFS recomputes
-	// correct depths — stale depths behind a ward are the #1 cause of
-	// spores "walking through" an active ward.
+	// ---- Apply blocking ----
+	for (const Vector3i &key : cells_to_block) {
+		Cell *c = _cells.getptr(key);
+		if (!c) {
+			continue;
+		}
+		c->blocked_by_ward = true;
+		c->depth = -1;
+		_spore_frontier.erase(key);
+		_frontier_set.erase(key);
+	}
+
+	print_line(vformat("SporeManager::on_ward_activated  blocked=%d  frontier_affected=%d  min_depth=%d",
+		cells_to_block.size(), any_frontier_affected ? 1 : 0,
+		min_blocked_old_depth < INT_MAX ? min_blocked_old_depth : -1));
+
+	if (!any_frontier_affected) {
+		// Only AHEAD cells were blocked.  No BFS is needed — the next
+		// lazy BFS extension will naturally route around the blocked cells.
+		// The blocked cells were already removed from _frontier_set above.
+		_sweep_dirty = true;
+		return;
+	}
+
+	// ---- Spore frontier was affected: behind-reset + re-BFS ----
+	// Any cell at depth ≥ min_blocked_old_depth could now be unreachable
+	// or need a longer path around the ward.  Reset them all.
 	int behind_reset_count = 0;
 	if (min_blocked_old_depth < INT_MAX) {
 		for (auto &E : _cells) {
-			if (!E.value.blocked_by_ward && E.value.depth >= min_blocked_old_depth) {
+			if (E.value.dead || E.value.blocked_by_ward) {
+				continue;
+			}
+			// Spore frontier cells are anchored — their depth is final.
+			// Only reset AHEAD cells.
+			if (_spore_frontier.has(E.key)) {
+				continue;
+			}
+			if (E.value.depth >= min_blocked_old_depth) {
 				E.value.depth = -1;
 				behind_reset_count++;
 			}
 		}
 	}
+	print_line(vformat("SporeManager::on_ward_activated  behind_reset=%d", behind_reset_count));
 
-	if (newly_blocked_count > 0 || newly_unblocked_count > 0) {
-		print_line(vformat("SporeManager::on_wards_changed  blocked:+%d  unblocked:+%d  min_depth=%d  behind_reset=%d",
-			newly_blocked_count, newly_unblocked_count,
-			min_blocked_old_depth < INT_MAX ? min_blocked_old_depth : -1,
-			behind_reset_count));
-	}
-
-	// Rebuild the frontier set: find all unblocked cells with valid
-	// depth that border unblocked depth=-1 cells.
+	// Rebuild _frontier_set from spore frontier cells.  These are the
+	// permanent BFS anchors — already spawned, depth is final, and they
+	// should have unvisited neighbors after the behind-reset.
 	_frontier_set.clear();
-	float max_frontier_depth = 0.0f;
-	for (const auto &E : _cells) {
-		if (E.value.blocked_by_ward || E.value.depth < 0) {
+	for (const Vector3i &key : _spore_frontier) {
+		const Cell *c = _cells.getptr(key);
+		if (!c || c->blocked_by_ward || c->depth < 0) {
 			continue;
 		}
+		// Verify the spore frontier cell still has unvisited neighbors.
+		_init_bfs_neighbors();
 		for (const Vector3i &n : _bfs_neighbors) {
-			Vector3i nk = E.key + n;
+			Vector3i nk = key + n;
 			const Cell *nc = _cells.getptr(nk);
 			if (nc && !nc->blocked_by_ward && nc->depth < 0) {
-				_frontier_set.insert(E.key);
-				if ((float)E.value.depth > max_frontier_depth) {
-					max_frontier_depth = (float)E.value.depth;
-				}
+				_frontier_set.insert(key);
 				break;
 			}
 		}
 	}
 
-	// Save a snapshot of unvisited cells before the BFS.  When ONLY
-	// unblocking (no new blocks), we offset their post-BFS depths so
-	// the unblocked region resumes at the current sweep line instead
-	// of its natural shallow depth.  This prevents both burst and
-	// pause: the unblocked cells become the next to spawn, right after
-	// the current front.
-	HashSet<Vector3i> pre_bfs_unvisited;
-	bool do_offset = (newly_unblocked_count > 0 && newly_blocked_count == 0);
-	if (do_offset) {
-		for (const auto &E : _cells) {
-			if (E.value.depth < 0 && !E.value.blocked_by_ward) {
-				pre_bfs_unvisited.insert(E.key);
-			}
-		}
-	}
-
-	// When a ward is removed (unblocking), the cells that were cut off
-	// may extend far past max_frontier_depth.  Don't ask the BFS to
-	// reach all the way to _sweep — the depth offset below handles the
-	// gap.  Only extend enough to reconnect the graph and seed the
-	// newly-unblocked region.
-	float target;
-	if (do_offset) {
-		target = MAX(max_frontier_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD);
-	} else {
-		target = MAX(max_frontier_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD * 2);
-	}
-	print_line(vformat("SporeManager::on_wards_changed  BFS target=%.1f  frontier=%d  max_fdepth=%.1f  sweep=%.1f",
-		target, _frontier_set.size(), max_frontier_depth, _sweep));
+	// Run the BFS from the rebuilt frontier.  Seed from entry cells and
+	// start cell as in _run_bfs_incremental, plus the spore frontier.
+	float target = MAX(_sweep + BFS_LOOKAHEAD * 2, _bfs_computed_depth + BFS_LOOKAHEAD);
+	print_line(vformat("SporeManager::on_ward_activated  BFS target=%.1f  spore_frontier=%d  bfs_frontier=%d",
+		target, _spore_frontier.size(), _frontier_set.size()));
 	_run_bfs_incremental(target);
 
-	// Offset newly-assigned depths so the unblocked region starts at
-	// the current sweep line.  Only offset cells whose assigned depth
-	// is below the old max_frontier_depth — those are in the shallow
-	// unblocked region.  Cells at/above max_frontier_depth are the
-	// normal frontier extension and must keep their natural depths.
-	if (do_offset && !pre_bfs_unvisited.is_empty()) {
-		int min_new_depth = INT_MAX;
-		for (const Vector3i &key : pre_bfs_unvisited) {
-			const Cell *c = _cells.getptr(key);
-			if (c && c->depth >= 0) {
-				// Only consider cells that landed in the shallow region.
-				if ((float)c->depth < max_frontier_depth && c->depth < min_new_depth) {
-					min_new_depth = c->depth;
-				}
+	_sweep_dirty = true;
+}
+
+void SporeManager::on_ward_deactivated(const Vector3 &p_center, float p_radius) {
+	// Query only the cells inside this ward's former sphere.
+	Vector<Vector3i> affected = _query_cells_in_ward_sphere(p_center, p_radius);
+
+	Vector<Vector3i> has_dead_neighbor_cells;
+	Vector<Vector3i> has_visited_neighbor_cells;
+	Vector<Vector3i> isolated_cells;
+
+	for (const Vector3i &key : affected) {
+		Cell *c = _cells.getptr(key);
+		if (!c) {
+			continue;
+		}
+		if (c->dead) {
+			continue; // Dead cells stay dead; their blocked status is irrelevant.
+		}
+		if (!c->blocked_by_ward) {
+			continue; // Not actually blocked — nothing to unblock.
+		}
+
+		// Classify by neighbor types.
+		bool has_dead = false;
+		bool has_visited = false;
+
+		_init_bfs_neighbors();
+		for (const Vector3i &n : _bfs_neighbors) {
+			Vector3i nk = key + n;
+			const Cell *nc = _cells.getptr(nk);
+			if (!nc) {
+				continue;
+			}
+			if (nc->dead) {
+				has_dead = true;
+				break; // Dead neighbor takes priority.
+			}
+			if (!nc->blocked_by_ward && nc->depth >= 0) {
+				has_visited = true;
+				// Don't break — dead check takes priority.
 			}
 		}
-		if (min_new_depth < INT_MAX) {
-			int offset = (int)_sweep - min_new_depth;
-			if (offset > 0) {
-				for (const Vector3i &key : pre_bfs_unvisited) {
-					Cell *c = _cells.getptr(key);
-					if (c && c->depth >= 0 && (float)c->depth < max_frontier_depth) {
-						c->depth += offset;
-					}
-				}
-				print_line(vformat("SporeManager::on_wards_changed  depth offset +%d applied (min_was=%d sweep=%.1f)",
-					offset, min_new_depth, _sweep));
-			}
+
+		if (has_dead) {
+			has_dead_neighbor_cells.push_back(key);
+		} else if (has_visited) {
+			has_visited_neighbor_cells.push_back(key);
+		} else {
+			isolated_cells.push_back(key);
 		}
 	}
-	_sweep_dirty = true;
+
+	if (has_dead_neighbor_cells.is_empty() &&
+			has_visited_neighbor_cells.is_empty() &&
+			isolated_cells.is_empty()) {
+		return; // Nothing to do.
+	}
+
+	// ---- Unblock all affected cells ----
+	auto unblock_cell = [this](const Vector3i &key) {
+		Cell *c = _cells.getptr(key);
+		if (c) {
+			c->blocked_by_ward = false;
+			c->depth = -1; // Will be recomputed.
+		}
+	};
+
+	for (const Vector3i &key : has_dead_neighbor_cells) {
+		unblock_cell(key);
+	}
+	for (const Vector3i &key : has_visited_neighbor_cells) {
+		unblock_cell(key);
+	}
+	for (const Vector3i &key : isolated_cells) {
+		unblock_cell(key);
+	}
+
+	print_line(vformat("SporeManager::on_ward_deactivated  dead_nbr=%d  visited_nbr=%d  isolated=%d",
+		has_dead_neighbor_cells.size(), has_visited_neighbor_cells.size(), isolated_cells.size()));
+
+	// ---- Case 1: Dead-neighbor cells → anchor at sweep depth, clean re-BFS ----
+	if (!has_dead_neighbor_cells.is_empty()) {
+		for (const Vector3i &key : has_dead_neighbor_cells) {
+			Cell *c = _cells.getptr(key);
+			if (c) {
+				c->depth = (int)_sweep;
+				_spore_frontier.insert(key);
+			}
+		}
+
+		// Clean BFS: resets all AHEAD depths, rebuilds frontier from
+		// spore frontier anchors, and re-floods from scratch.
+		print_line(vformat("SporeManager::on_ward_deactivated  case=dead_nbr  spore_frontier=%d",
+			_spore_frontier.size()));
+		_run_clean_bfs_from();
+		_sweep_dirty = true;
+		return;
+	}
+
+	// ---- Case 2: Visited-neighbor cells → add to frontier, lazy BFS ----
+	if (!has_visited_neighbor_cells.is_empty()) {
+		for (const Vector3i &key : has_visited_neighbor_cells) {
+			_frontier_set.insert(key);
+		}
+
+		float target = _bfs_computed_depth + BFS_LOOKAHEAD;
+		print_line(vformat("SporeManager::on_ward_deactivated  case=visited_nbr  BFS target=%.1f  frontier=%d",
+			target, _frontier_set.size()));
+		_run_bfs_incremental(target);
+		_sweep_dirty = true;
+		return;
+	}
+
+	// ---- Case 3: Isolated cells only → no BFS needed ----
+	// Cells were unblocked but have no neighbors with known depth.
+	// They'll be discovered naturally by future lazy BFS extensions.
+	// Nothing more to do.
+	print_line(vformat("SporeManager::on_ward_deactivated  case=isolated  no BFS needed"));
+}
+
+void SporeManager::on_wards_changed() {
+	// This method is now a no-op.  set_wards() automatically diffs
+	// old vs new wards and calls on_ward_activated() /
+	// on_ward_deactivated() for each change.  New cells added while
+	// wards are active are checked in add_cell() via _is_position_warded().
+	// Kept for backward compatibility — callers can safely remove it.
+	print_line("SporeManager::on_wards_changed  (no-op, per-ward methods handle changes)");
 }
 
 // ---- GDScript queries ----
