@@ -1969,9 +1969,9 @@ void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
 
 	// Run the BFS from the rebuilt frontier, but only a reasonable
 	// window ahead of the sweep.  The behind-reset cleared depths up
-	// to _bfs_global_max_depth; we re-assign the near window here and
-	// let ensure_depths_computed() (called by GDScript right after)
-	// finish the rest using the known global max as its target.
+	// to _bfs_global_max_depth; we re-assign the near window here.
+	// The lazy BFS extension in advance_sweeps() naturally fills in
+	// cells beyond this window as the sweep cursor advances.
 	float target = _sweep + BFS_LOOKAHEAD * 3.0f;
 	print_line(vformat("SporeManager::on_ward_activated  re_bfs target=%.1f  spore_frontier=%d  bfs_frontier=%d",
 		target, _spore_frontier.size(), _frontier_set.size()));
@@ -2158,15 +2158,12 @@ void SporeManager::notify_cells_added() {
 }
 
 void SporeManager::ensure_depths_computed() {
-	// Run full BFS to assign depth to every reachable cell.
-	// Does NOT touch _sweep or _sweep_idx — only sets _sweep_dirty
-	// so that advance_sweeps() rebuilds the sorted list on next call.
-	// The rebuild correctly skips already-spawned cells, so the sweep
-	// resumes exactly where it left off.
-	// Use the known global max depth as the target (or 10000 on first
-	// call when nothing has been computed yet).
-	float target = _bfs_global_max_depth > 0.0f ? _bfs_global_max_depth : 10000.0f;
-	_run_bfs_incremental(target);
+	// Trigger a lazy BFS extension on the next advance_sweeps() call.
+	// This replaces the old behaviour of running a full-graph BFS to
+	// 10000/global-max — the lazy extension in advance_sweeps already
+	// keeps the BFS window ahead of the sweep cursor, so a deep
+	// recomputation is never needed.
+	_cells_added = true;
 }
 
 int SporeManager::get_bfs_neighbor_count() const {

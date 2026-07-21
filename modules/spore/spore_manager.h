@@ -203,8 +203,7 @@ private:
 	float _bfs_computed_depth = 0.0f;
 	// Maximum depth ever reached by any BFS run.  Monotonically
 	// increases; never reset by ward operations.  Used as the
-	// target for ensure_depths_computed() / propagate_depths()
-	// so we don't need a hardcoded sentinel like 10000.
+	// so we always know the true extent of the graph.
 	float _bfs_global_max_depth = 0.0f;
 	bool _cells_added = false;
 	// Cells known to have at least one unvisited (depth=-1) neighbour.
@@ -472,10 +471,10 @@ public:
 	// propagate_depths() for incremental chamber loading).
 	void notify_cells_added();
 
-	// Force-compute depths for all cells (runs full BFS to 10000 depth
-	// units).  Does NOT reset the sweep cursor — only sets _sweep_dirty
-	// so the sweep list is rebuilt on the next advance_sweeps() call.
-	// Safe to call from GDScript at any time (e.g. console commands).
+// Signal that depths should be (re)computed on the next
+// advance_sweeps() call.  Previously ran a full-graph BFS;
+// now just sets _cells_added so the lazy BFS extension handles
+// it incrementally — no deep traversal needed.
 	void ensure_depths_computed();
 
 	// BFS neighbour count (for debugging / profiling).
