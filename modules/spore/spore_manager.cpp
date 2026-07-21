@@ -1456,6 +1456,7 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 	}
 
 	_bfs_computed_depth = p_target_depth;
+	_bfs_global_max_depth = MAX(_bfs_global_max_depth, p_target_depth);
 	_sweep_dirty = true;
 
 	// Rebuild _frontier_set from the visited set (cells touched in
@@ -1588,13 +1589,12 @@ void SporeManager::propagate_depths() {
 		}
 	}
 
-	// Full re-initialization — discard stale spore frontier entries.
-	// Will be rebuilt as cells re-spawn.
+	// Full re-initialization — discard stale spore frontier entries
+	// and the global max depth (cell graph is rebuilt from scratch).
 	_spore_frontier.clear();
+	_bfs_global_max_depth = 0.0f;
 
-	// Run BFS to a generous depth (covers all connected cells).
-	// Use INT_MAX / 2 to avoid overflow — in practice no chamber
-	// has cells deeper than a few hundred.
+	// Run full BFS to cover all cells in the fresh graph.
 	_run_bfs_incremental(10000.0f);
 
 	// Build the sorted sweep list (skips already-spawned cells).
@@ -1967,9 +1967,12 @@ void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
 		}
 	}
 
-	// Run the BFS from the rebuilt frontier.  Seed from entry cells and
-	// start cell as in _run_bfs_incremental, plus the spore frontier.
-	float target = MAX(_sweep + BFS_LOOKAHEAD * 2, _bfs_computed_depth + BFS_LOOKAHEAD);
+	// Run the BFS from the rebuilt frontier, but only a reasonable
+	// window ahead of the sweep.  The behind-reset cleared depths up
+	// to _bfs_global_max_depth; we re-assign the near window here and
+	// let ensure_depths_computed() (called by GDScript right after)
+	// finish the rest using the known global max as its target.
+	float target = _sweep + BFS_LOOKAHEAD * 3.0f;
 	print_line(vformat("SporeManager::on_ward_activated  re_bfs target=%.1f  spore_frontier=%d  bfs_frontier=%d",
 		target, _spore_frontier.size(), _frontier_set.size()));
 	_run_bfs_incremental(target);
@@ -2160,7 +2163,10 @@ void SporeManager::ensure_depths_computed() {
 	// so that advance_sweeps() rebuilds the sorted list on next call.
 	// The rebuild correctly skips already-spawned cells, so the sweep
 	// resumes exactly where it left off.
-	_run_bfs_incremental(10000.0f);
+	// Use the known global max depth as the target (or 10000 on first
+	// call when nothing has been computed yet).
+	float target = _bfs_global_max_depth > 0.0f ? _bfs_global_max_depth : 10000.0f;
+	_run_bfs_incremental(target);
 }
 
 int SporeManager::get_bfs_neighbor_count() const {
