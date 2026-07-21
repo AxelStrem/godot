@@ -13,6 +13,7 @@
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/os/thread.h"
+#include <cfloat>
 #include "core/string/print_string.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/sort_array.h"
@@ -22,12 +23,9 @@ namespace {
 // Use a macro instead of static const to avoid static init order issues — SNAME
 // requires the StringName system to be configured, which isn't guaranteed at DLL load time.
 #define WFC_NONE_CONNECTION SNAME("none")
-static const StringName WFC_WALL_PANEL_TYPE = SNAME("wall_panel");
 static constexpr int WFC_LOOKUP_RANGE = 3;
 
-static double _usec_to_msec(uint64_t p_usec) {
-	return double(p_usec) / 1000.0;
-}
+static const StringName WFC_WALL_PANEL_TYPE = SNAME("wall_panel");
 
 static int _count_bits_u64(uint64_t p_value) {
 	int count = 0;
@@ -1130,7 +1128,6 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, const Re
 						if (element.remaining == 0) {
 							float cell_size = p_snapshot.cell_size;
 							int gx = Math::round(element.position.x / cell_size);
-							int gy = Math::round(element.position.y / cell_size);
 							int gz = Math::round(element.position.z / cell_size);
 							result.error = vformat("Contradiction while solving WFC element of type '%s' at grid(%d,%d).", String(type_data.name), gx, gz);
 							return false;
@@ -1152,7 +1149,6 @@ static SolveResult _solve_snapshot(const AuthoringSnapshot &p_snapshot, const Re
 						if (element.remaining == 0) {
 							float cell_size = p_snapshot.cell_size;
 							int gx = Math::round(element.position.x / cell_size);
-							int gy = Math::round(element.position.y / cell_size);
 							int gz = Math::round(element.position.z / cell_size);
 							result.error = vformat("Contradiction (no-neighbor) while solving WFC element of type '%s' at grid(%d,%d).", String(type_data.name), gx, gz);
 							return false;
