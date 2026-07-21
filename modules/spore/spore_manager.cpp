@@ -1843,6 +1843,8 @@ void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
 	}
 
 	// ---- Apply blocking ----
+	_init_bfs_neighbors();
+	int frontier_promoted_to_dead = 0;
 	for (const Vector3i &key : cells_to_block) {
 		Cell *c = _cells.getptr(key);
 		if (!c) {
@@ -1852,13 +1854,34 @@ void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
 		c->depth = -1;
 		_spore_frontier.erase(key);
 		_frontier_set.erase(key);
+
+		// Re-classify spore frontier neighbours: the blocked cell may
+		// have been their only unspawned, unblocked neighbour.  If so,
+		// they transition from SPORE_FRONTIER → DEAD.  Keeping them in
+		// _spore_frontier makes the rebuild loop below progressively
+		// slower with each ward activation.
+		for (const Vector3i &n : _bfs_neighbors) {
+			Vector3i nk = key + n;
+			if (!_spore_frontier.has(nk)) {
+				continue;
+			}
+			CellZone nz = _classify_cell(nk);
+			if (nz == CellZone::DEAD) {
+				_spore_frontier.erase(nk);
+				Cell *nc = _cells.getptr(nk);
+				if (nc) {
+					nc->dead = true;
+				}
+				frontier_promoted_to_dead++;
+			}
+		}
 	}
 
 	print_line(vformat("SporeManager::on_ward_activated  pos=(%.1f,%.1f,%.1f) r=%.1f  affected=%d  blocked=%d",
 		p_center.x, p_center.y, p_center.z, p_radius, affected.size(), cells_to_block.size()));
-	print_line(vformat("SporeManager::on_ward_activated  spore_frontier=%d  ahead_with_depth=%d  ahead_no_depth=%d  min_old_depth=%d",
+	print_line(vformat("SporeManager::on_ward_activated  spore_frontier=%d  ahead_with_depth=%d  ahead_no_depth=%d  min_old_depth=%d  frontier_to_dead=%d",
 		spore_frontier_blocked, ahead_with_depth, ahead_no_depth,
-		min_blocked_old_depth < INT_MAX ? min_blocked_old_depth : -1));
+		min_blocked_old_depth < INT_MAX ? min_blocked_old_depth : -1, frontier_promoted_to_dead));
 
 	// Per plan §5.1: if all blocked cells are beyond the BFS frontier
 	// (none have a computed depth yet), no re-BFS is needed — the lazy
@@ -1897,13 +1920,13 @@ void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
 	// permanent BFS anchors — already spawned, depth is final, and they
 	// should have unvisited neighbors after the behind-reset.
 	_frontier_set.clear();
+	_init_bfs_neighbors();
 	for (const Vector3i &key : _spore_frontier) {
 		const Cell *c = _cells.getptr(key);
 		if (!c || c->blocked_by_ward || c->depth < 0) {
 			continue;
 		}
 		// Verify the spore frontier cell still has unvisited neighbors.
-		_init_bfs_neighbors();
 		for (const Vector3i &n : _bfs_neighbors) {
 			Vector3i nk = key + n;
 			const Cell *nc = _cells.getptr(nk);
@@ -1932,6 +1955,7 @@ void SporeManager::on_ward_deactivated(const Vector3 &p_center, float p_radius) 
 	Vector<Vector3i> has_visited_neighbor_cells;
 	Vector<Vector3i> isolated_cells;
 
+	_init_bfs_neighbors();
 	for (const Vector3i &key : affected) {
 		Cell *c = _cells.getptr(key);
 		if (!c) {
@@ -1948,7 +1972,6 @@ void SporeManager::on_ward_deactivated(const Vector3 &p_center, float p_radius) 
 		bool has_dead = false;
 		bool has_visited = false;
 
-		_init_bfs_neighbors();
 		for (const Vector3i &n : _bfs_neighbors) {
 			Vector3i nk = key + n;
 			const Cell *nc = _cells.getptr(nk);
