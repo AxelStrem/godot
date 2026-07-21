@@ -1840,15 +1840,12 @@ void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
 		cells_to_block.size(), any_frontier_affected ? 1 : 0,
 		min_blocked_old_depth < INT_MAX ? min_blocked_old_depth : -1));
 
-	if (!any_frontier_affected) {
-		// Only AHEAD cells were blocked.  No BFS is needed — the next
-		// lazy BFS extension will naturally route around the blocked cells.
-		// The blocked cells were already removed from _frontier_set above.
-		_sweep_dirty = true;
-		return;
-	}
-
-	// ---- Spore frontier was affected: behind-reset + re-BFS ----
+	// ---- Behind-reset + re-BFS ----
+	// Always run when any cells are blocked, regardless of zone.
+	// If only AHEAD cells were blocked, cells beyond them on the far
+	// side of the ward still have stale BFS depths.  The behind-reset
+	// clears everything at depth ≥ min_blocked_old_depth, and the
+	// re-BFS correctly discovers that those cells are now unreachable.
 	// Any cell at depth ≥ min_blocked_old_depth could now be unreachable
 	// or need a longer path around the ward.  Reset them all.
 	int behind_reset_count = 0;
