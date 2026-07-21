@@ -157,6 +157,7 @@ private:
 		int32_t chamber_id = -1;
 		bool spawned = false;            // has _activate_spore_cell been called?
 		bool blocked_by_ward = false;    // inside an active ward → depth treated as INF
+		bool dead = false;               // zone 1: behind sweep, all neighbors spawned/blocked, immutable
 		float depth_noise = 0.0f;        // normalized [-1,1] positional noise for frontier waviness
 	};
 
@@ -206,11 +207,26 @@ private:
 	// and on_wards_changed().  Eliminates the O(cells × 124) frontier
 	// scan that used to run on every BFS extension.
 	HashSet<Vector3i> _frontier_set;
+
+	// Spore frontier: cells that have spawned AND have at least one
+	// unspawned, unblocked neighbor.  These are the permanent BFS
+	// anchor points for any re-flood after ward changes.  Dead cells
+	// (all neighbors spawned/blocked) are excluded and never touched again.
+	HashSet<Vector3i> _spore_frontier;
 	static constexpr float BFS_LOOKAHEAD = 20.0f;
 
 	// ---- BFS / sweep helpers ----
 	void _run_bfs_incremental(float p_target_depth);
+	void _run_clean_bfs_from(); // Reset AHEAD depths and re-flood from spore frontier.
 	void _build_sweep_list();
+
+	enum class CellZone {
+		DEAD,
+		SPORE_FRONTIER,
+		AHEAD,
+	};
+	CellZone _classify_cell(const Vector3i &p_key) const;
+	void _update_spore_frontier_for_spawn(const Vector3i &p_key);
 
 	// ---- Spatial index ----
 	SporeGrid _grid;
@@ -231,6 +247,8 @@ private:
 	void _free_id(int32_t p_id);
 	float _compute_radius(float p_elapsed, int p_profile, float p_seed_offset) const;
 	void _rebuild_ward_grid();
+	Vector<Vector3i> _query_cells_in_ward_sphere(const Vector3 &p_center, float p_radius) const;
+	bool _is_position_warded(const Vector3 &p_pos) const;
 	void _detect_overlaps(double p_total_time);
 	void _assign_prune_deadline(int32_t p_id, const Vector3 &p_pos, float p_spawn_depth);
 
@@ -411,6 +429,16 @@ public:
 	// blocked cells are pushed to unreachable depth and unblocked cells
 	// recover their natural depth.
 	void on_wards_changed();
+
+	// Per-ward activation: called when a single ward is placed or its
+	// radius increases.  Only touches cells inside the ward sphere
+	// (O(ward_volume) instead of O(all_cells)).
+	void on_ward_activated(const Vector3 &p_center, float p_radius);
+
+	// Per-ward deactivation: called when a ward is removed or its
+	// radius decreases.  Classifies unblocked cells by neighbor type
+	// and runs the minimum necessary BFS.
+	void on_ward_deactivated(const Vector3 &p_center, float p_radius);
 
 	// GDScript queries for cell state.
 	int get_cell_depth(const Vector3i &p_grid_key) const;
