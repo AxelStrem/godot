@@ -1296,9 +1296,6 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 		return;
 	}
 
-	print_line(vformat("SporeManager::_run_bfs_incremental  START  target=%.1f  sweep=%.1f  bfs_computed_depth=%.1f  frontier_set=%d",
-		p_target_depth, _sweep, _bfs_computed_depth, _frontier_set.size()));
-
 	_init_bfs_neighbors();
 
 	// Collect seeds: entry cells (depth 0) and frontier cells
@@ -1408,14 +1405,6 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 		}
 	}
 
-	print_line(vformat("SporeManager::_run_bfs_incremental  SEEDS  wave=%d  start=%d  entry=%d  frontier(seeded=%d skip:dead=%d blocked=%d neg_depth=%d oob=%d no_nbr=%d)",
-		wave.size(),
-		_has_start_cell ? 1 : 0,
-		wave.size() - (_has_start_cell ? 1 : 0) - frontier_seeded,
-		frontier_seeded,
-		frontier_skipped_dead, frontier_skipped_blocked, frontier_skipped_depth_neg,
-		frontier_skipped_depth_oob, frontier_skipped_no_neighbor));
-
 	if (wave.is_empty()) {
 		return;
 	}
@@ -1478,14 +1467,9 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 		}
 	}
 
-	print_line(vformat("SporeManager::_run_bfs_incremental  target=%.1f  assigned=%d  frontier=%d  sweep=%.1f",
-		p_target_depth, visited.size(), _frontier_set.size(), _sweep));
 }
 
 void SporeManager::_run_clean_bfs_from() {
-	print_line(vformat("SporeManager::_run_clean_bfs_from  START  sweep=%.1f  spore_frontier=%d  bfs_computed_depth=%.1f",
-		_sweep, _spore_frontier.size(), _bfs_computed_depth));
-
 	// Reset all non-dead, non-spore-frontier cell depths to -1.
 	// This discards stale BFS depths from before a ward was placed/removed
 	// and ensures the re-flood finds the current shortest paths.
@@ -1527,8 +1511,6 @@ void SporeManager::_run_clean_bfs_from() {
 	float target = _sweep + BFS_LOOKAHEAD * 3.0f;
 	_run_bfs_incremental(target);
 
-	print_line(vformat("SporeManager::_run_clean_bfs_from  reset=%d  frontier=%d  target=%.1f",
-		reset_count, _frontier_set.size(), target));
 }
 
 void SporeManager::_build_sweep_list() {
@@ -1629,7 +1611,6 @@ Dictionary SporeManager::advance_sweeps(float p_delta) {
 	// run when the sweep is close to computed_max_depth.
 	if (_cells_added) {
 		float target = MAX(_bfs_computed_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD * 2);
-		print_line(vformat("SporeManager::advance_sweeps  BFS_EXTEND(cells_added)  target=%.1f", target));
 		_run_bfs_incremental(target);
 		_cells_added = false;
 	} else if (_sweep + BFS_LOOKAHEAD * 0.5f > _bfs_computed_depth) {
@@ -1637,8 +1618,6 @@ Dictionary SporeManager::advance_sweeps(float p_delta) {
 		// BFS actually reaches the frontier even if _bfs_computed_depth
 		// was left stale by a ward change or other edge case.
 		float ext_target = MAX(_bfs_computed_depth + BFS_LOOKAHEAD, _sweep + BFS_LOOKAHEAD * 2);
-		print_line(vformat("SporeManager::advance_sweeps  BFS_EXTEND(sweep_near)  sweep=%.1f  computed=%.1f  target=%.1f",
-			_sweep, _bfs_computed_depth, ext_target));
 		_run_bfs_incremental(ext_target);
 	}
 
@@ -1867,8 +1846,6 @@ void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
 	}
 
 	if (cells_to_block.is_empty()) {
-		print_line(vformat("SporeManager::on_ward_activated  pos=(%.1f,%.1f,%.1f) r=%.1f  NO_CELLS_TO_BLOCK",
-			p_center.x, p_center.y, p_center.z, p_radius));
 		return; // Ward fully inside dead zone — nothing to do.
 	}
 
@@ -1907,18 +1884,11 @@ void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
 		}
 	}
 
-	print_line(vformat("SporeManager::on_ward_activated  pos=(%.1f,%.1f,%.1f) r=%.1f  affected=%d  blocked=%d",
-		p_center.x, p_center.y, p_center.z, p_radius, affected.size(), cells_to_block.size()));
-	print_line(vformat("SporeManager::on_ward_activated  spore_frontier=%d  ahead_with_depth=%d  ahead_no_depth=%d  min_old_depth=%d  frontier_to_dead=%d",
-		spore_frontier_blocked, ahead_with_depth, ahead_no_depth,
-		min_blocked_old_depth < INT_MAX ? min_blocked_old_depth : -1, frontier_promoted_to_dead));
-
 	// Per plan §5.1: if all blocked cells are beyond the BFS frontier
 	// (none have a computed depth yet), no re-BFS is needed — the lazy
 	// BFS extension will naturally skip them when it reaches them.
 	// Set _sweep_dirty so _build_sweep_list excludes blocked cells.
 	if (min_blocked_old_depth == INT_MAX) {
-		print_line("SporeManager::on_ward_activated  path=EARLY_RETURN  (all blocked beyond BFS frontier, no re-BFS)");
 		_sweep_dirty = true;
 		return;
 	}
@@ -1927,7 +1897,6 @@ void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
 	// Cells at depth ≥ min_blocked_old_depth may have stale depths
 	// computed through now-blocked cells.  Reset and re-flood BFS
 	// from spore frontier anchors.
-	print_line("SporeManager::on_ward_activated  path=RE_BFS  (cells with BFS depth blocked, re-flood from spore frontier)");
 
 	// ---- Behind-reset ----
 	int behind_reset_count = 0;
@@ -1944,8 +1913,6 @@ void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
 			behind_reset_count++;
 		}
 	}
-	print_line(vformat("SporeManager::on_ward_activated  behind_reset=%d", behind_reset_count));
-
 	// Rebuild _frontier_set from spore frontier cells.  These are the
 	// permanent BFS anchors — already spawned, depth is final, and they
 	// should have unvisited neighbors after the behind-reset.
@@ -1973,8 +1940,6 @@ void SporeManager::on_ward_activated(const Vector3 &p_center, float p_radius) {
 	// The lazy BFS extension in advance_sweeps() naturally fills in
 	// cells beyond this window as the sweep cursor advances.
 	float target = _sweep + BFS_LOOKAHEAD * 3.0f;
-	print_line(vformat("SporeManager::on_ward_activated  re_bfs target=%.1f  spore_frontier=%d  bfs_frontier=%d",
-		target, _spore_frontier.size(), _frontier_set.size()));
 	_run_bfs_incremental(target);
 
 	_sweep_dirty = true;
@@ -2055,9 +2020,6 @@ void SporeManager::on_ward_deactivated(const Vector3 &p_center, float p_radius) 
 		unblock_cell(key);
 	}
 
-	print_line(vformat("SporeManager::on_ward_deactivated  dead_nbr=%d  visited_nbr=%d  isolated=%d",
-		has_dead_neighbor_cells.size(), has_visited_neighbor_cells.size(), isolated_cells.size()));
-
 	// ---- Case 1: Dead-neighbor cells → anchor at sweep depth, clean re-BFS ----
 	if (!has_dead_neighbor_cells.is_empty()) {
 		for (const Vector3i &key : has_dead_neighbor_cells) {
@@ -2070,8 +2032,6 @@ void SporeManager::on_ward_deactivated(const Vector3 &p_center, float p_radius) 
 
 		// Clean BFS: resets all AHEAD depths, rebuilds frontier from
 		// spore frontier anchors, and re-floods from scratch.
-		print_line(vformat("SporeManager::on_ward_deactivated  case=dead_nbr  spore_frontier=%d",
-			_spore_frontier.size()));
 		_run_clean_bfs_from();
 		_sweep_dirty = true;
 		return;
@@ -2084,8 +2044,6 @@ void SporeManager::on_ward_deactivated(const Vector3 &p_center, float p_radius) 
 		}
 
 		float target = _bfs_computed_depth + BFS_LOOKAHEAD;
-		print_line(vformat("SporeManager::on_ward_deactivated  case=visited_nbr  BFS target=%.1f  frontier=%d",
-			target, _frontier_set.size()));
 		_run_bfs_incremental(target);
 		_sweep_dirty = true;
 		return;
@@ -2095,7 +2053,6 @@ void SporeManager::on_ward_deactivated(const Vector3 &p_center, float p_radius) 
 	// Cells were unblocked but have no neighbors with known depth.
 	// They'll be discovered naturally by future lazy BFS extensions.
 	// Nothing more to do.
-	print_line(vformat("SporeManager::on_ward_deactivated  case=isolated  no BFS needed"));
 }
 
 void SporeManager::on_wards_changed() {
@@ -2104,7 +2061,6 @@ void SporeManager::on_wards_changed() {
 	// on_ward_deactivated() for each change.  New cells added while
 	// wards are active are checked in add_cell() via _is_position_warded().
 	// Kept for backward compatibility — callers can safely remove it.
-	print_line("SporeManager::on_wards_changed  (no-op, per-ward methods handle changes)");
 }
 
 // ---- GDScript queries ----
