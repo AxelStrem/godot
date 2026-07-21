@@ -1356,16 +1356,35 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 	// Seed from the incrementally maintained frontier set.
 	// This replaces the old O(cells × 124) full scan — we only check
 	// cells that are KNOWN to have unvisited neighbours.
+	int frontier_seeded = 0;
+	int frontier_skipped_dead = 0;
+	int frontier_skipped_blocked = 0;
+	int frontier_skipped_depth_neg = 0;
+	int frontier_skipped_depth_oob = 0;
+	int frontier_skipped_no_neighbor = 0;
 	if (!_frontier_set.is_empty()) {
 		for (const Vector3i &key : _frontier_set) {
 			if (visited.has(key)) {
 				continue;
 			}
 			const Cell *cell_ref = _cells.getptr(key);
-			if (!cell_ref || cell_ref->dead || cell_ref->blocked_by_ward || cell_ref->depth < 0) {
+			if (!cell_ref) {
+				continue;
+			}
+			if (cell_ref->dead) {
+				frontier_skipped_dead++;
+				continue;
+			}
+			if (cell_ref->blocked_by_ward) {
+				frontier_skipped_blocked++;
+				continue;
+			}
+			if (cell_ref->depth < 0) {
+				frontier_skipped_depth_neg++;
 				continue;
 			}
 			if (cell_ref->depth > (int)p_target_depth) {
+				frontier_skipped_depth_oob++;
 				continue;
 			}
 			// Verify it still has at least one unvisited neighbour
@@ -1382,9 +1401,20 @@ void SporeManager::_run_bfs_incremental(float p_target_depth) {
 			if (still_frontier) {
 				wave.push_back({ key, cell_ref->depth });
 				visited.insert(key);
+				frontier_seeded++;
+			} else {
+				frontier_skipped_no_neighbor++;
 			}
 		}
 	}
+
+	print_line(vformat("SporeManager::_run_bfs_incremental  SEEDS  wave=%d  start=%d  entry=%d  frontier(seeded=%d skip:dead=%d blocked=%d neg_depth=%d oob=%d no_nbr=%d)",
+		wave.size(),
+		_has_start_cell ? 1 : 0,
+		wave.size() - (_has_start_cell ? 1 : 0) - frontier_seeded,
+		frontier_seeded,
+		frontier_skipped_dead, frontier_skipped_blocked, frontier_skipped_depth_neg,
+		frontier_skipped_depth_oob, frontier_skipped_no_neighbor));
 
 	if (wave.is_empty()) {
 		return;
