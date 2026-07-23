@@ -416,6 +416,10 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 	float pitch_scale_sum = 0.0F;
 	float pitch_scale_weight = 0.0F;
 
+	// keep track of a weighted average of the ITD across listeners
+	float itd_samples_sum = 0.0F;
+	float itd_samples_weight = 0.0F;
+
 	bool has_any_listener_in_range = false;
 	linear_attenuation = 0;
 	for (Camera3D *camera : cameras) {
@@ -504,6 +508,20 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 
 		_apply_max_volume_from_vector(output_volume_vector, listener_volume_vector);
 
+		// Compute ITD from horizontal source angle (Woodworth's formula for a spherical head).
+		// Only meaningful in stereo mode; surround speaker layouts rely on individual speaker placement.
+		if (AudioServer::get_singleton()->get_speaker_mode() == AudioServer::SPEAKER_MODE_STEREO) {
+			float azimuth = Math::atan2(local_pos.x, -local_pos.z);
+			float abs_azimuth = Math::abs(azimuth);
+			static constexpr float head_radius = 0.0875f; // Average human head radius in meters.
+			static constexpr float speed_of_sound = 343.0f; // m/s, matches doppler constant.
+			float listener_itd_seconds = head_radius / speed_of_sound * (abs_azimuth + Math::sin(abs_azimuth));
+			float listener_itd_samples = (azimuth >= 0.0f ? 1.0f : -1.0f) * listener_itd_seconds * AudioServer::get_singleton()->get_mix_rate();
+			float weight = _get_max_volume(listener_volume_vector);
+			itd_samples_sum += weight * listener_itd_samples;
+			itd_samples_weight += weight;
+		}
+
 #ifndef PHYSICS_3D_DISABLED
 
 		if (area && area->is_using_reverb_bus()) {
@@ -546,6 +564,12 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 		actual_pitch_scale = pitch_scale_sum / pitch_scale_weight;
 	}
 
+	if (itd_samples_weight > 0.0F) {
+		itd_samples = itd_samples_sum / itd_samples_weight;
+	} else {
+		itd_samples = 0.0f;
+	}
+
 	for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
 		AudioServer::get_singleton()->set_playback_highshelf_params(playback, linear_attenuation, attenuation_filter_cutoff_hz);
 	}
@@ -577,6 +601,10 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 	if (!skip_setting_volumes) {
 		for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
 			AudioServer::get_singleton()->set_playback_bus_volumes_linear(playback, bus_volumes);
+		}
+
+		for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
+			AudioServer::get_singleton()->set_playback_itd_samples(playback, itd_samples);
 		}
 
 		for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
