@@ -296,6 +296,14 @@ private:
 		SafeNumeric<float> highshelf_gain;
 		SafeNumeric<float> attenuation_filter_cutoff_hz; // This isn't used unless highshelf_gain is nonzero.
 		AudioFilterSW::Processor filter_process[8];
+		// ITD (Interaural Time Difference) per-ear fractional-sample delay.
+		// Positive = right ear leads, left ear is delayed (source is to the right of listener).
+		// Valid range approximately [-34, 34] samples at 48 kHz.
+		static constexpr int ITD_HISTORY_SIZE = 128;
+		static constexpr int ITD_HISTORY_MASK = ITD_HISTORY_SIZE - 1;
+		SafeNumeric<float> itd_samples;
+		AudioFrame itd_history[ITD_HISTORY_SIZE];
+		int itd_history_pos = 0;
 		// Updating this ref after the list node is created breaks consistency guarantees, don't do it!
 		Ref<AudioStreamPlayback> stream_playback;
 		// Playback state determines the fate of a particular AudioStreamListNode during the mix step. Must be atomically replaced.
@@ -442,6 +450,7 @@ public:
 	void set_playback_pitch_scale(Ref<AudioStreamPlayback> p_playback, float p_pitch_scale);
 	void set_playback_paused(Ref<AudioStreamPlayback> p_playback, bool p_paused);
 	void set_playback_highshelf_params(Ref<AudioStreamPlayback> p_playback, float p_gain, float p_attenuation_cutoff_hz);
+	void set_playback_itd_samples(Ref<AudioStreamPlayback> p_playback, float p_itd_samples);
 
 	bool is_playback_active(Ref<AudioStreamPlayback> p_playback);
 	float get_playback_position(Ref<AudioStreamPlayback> p_playback);

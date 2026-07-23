@@ -446,6 +446,43 @@ void AudioServer::_mix_step() {
 			}
 		}
 
+		// Apply ITD (Interaural Time Difference) to the mixed audio.
+		// Delays one ear relative to the other using fractional-sample interpolation.
+		{
+			float itd = playback->itd_samples.get();
+			if (itd >= 0.5f || itd <= -0.5f) {
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					// Write current frame to ITD ring buffer.
+					playback->itd_history[playback->itd_history_pos] = buf[i];
+
+					if (itd > 0.0f) {
+						// Right ear leads — delay left ear (source is to the right).
+						int delay = (int)itd;
+						float frac = itd - (float)delay;
+						int read_pos = (playback->itd_history_pos - delay) & AudioStreamPlaybackListNode::ITD_HISTORY_MASK;
+						int read_pos_next = (read_pos - 1) & AudioStreamPlaybackListNode::ITD_HISTORY_MASK;
+						buf[i].left = playback->itd_history[read_pos].left * (1.0f - frac) + playback->itd_history[read_pos_next].left * frac;
+					} else {
+						// Left ear leads — delay right ear (source is to the left).
+						float abs_itd = -itd;
+						int delay = (int)abs_itd;
+						float frac = abs_itd - (float)delay;
+						int read_pos = (playback->itd_history_pos - delay) & AudioStreamPlaybackListNode::ITD_HISTORY_MASK;
+						int read_pos_next = (read_pos - 1) & AudioStreamPlaybackListNode::ITD_HISTORY_MASK;
+						buf[i].right = playback->itd_history[read_pos].right * (1.0f - frac) + playback->itd_history[read_pos_next].right * frac;
+					}
+
+					playback->itd_history_pos = (playback->itd_history_pos + 1) & AudioStreamPlaybackListNode::ITD_HISTORY_MASK;
+				}
+			} else {
+				// ITD is effectively zero — just update ring buffer for continuity.
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->itd_history[playback->itd_history_pos] = buf[i];
+					playback->itd_history_pos = (playback->itd_history_pos + 1) & AudioStreamPlaybackListNode::ITD_HISTORY_MASK;
+				}
+			}
+		}
+
 		// Get the bus details for this playback. This contains information about which buses the playback is assigned to and the volume of the playback on each bus.
 		AudioStreamPlaybackBusDetails *bus_details_ptr = playback->bus_details.load();
 		ERR_FAIL_NULL(bus_details_ptr);
@@ -1444,6 +1481,17 @@ void AudioServer::set_playback_highshelf_params(Ref<AudioStreamPlayback> p_playb
 
 	playback_node->attenuation_filter_cutoff_hz.set(p_attenuation_cutoff_hz);
 	playback_node->highshelf_gain.set(p_gain);
+}
+
+void AudioServer::set_playback_itd_samples(Ref<AudioStreamPlayback> p_playback, float p_itd_samples) {
+	ERR_FAIL_COND(p_playback.is_null());
+
+	AudioStreamPlaybackListNode *playback_node = _find_playback_list_node(p_playback);
+	if (!playback_node) {
+		return;
+	}
+
+	playback_node->itd_samples.set(p_itd_samples);
 }
 
 bool AudioServer::is_playback_active(Ref<AudioStreamPlayback> p_playback) {

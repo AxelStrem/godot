@@ -79,6 +79,8 @@ private:
 	float max_db = 3.0;
 	// Internally used to take doppler tracking into account.
 	float actual_pitch_scale = 1.0;
+	// Internally used to store ITD (Interaural Time Difference) computed per listener.
+	float itd_samples = 0.0f;
 
 	uint64_t last_mix_count = -1;
 	bool force_update_panning = false;
