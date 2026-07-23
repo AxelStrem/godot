@@ -81,6 +81,9 @@ private:
 	float actual_pitch_scale = 1.0;
 	// Internally used to store ITD (Interaural Time Difference) computed per listener.
 	float itd_samples = 0.0f;
+	// Internally used to store head-shadow per-ear lowpass cutoffs.
+	float head_shadow_cutoff_l = 20000.0f;
+	float head_shadow_cutoff_r = 20000.0f;
 
 	uint64_t last_mix_count = -1;
 	bool force_update_panning = false;

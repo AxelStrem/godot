@@ -482,6 +482,55 @@ void AudioServer::_mix_step() {
 			}
 		}
 
+		// Apply head-shadow lowpass for HRTF simulation.
+		// Filters the contralateral (far) ear to simulate the acoustic shadow
+		// of the head. The near ear is left unattenuated.
+		{
+			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
+			float nyquist_limit = mix_rate * 0.49f;
+
+			float cutoff_l = playback->head_shadow_cutoff_l.get();
+			if (cutoff_l <= 0.0f) { cutoff_l = nyquist_limit; }
+			float cutoff_r = playback->head_shadow_cutoff_r.get();
+			if (cutoff_r <= 0.0f) { cutoff_r = nyquist_limit; }
+
+			// Left ear head-shadow filter
+			{
+				AudioFilterSW filter;
+				filter.set_mode(AudioFilterSW::LOWPASS);
+				filter.set_sampling_rate(mix_rate);
+				filter.set_cutoff(MIN(cutoff_l, nyquist_limit));
+				filter.set_resonance(1);
+				filter.set_stages(1);
+				filter.set_gain(0);
+
+				playback->head_shadow_lp_l.set_filter(&filter, false);
+				playback->head_shadow_lp_l.update_coeffs(buffer_size);
+
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->head_shadow_lp_l.process_one_interp(buf[i].left);
+				}
+			}
+
+			// Right ear head-shadow filter
+			{
+				AudioFilterSW filter;
+				filter.set_mode(AudioFilterSW::LOWPASS);
+				filter.set_sampling_rate(mix_rate);
+				filter.set_cutoff(MIN(cutoff_r, nyquist_limit));
+				filter.set_resonance(1);
+				filter.set_stages(1);
+				filter.set_gain(0);
+
+				playback->head_shadow_lp_r.set_filter(&filter, false);
+				playback->head_shadow_lp_r.update_coeffs(buffer_size);
+
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->head_shadow_lp_r.process_one_interp(buf[i].right);
+				}
+			}
+		}
+
 		// Get the bus details for this playback. This contains information about which buses the playback is assigned to and the volume of the playback on each bus.
 		AudioStreamPlaybackBusDetails *bus_details_ptr = playback->bus_details.load();
 		ERR_FAIL_NULL(bus_details_ptr);
@@ -1486,6 +1535,18 @@ void AudioServer::set_playback_itd_samples(Ref<AudioStreamPlayback> p_playback, 
 	}
 
 	playback_node->itd_samples.set(p_itd_samples);
+}
+
+void AudioServer::set_playback_head_shadow_params(Ref<AudioStreamPlayback> p_playback, float p_cutoff_l, float p_cutoff_r) {
+	ERR_FAIL_COND(p_playback.is_null());
+
+	AudioStreamPlaybackListNode *playback_node = _find_playback_list_node(p_playback);
+	if (!playback_node) {
+		return;
+	}
+
+	playback_node->head_shadow_cutoff_l.set(p_cutoff_l);
+	playback_node->head_shadow_cutoff_r.set(p_cutoff_r);
 }
 
 bool AudioServer::is_playback_active(Ref<AudioStreamPlayback> p_playback) {
