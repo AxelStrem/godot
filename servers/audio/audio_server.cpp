@@ -531,6 +531,93 @@ void AudioServer::_mix_step() {
 			}
 		}
 
+		// Apply pinna notch filters for HRTF simulation.
+		// Two narrow notches per ear whose center frequencies shift with
+		// source elevation, creating the spectral cues for vertical
+		// localization. 0 Hz disables a notch.
+		{
+			static constexpr float notch_resonance = 4.0f;
+			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
+			float nyquist_limit = mix_rate * 0.49f;
+
+			float n1l_freq = playback->pinna_notch1_freq_l.get();
+			float n1r_freq = playback->pinna_notch1_freq_r.get();
+			float n2l_freq = playback->pinna_notch2_freq_l.get();
+			float n2r_freq = playback->pinna_notch2_freq_r.get();
+
+			// Left ear — notch 1
+			if (n1l_freq > 0.0f && n1l_freq < nyquist_limit) {
+				AudioFilterSW filter;
+				filter.set_mode(AudioFilterSW::NOTCH);
+				filter.set_sampling_rate(mix_rate);
+				filter.set_cutoff(n1l_freq);
+				filter.set_resonance(notch_resonance);
+				filter.set_stages(1);
+				filter.set_gain(0);
+
+				playback->pinna_notch1_l.set_filter(&filter, false);
+				playback->pinna_notch1_l.update_coeffs(buffer_size);
+
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->pinna_notch1_l.process_one_interp(buf[i].left);
+				}
+			}
+
+			// Left ear — notch 2
+			if (n2l_freq > 0.0f && n2l_freq < nyquist_limit) {
+				AudioFilterSW filter;
+				filter.set_mode(AudioFilterSW::NOTCH);
+				filter.set_sampling_rate(mix_rate);
+				filter.set_cutoff(n2l_freq);
+				filter.set_resonance(notch_resonance);
+				filter.set_stages(1);
+				filter.set_gain(0);
+
+				playback->pinna_notch2_l.set_filter(&filter, false);
+				playback->pinna_notch2_l.update_coeffs(buffer_size);
+
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->pinna_notch2_l.process_one_interp(buf[i].left);
+				}
+			}
+
+			// Right ear — notch 1
+			if (n1r_freq > 0.0f && n1r_freq < nyquist_limit) {
+				AudioFilterSW filter;
+				filter.set_mode(AudioFilterSW::NOTCH);
+				filter.set_sampling_rate(mix_rate);
+				filter.set_cutoff(n1r_freq);
+				filter.set_resonance(notch_resonance);
+				filter.set_stages(1);
+				filter.set_gain(0);
+
+				playback->pinna_notch1_r.set_filter(&filter, false);
+				playback->pinna_notch1_r.update_coeffs(buffer_size);
+
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->pinna_notch1_r.process_one_interp(buf[i].right);
+				}
+			}
+
+			// Right ear — notch 2
+			if (n2r_freq > 0.0f && n2r_freq < nyquist_limit) {
+				AudioFilterSW filter;
+				filter.set_mode(AudioFilterSW::NOTCH);
+				filter.set_sampling_rate(mix_rate);
+				filter.set_cutoff(n2r_freq);
+				filter.set_resonance(notch_resonance);
+				filter.set_stages(1);
+				filter.set_gain(0);
+
+				playback->pinna_notch2_r.set_filter(&filter, false);
+				playback->pinna_notch2_r.update_coeffs(buffer_size);
+
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->pinna_notch2_r.process_one_interp(buf[i].right);
+				}
+			}
+		}
+
 		// Get the bus details for this playback. This contains information about which buses the playback is assigned to and the volume of the playback on each bus.
 		AudioStreamPlaybackBusDetails *bus_details_ptr = playback->bus_details.load();
 		ERR_FAIL_NULL(bus_details_ptr);
@@ -1547,6 +1634,20 @@ void AudioServer::set_playback_head_shadow_params(Ref<AudioStreamPlayback> p_pla
 
 	playback_node->head_shadow_cutoff_l.set(p_cutoff_l);
 	playback_node->head_shadow_cutoff_r.set(p_cutoff_r);
+}
+
+void AudioServer::set_playback_pinna_notch_params(Ref<AudioStreamPlayback> p_playback, float p_notch1_l, float p_notch1_r, float p_notch2_l, float p_notch2_r) {
+	ERR_FAIL_COND(p_playback.is_null());
+
+	AudioStreamPlaybackListNode *playback_node = _find_playback_list_node(p_playback);
+	if (!playback_node) {
+		return;
+	}
+
+	playback_node->pinna_notch1_freq_l.set(p_notch1_l);
+	playback_node->pinna_notch1_freq_r.set(p_notch1_r);
+	playback_node->pinna_notch2_freq_l.set(p_notch2_l);
+	playback_node->pinna_notch2_freq_r.set(p_notch2_r);
 }
 
 bool AudioServer::is_playback_active(Ref<AudioStreamPlayback> p_playback) {
