@@ -425,6 +425,13 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 	float hs_cutoff_r_sum = 0.0F;
 	float hs_cutoff_weight = 0.0F;
 
+	// keep track of a weighted average of pinna notch frequencies across listeners
+	float pn_n1l_sum = 0.0F;
+	float pn_n1r_sum = 0.0F;
+	float pn_n2l_sum = 0.0F;
+	float pn_n2r_sum = 0.0F;
+	float pn_weight = 0.0F;
+
 	bool has_any_listener_in_range = false;
 	linear_attenuation = 0;
 	for (Camera3D *camera : cameras) {
@@ -539,6 +546,25 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 			hs_cutoff_l_sum += weight * listener_cutoff_l;
 			hs_cutoff_r_sum += weight * listener_cutoff_r;
 			hs_cutoff_weight += weight;
+
+			// Compute pinna notch frequencies from source elevation.
+			// Pinna notches shift upward for elevated sources and
+			// downward for sources below, providing vertical
+			// localization cues. Both ears receive the same
+			// elevation-based notches (ear-specific differences
+			// are subtle and omitted for simplicity).
+			float elevation = Math::atan2(local_pos.y, Math::sqrt(local_pos.x * local_pos.x + local_pos.z * local_pos.z));
+			float elevation_norm = CLAMP(elevation / 1.57079633f, -1.0f, 1.0f);
+			static constexpr float notch1_base = 8000.0f;
+			static constexpr float notch2_base = 10000.0f;
+			static constexpr float notch_range = 4000.0f;
+			float listener_notch1 = CLAMP(notch1_base + elevation_norm * notch_range, 3000.0f, 18000.0f);
+			float listener_notch2 = CLAMP(notch2_base + elevation_norm * notch_range, 4000.0f, 18000.0f);
+			pn_n1l_sum += weight * listener_notch1;
+			pn_n1r_sum += weight * listener_notch1;
+			pn_n2l_sum += weight * listener_notch2;
+			pn_n2r_sum += weight * listener_notch2;
+			pn_weight += weight;
 		}
 
 #ifndef PHYSICS_3D_DISABLED
@@ -597,6 +623,18 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 		head_shadow_cutoff_r = 20000.0f;
 	}
 
+	if (pn_weight > 0.0F) {
+		pinna_notch1_freq_l = pn_n1l_sum / pn_weight;
+		pinna_notch1_freq_r = pn_n1r_sum / pn_weight;
+		pinna_notch2_freq_l = pn_n2l_sum / pn_weight;
+		pinna_notch2_freq_r = pn_n2r_sum / pn_weight;
+	} else {
+		pinna_notch1_freq_l = 0.0f;
+		pinna_notch1_freq_r = 0.0f;
+		pinna_notch2_freq_l = 0.0f;
+		pinna_notch2_freq_r = 0.0f;
+	}
+
 	for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
 		AudioServer::get_singleton()->set_playback_highshelf_params(playback, linear_attenuation, attenuation_filter_cutoff_hz);
 	}
@@ -636,6 +674,10 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 
 		for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
 			AudioServer::get_singleton()->set_playback_head_shadow_params(playback, head_shadow_cutoff_l, head_shadow_cutoff_r);
+		}
+
+		for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
+			AudioServer::get_singleton()->set_playback_pinna_notch_params(playback, pinna_notch1_freq_l, pinna_notch1_freq_r, pinna_notch2_freq_l, pinna_notch2_freq_r);
 		}
 
 		for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {

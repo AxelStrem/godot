@@ -310,6 +310,18 @@ private:
 		SafeNumeric<float> head_shadow_cutoff_r;
 		AudioFilterSW::Processor head_shadow_lp_l;
 		AudioFilterSW::Processor head_shadow_lp_r;
+		// Pinna notch filters for HRTF simulation.
+		// Two narrow notches per ear whose center frequencies shift with
+		// source elevation, providing vertical localization cues.
+		// 0 Hz = disabled; typical range ~4-14 kHz.
+		SafeNumeric<float> pinna_notch1_freq_l;
+		SafeNumeric<float> pinna_notch1_freq_r;
+		SafeNumeric<float> pinna_notch2_freq_l;
+		SafeNumeric<float> pinna_notch2_freq_r;
+		AudioFilterSW::Processor pinna_notch1_l;
+		AudioFilterSW::Processor pinna_notch1_r;
+		AudioFilterSW::Processor pinna_notch2_l;
+		AudioFilterSW::Processor pinna_notch2_r;
 		// Updating this ref after the list node is created breaks consistency guarantees, don't do it!
 		Ref<AudioStreamPlayback> stream_playback;
 		// Playback state determines the fate of a particular AudioStreamListNode during the mix step. Must be atomically replaced.
@@ -458,6 +470,7 @@ public:
 	void set_playback_highshelf_params(Ref<AudioStreamPlayback> p_playback, float p_gain, float p_attenuation_cutoff_hz);
 	void set_playback_itd_samples(Ref<AudioStreamPlayback> p_playback, float p_itd_samples);
 	void set_playback_head_shadow_params(Ref<AudioStreamPlayback> p_playback, float p_cutoff_l, float p_cutoff_r);
+	void set_playback_pinna_notch_params(Ref<AudioStreamPlayback> p_playback, float p_notch1_l, float p_notch1_r, float p_notch2_l, float p_notch2_r);
 
 	bool is_playback_active(Ref<AudioStreamPlayback> p_playback);
 	float get_playback_position(Ref<AudioStreamPlayback> p_playback);

@@ -84,6 +84,11 @@ private:
 	// Internally used to store head-shadow per-ear lowpass cutoffs.
 	float head_shadow_cutoff_l = 20000.0f;
 	float head_shadow_cutoff_r = 20000.0f;
+	// Internally used to store pinna notch frequencies for vertical localization.
+	float pinna_notch1_freq_l = 0.0f;
+	float pinna_notch1_freq_r = 0.0f;
+	float pinna_notch2_freq_l = 0.0f;
+	float pinna_notch2_freq_r = 0.0f;
 
 	uint64_t last_mix_count = -1;
 	bool force_update_panning = false;
