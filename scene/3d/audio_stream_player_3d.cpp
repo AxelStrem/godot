@@ -420,6 +420,11 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 	float itd_samples_sum = 0.0F;
 	float itd_samples_weight = 0.0F;
 
+	// keep track of a weighted average of head-shadow cutoffs across listeners
+	float hs_cutoff_l_sum = 0.0F;
+	float hs_cutoff_r_sum = 0.0F;
+	float hs_cutoff_weight = 0.0F;
+
 	bool has_any_listener_in_range = false;
 	linear_attenuation = 0;
 	for (Camera3D *camera : cameras) {
@@ -520,6 +525,20 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 			float weight = _get_max_volume(listener_volume_vector);
 			itd_samples_sum += weight * listener_itd_samples;
 			itd_samples_weight += weight;
+
+			// Compute head-shadow lowpass cutoff for the contralateral (far) ear.
+			// Based on a spherical-head empirical model: cutoff drops from
+			// ~20 kHz at 0° to ~800 Hz at 90° azimuth. The near ear
+			// receives the full spectrum.
+			static constexpr float hs_cutoff_0deg = 20000.0f;
+			static constexpr float hs_cutoff_90deg = 800.0f;
+			float shadow_cutoff = hs_cutoff_0deg - (hs_cutoff_0deg - hs_cutoff_90deg) * (abs_azimuth / 1.57079633f);
+			shadow_cutoff = CLAMP(shadow_cutoff, hs_cutoff_90deg, hs_cutoff_0deg);
+			float listener_cutoff_l = (azimuth >= 0.0f) ? shadow_cutoff : hs_cutoff_0deg;
+			float listener_cutoff_r = (azimuth >= 0.0f) ? hs_cutoff_0deg : shadow_cutoff;
+			hs_cutoff_l_sum += weight * listener_cutoff_l;
+			hs_cutoff_r_sum += weight * listener_cutoff_r;
+			hs_cutoff_weight += weight;
 		}
 
 #ifndef PHYSICS_3D_DISABLED
@@ -570,6 +589,14 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 		itd_samples = 0.0f;
 	}
 
+	if (hs_cutoff_weight > 0.0F) {
+		head_shadow_cutoff_l = hs_cutoff_l_sum / hs_cutoff_weight;
+		head_shadow_cutoff_r = hs_cutoff_r_sum / hs_cutoff_weight;
+	} else {
+		head_shadow_cutoff_l = 20000.0f;
+		head_shadow_cutoff_r = 20000.0f;
+	}
+
 	for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
 		AudioServer::get_singleton()->set_playback_highshelf_params(playback, linear_attenuation, attenuation_filter_cutoff_hz);
 	}
@@ -605,6 +632,10 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 
 		for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
 			AudioServer::get_singleton()->set_playback_itd_samples(playback, itd_samples);
+		}
+
+		for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {
+			AudioServer::get_singleton()->set_playback_head_shadow_params(playback, head_shadow_cutoff_l, head_shadow_cutoff_r);
 		}
 
 		for (Ref<AudioStreamPlayback> &playback : internal->stream_playbacks) {

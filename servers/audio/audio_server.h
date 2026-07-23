@@ -304,6 +304,12 @@ private:
 		SafeNumeric<float> itd_samples;
 		AudioFrame itd_history[ITD_HISTORY_SIZE];
 		int itd_history_pos = 0;
+		// Head-shadow per-ear lowpass cutoff for HRTF simulation.
+		// Near ear gets 20000 Hz (bypass); far ear drops to ~800 Hz at 90° azimuth.
+		SafeNumeric<float> head_shadow_cutoff_l;
+		SafeNumeric<float> head_shadow_cutoff_r;
+		AudioFilterSW::Processor head_shadow_lp_l;
+		AudioFilterSW::Processor head_shadow_lp_r;
 		// Updating this ref after the list node is created breaks consistency guarantees, don't do it!
 		Ref<AudioStreamPlayback> stream_playback;
 		// Playback state determines the fate of a particular AudioStreamListNode during the mix step. Must be atomically replaced.
@@ -451,6 +457,7 @@ public:
 	void set_playback_paused(Ref<AudioStreamPlayback> p_playback, bool p_paused);
 	void set_playback_highshelf_params(Ref<AudioStreamPlayback> p_playback, float p_gain, float p_attenuation_cutoff_hz);
 	void set_playback_itd_samples(Ref<AudioStreamPlayback> p_playback, float p_itd_samples);
+	void set_playback_head_shadow_params(Ref<AudioStreamPlayback> p_playback, float p_cutoff_l, float p_cutoff_r);
 
 	bool is_playback_active(Ref<AudioStreamPlayback> p_playback);
 	float get_playback_position(Ref<AudioStreamPlayback> p_playback);
