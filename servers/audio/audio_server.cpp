@@ -576,11 +576,11 @@ void AudioServer::_mix_step() {
 					filter.set_gain(0);
 
 					playback->head_shadow_lp_l.set_filter(&filter, l_changed || need_clear);
-					playback->head_shadow_lp_l.update_coeffs(buffer_size);
+					playback->head_shadow_lp_l.update_coeffs(0);
 					playback->head_shadow_last_cutoff_l = cutoff_l;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->head_shadow_lp_l.process_one_interp(buf[i].left);
+						playback->head_shadow_lp_l.process_one(buf[i].left);
 					}
 				}
 
@@ -596,11 +596,11 @@ void AudioServer::_mix_step() {
 					filter.set_gain(0);
 
 					playback->head_shadow_lp_r.set_filter(&filter, r_changed || need_clear);
-					playback->head_shadow_lp_r.update_coeffs(buffer_size);
+					playback->head_shadow_lp_r.update_coeffs(0);
 					playback->head_shadow_last_cutoff_r = cutoff_r;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->head_shadow_lp_r.process_one_interp(buf[i].right);
+						playback->head_shadow_lp_r.process_one(buf[i].right);
 					}
 				}
 			}
@@ -644,11 +644,11 @@ void AudioServer::_mix_step() {
 					filter.set_gain(0);
 
 					playback->pinna_notch1_l.set_filter(&filter, freq_changed || need_clear);
-					playback->pinna_notch1_l.update_coeffs(buffer_size);
+					playback->pinna_notch1_l.update_coeffs(0);
 					playback->pinna_notch1_last_l = n1l_freq;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->pinna_notch1_l.process_one_interp(buf[i].left);
+						playback->pinna_notch1_l.process_one(buf[i].left);
 					}
 				}
 				playback->pinna_notch1_l_was_active = is_active;
@@ -671,11 +671,11 @@ void AudioServer::_mix_step() {
 					filter.set_gain(0);
 
 					playback->pinna_notch2_l.set_filter(&filter, freq_changed || need_clear);
-					playback->pinna_notch2_l.update_coeffs(buffer_size);
+					playback->pinna_notch2_l.update_coeffs(0);
 					playback->pinna_notch2_last_l = n2l_freq;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->pinna_notch2_l.process_one_interp(buf[i].left);
+						playback->pinna_notch2_l.process_one(buf[i].left);
 					}
 				}
 				playback->pinna_notch2_l_was_active = is_active;
@@ -698,11 +698,11 @@ void AudioServer::_mix_step() {
 					filter.set_gain(0);
 
 					playback->pinna_notch1_r.set_filter(&filter, freq_changed || need_clear);
-					playback->pinna_notch1_r.update_coeffs(buffer_size);
+					playback->pinna_notch1_r.update_coeffs(0);
 					playback->pinna_notch1_last_r = n1r_freq;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->pinna_notch1_r.process_one_interp(buf[i].right);
+						playback->pinna_notch1_r.process_one(buf[i].right);
 					}
 				}
 				playback->pinna_notch1_r_was_active = is_active;
@@ -725,11 +725,11 @@ void AudioServer::_mix_step() {
 					filter.set_gain(0);
 
 					playback->pinna_notch2_r.set_filter(&filter, freq_changed || need_clear);
-					playback->pinna_notch2_r.update_coeffs(buffer_size);
+					playback->pinna_notch2_r.update_coeffs(0);
 					playback->pinna_notch2_last_r = n2r_freq;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->pinna_notch2_r.process_one_interp(buf[i].right);
+						playback->pinna_notch2_r.process_one(buf[i].right);
 					}
 				}
 				playback->pinna_notch2_r_was_active = is_active;
