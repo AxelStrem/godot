@@ -70,7 +70,24 @@ void AudioDriver::stop_counting_ticks() {
 }
 #endif // DEBUG_ENABLED
 
+#if defined(__SSE__) || defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)
+#include <xmmintrin.h>
+#endif
+
 void AudioDriver::audio_server_process(int p_frames, int32_t *p_buffer, bool p_update_mix_time) {
+#if defined(__SSE__) || defined(_M_X64) || defined(_M_IX86) || defined(__x86_64__) || defined(__i386__)
+	// Enable FTZ (Flush To Zero) and DAZ (Denormals Are Zero) in the MXCSR
+	// register for the audio thread. Without this, IIR filter feedback
+	// produces subnormal floats that stall x86 CPUs ~100x when used as
+	// arithmetic operands, causing audible clicks. This is industry-standard
+	// practice for real-time audio processing.
+	static thread_local bool mxcsr_configured = false;
+	if (!mxcsr_configured) {
+		_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+		_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+		mxcsr_configured = true;
+	}
+#endif
 	if (p_update_mix_time) {
 		update_mix_time(p_frames);
 	}
