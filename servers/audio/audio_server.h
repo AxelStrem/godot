@@ -224,6 +224,8 @@ private:
 
 	float playback_speed_scale = 1.0f;
 
+	int hrtf_debug_mask = 7; // Bit 0:ITD, 1:Head Shadow, 2:Pinna Notches. 7=all on.
+
 	bool tag_used_audio_streams = false;
 
 #ifdef DEBUG_ENABLED
@@ -472,6 +474,10 @@ public:
 
 	void set_playback_speed_scale(float p_scale);
 	float get_playback_speed_scale() const;
+
+	// HRTF debug: bit 0=ITD, bit 1=Head Shadow, bit 2=Pinna Notches. Default 7 (all on).
+	void set_hrtf_debug_mask(int p_mask);
+	int get_hrtf_debug_mask() const;
 
 	// Convenience method.
 	void start_playback_stream(Ref<AudioStreamPlayback> p_playback, const StringName &p_bus, Vector<AudioFrame> p_volume_db_vector, float p_start_time = 0, float p_pitch_scale = 1);
