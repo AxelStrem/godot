@@ -563,14 +563,13 @@ void AudioServer::_mix_step() {
 		if (!all_volumes_zero) {
 			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
 		// Apply head-shadow lowpass for HRTF simulation.
-		// Filters the contralateral (far) ear to simulate the acoustic shadow
-		// of the head. The near ear is left unattenuated.
-		// Bypassed entirely when both cutoffs are near Nyquist to save CPU.
+		// DIAGNOSTIC: Using inline 1-pole IIR instead of AudioFilterSW to isolate
+		// whether the bug is in the filter infrastructure or elsewhere.
+		// y[n] = y[n-1] + a * (x[n] - y[n-1])  where a = 1 - exp(-2*PI*fc/fs)
 		{
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
 			float nyquist_limit = mix_rate * 0.49f;
 			static constexpr float hs_bypass_threshold = 19000.0f;
-			static constexpr float hs_reconfig_delta = 50.0f;
 
 			float cutoff_l = playback->head_shadow_cutoff_l.get();
 			if (cutoff_l <= 0.0f) { cutoff_l = nyquist_limit; }
@@ -578,48 +577,35 @@ void AudioServer::_mix_step() {
 			if (cutoff_r <= 0.0f) { cutoff_r = nyquist_limit; }
 
 			bool should_bypass = (cutoff_l >= hs_bypass_threshold && cutoff_r >= hs_bypass_threshold) || !(mask & 2);
-			bool need_clear = playback->head_shadow_was_bypassed && !should_bypass;
 
 			if (!should_bypass) {
-				// Left ear
+				// Left ear — inline 1-pole lowpass
 				{
-					bool l_changed = Math::abs(cutoff_l - playback->head_shadow_last_cutoff_l) > hs_reconfig_delta;
-					AudioFilterSW filter;
-					filter.set_mode(AudioFilterSW::LOWPASS);
-					filter.set_sampling_rate(mix_rate);
-					filter.set_cutoff(MIN(cutoff_l, nyquist_limit));
-					filter.set_resonance(1);
-					filter.set_stages(1);
-					filter.set_gain(0);
-
-					playback->head_shadow_lp_l.set_filter(&filter, l_changed || need_clear);
-					playback->head_shadow_lp_l.update_coeffs(0);
-					playback->head_shadow_last_cutoff_l = cutoff_l;
-
+					float a = 1.0f - expf(-Math::TAU * MIN(cutoff_l, nyquist_limit) / mix_rate);
+					float y = playback->head_shadow_simple_l;
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->head_shadow_lp_l.process_one(buf[i].left);
+						y += a * (buf[i].left - y);
+						buf[i].left = y;
 					}
+					playback->head_shadow_simple_l = y;
 				}
 
-				// Right ear
+				// Right ear — inline 1-pole lowpass
 				{
-					bool r_changed = Math::abs(cutoff_r - playback->head_shadow_last_cutoff_r) > hs_reconfig_delta;
-					AudioFilterSW filter;
-					filter.set_mode(AudioFilterSW::LOWPASS);
-					filter.set_sampling_rate(mix_rate);
-					filter.set_cutoff(MIN(cutoff_r, nyquist_limit));
-					filter.set_resonance(1);
-					filter.set_stages(1);
-					filter.set_gain(0);
-
-					playback->head_shadow_lp_r.set_filter(&filter, r_changed || need_clear);
-					playback->head_shadow_lp_r.update_coeffs(0);
-					playback->head_shadow_last_cutoff_r = cutoff_r;
-
+					float a = 1.0f - expf(-Math::TAU * MIN(cutoff_r, nyquist_limit) / mix_rate);
+					float y = playback->head_shadow_simple_r;
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->head_shadow_lp_r.process_one(buf[i].right);
+						y += a * (buf[i].right - y);
+						buf[i].right = y;
 					}
+					playback->head_shadow_simple_r = y;
 				}
+			} else if (playback->head_shadow_was_bypassed && should_bypass) {
+				// No-op: still bypassed.
+			} else {
+				// Transition from active to bypassed — reset states.
+				playback->head_shadow_simple_l = 0.0f;
+				playback->head_shadow_simple_r = 0.0f;
 			}
 
 			playback->head_shadow_was_bypassed = should_bypass;
