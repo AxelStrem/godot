@@ -451,8 +451,9 @@ void AudioServer::_mix_step() {
 		// The delay value is interpolated across the buffer to avoid clicks when
 		// the ITD changes between mix steps.
 		{
+			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
 			float itd = playback->itd_samples.get();
-			bool is_active = (itd >= 0.5f || itd <= -0.5f);
+			bool is_active = (itd >= 0.5f || itd <= -0.5f) && (mask & 1);
 			float itd_start = playback->itd_last_value;
 			float itd_step = (itd - itd_start) / (float)buffer_size;
 
@@ -544,6 +545,7 @@ void AudioServer::_mix_step() {
 		}
 
 		if (!all_volumes_zero) {
+			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
 		// Apply head-shadow lowpass for HRTF simulation.
 		// Filters the contralateral (far) ear to simulate the acoustic shadow
 		// of the head. The near ear is left unattenuated.
@@ -559,7 +561,7 @@ void AudioServer::_mix_step() {
 			float cutoff_r = playback->head_shadow_cutoff_r.get();
 			if (cutoff_r <= 0.0f) { cutoff_r = nyquist_limit; }
 
-			bool should_bypass = (cutoff_l >= hs_bypass_threshold && cutoff_r >= hs_bypass_threshold);
+			bool should_bypass = (cutoff_l >= hs_bypass_threshold && cutoff_r >= hs_bypass_threshold) || !(mask & 2);
 			bool need_clear = playback->head_shadow_was_bypassed && !should_bypass;
 
 			if (!should_bypass) {
@@ -637,10 +639,12 @@ void AudioServer::_mix_step() {
 			float n2l_freq = playback->pinna_notch2_freq_l.get();
 			float n2r_freq = playback->pinna_notch2_freq_r.get();
 
+			bool pinna_masked = !(mask & 4);
+
 			// Left ear — notch 1
 			{
 				bool was_active = playback->pinna_notch1_l_was_active;
-				bool is_active = (n1l_freq > 0.0f && n1l_freq < nyquist_limit);
+				bool is_active = (n1l_freq > 0.0f && n1l_freq < nyquist_limit) && !pinna_masked;
 				if (is_active) {
 					bool freq_changed = Math::abs(n1l_freq - playback->pinna_notch1_last_l) > pn_reconfig_delta;
 					bool need_clear = !was_active;
@@ -672,7 +676,7 @@ void AudioServer::_mix_step() {
 			// Left ear — notch 2
 			{
 				bool was_active = playback->pinna_notch2_l_was_active;
-				bool is_active = (n2l_freq > 0.0f && n2l_freq < nyquist_limit);
+				bool is_active = (n2l_freq > 0.0f && n2l_freq < nyquist_limit) && !pinna_masked;
 				if (is_active) {
 					bool freq_changed = Math::abs(n2l_freq - playback->pinna_notch2_last_l) > pn_reconfig_delta;
 					bool need_clear = !was_active;
@@ -704,7 +708,7 @@ void AudioServer::_mix_step() {
 			// Right ear — notch 1
 			{
 				bool was_active = playback->pinna_notch1_r_was_active;
-				bool is_active = (n1r_freq > 0.0f && n1r_freq < nyquist_limit);
+				bool is_active = (n1r_freq > 0.0f && n1r_freq < nyquist_limit) && !pinna_masked;
 				if (is_active) {
 					bool freq_changed = Math::abs(n1r_freq - playback->pinna_notch1_last_r) > pn_reconfig_delta;
 					bool need_clear = !was_active;
@@ -736,7 +740,7 @@ void AudioServer::_mix_step() {
 			// Right ear — notch 2
 			{
 				bool was_active = playback->pinna_notch2_r_was_active;
-				bool is_active = (n2r_freq > 0.0f && n2r_freq < nyquist_limit);
+				bool is_active = (n2r_freq > 0.0f && n2r_freq < nyquist_limit) && !pinna_masked;
 				if (is_active) {
 					bool freq_changed = Math::abs(n2r_freq - playback->pinna_notch2_last_r) > pn_reconfig_delta;
 					bool need_clear = !was_active;
@@ -1799,6 +1803,14 @@ void AudioServer::set_playback_pinna_notch_params(Ref<AudioStreamPlayback> p_pla
 	playback_node->pinna_notch2_freq_r.set(p_notch2_r);
 }
 
+void AudioServer::set_hrtf_debug_mask(int p_mask) {
+	hrtf_debug_mask = p_mask;
+}
+
+int AudioServer::get_hrtf_debug_mask() const {
+	return hrtf_debug_mask;
+}
+
 bool AudioServer::is_playback_active(Ref<AudioStreamPlayback> p_playback) {
 	ERR_FAIL_COND_V(p_playback.is_null(), false);
 
@@ -2438,6 +2450,9 @@ void AudioServer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_playback_speed_scale", "scale"), &AudioServer::set_playback_speed_scale);
 	ClassDB::bind_method(D_METHOD("get_playback_speed_scale"), &AudioServer::get_playback_speed_scale);
+
+	ClassDB::bind_method(D_METHOD("set_hrtf_debug_mask", "mask"), &AudioServer::set_hrtf_debug_mask);
+	ClassDB::bind_method(D_METHOD("get_hrtf_debug_mask"), &AudioServer::get_hrtf_debug_mask);
 
 	ClassDB::bind_method(D_METHOD("lock"), &AudioServer::lock);
 	ClassDB::bind_method(D_METHOD("unlock"), &AudioServer::unlock);
