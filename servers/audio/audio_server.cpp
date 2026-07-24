@@ -448,29 +448,45 @@ void AudioServer::_mix_step() {
 
 		// Apply ITD (Interaural Time Difference) to the mixed audio.
 		// Delays one ear relative to the other using fractional-sample interpolation.
+		// The delay value is interpolated across the buffer to avoid clicks when
+		// the ITD changes between mix steps.
 		{
 			float itd = playback->itd_samples.get();
-			if (itd >= 0.5f || itd <= -0.5f) {
+			bool is_active = (itd >= 0.5f || itd <= -0.5f);
+			float itd_start = playback->itd_last_value;
+			float itd_step = (itd - itd_start) / (float)buffer_size;
+
+			if (is_active || playback->itd_was_active) {
+				// Prime the history buffer on first activation by filling it with
+				// the first sample, so delayed reads never touch uninitialized memory.
+				if (is_active && !playback->itd_was_active) {
+					for (int h = 0; h < AudioStreamPlaybackListNode::ITD_HISTORY_SIZE; h++) {
+						playback->itd_history[h] = buf[0];
+					}
+				}
+
 				for (unsigned int i = 0; i < buffer_size; i++) {
+					float cur_itd = itd_start + (float)i * itd_step;
 					// Write current frame to ITD ring buffer.
 					playback->itd_history[playback->itd_history_pos] = buf[i];
 
-					if (itd > 0.0f) {
+					if (cur_itd >= 0.5f) {
 						// Right ear leads — delay left ear (source is to the right).
-						int delay = (int)itd;
-						float frac = itd - (float)delay;
+						int delay = (int)cur_itd;
+						float frac = cur_itd - (float)delay;
 						int read_pos = (playback->itd_history_pos - delay) & AudioStreamPlaybackListNode::ITD_HISTORY_MASK;
 						int read_pos_next = (read_pos - 1) & AudioStreamPlaybackListNode::ITD_HISTORY_MASK;
 						buf[i].left = playback->itd_history[read_pos].left * (1.0f - frac) + playback->itd_history[read_pos_next].left * frac;
-					} else {
+					} else if (cur_itd <= -0.5f) {
 						// Left ear leads — delay right ear (source is to the left).
-						float abs_itd = -itd;
+						float abs_itd = -cur_itd;
 						int delay = (int)abs_itd;
 						float frac = abs_itd - (float)delay;
 						int read_pos = (playback->itd_history_pos - delay) & AudioStreamPlaybackListNode::ITD_HISTORY_MASK;
 						int read_pos_next = (read_pos - 1) & AudioStreamPlaybackListNode::ITD_HISTORY_MASK;
 						buf[i].right = playback->itd_history[read_pos].right * (1.0f - frac) + playback->itd_history[read_pos_next].right * frac;
 					}
+					// else: |cur_itd| < 0.5 — no delay applied to either ear
 
 					playback->itd_history_pos = (playback->itd_history_pos + 1) & AudioStreamPlaybackListNode::ITD_HISTORY_MASK;
 				}
@@ -481,8 +497,53 @@ void AudioServer::_mix_step() {
 					playback->itd_history_pos = (playback->itd_history_pos + 1) & AudioStreamPlaybackListNode::ITD_HISTORY_MASK;
 				}
 			}
+
+			playback->itd_last_value = itd;
+			playback->itd_was_active = is_active;
 		}
 
+		// Load bus details early so we can skip filter processing for
+		// playbacks that are fully silent (e.g. beyond max_distance).
+		AudioStreamPlaybackBusDetails *bus_details_ptr = playback->bus_details.load();
+		ERR_FAIL_NULL(bus_details_ptr);
+		AudioStreamPlaybackBusDetails bus_details = *bus_details_ptr;
+
+		// Check if this playback is completely silent on all buses.
+		// If so, skip head shadow, pinna notches, and bus mixing entirely.
+		bool all_volumes_zero = true;
+		for (int chk = 0; chk < MAX_BUSES_PER_PLAYBACK; chk++) {
+			if (!bus_details.bus_active[chk]) {
+				continue;
+			}
+			for (int ch = 0; ch < MAX_CHANNELS_PER_BUS; ch++) {
+				if (bus_details.volume[chk][ch].left != 0.0f || bus_details.volume[chk][ch].right != 0.0f) {
+					all_volumes_zero = false;
+					break;
+				}
+			}
+			if (!all_volumes_zero) {
+				break;
+			}
+		}
+		// Also check prev volumes — if any were non-zero, we need to fade out.
+		if (all_volumes_zero) {
+			for (int chk = 0; chk < MAX_BUSES_PER_PLAYBACK; chk++) {
+				if (!playback->prev_bus_details->bus_active[chk]) {
+					continue;
+				}
+				for (int ch = 0; ch < MAX_CHANNELS_PER_BUS; ch++) {
+					if (playback->prev_bus_details->volume[chk][ch].left != 0.0f || playback->prev_bus_details->volume[chk][ch].right != 0.0f) {
+						all_volumes_zero = false;
+						break;
+					}
+				}
+				if (!all_volumes_zero) {
+					break;
+				}
+			}
+		}
+
+		if (!all_volumes_zero) {
 		// Apply head-shadow lowpass for HRTF simulation.
 		// Filters the contralateral (far) ear to simulate the acoustic shadow
 		// of the head. The near ear is left unattenuated.
@@ -705,12 +766,6 @@ void AudioServer::_mix_step() {
 			}
 		}
 
-		// Get the bus details for this playback. This contains information about which buses the playback is assigned to and the volume of the playback on each bus.
-		AudioStreamPlaybackBusDetails *bus_details_ptr = playback->bus_details.load();
-		ERR_FAIL_NULL(bus_details_ptr);
-		// Make a copy of the bus details so we can modify it without worrying about other threads.
-		AudioStreamPlaybackBusDetails bus_details = *bus_details_ptr;
-
 		// Mix to any active buses.
 		for (int idx = 0; idx < MAX_BUSES_PER_PLAYBACK; idx++) {
 			if (!bus_details.bus_active[idx]) {
@@ -777,6 +832,8 @@ void AudioServer::_mix_step() {
 				_mix_step_for_channel(channel_buf, buf, prev_channel_vol, AudioFrame(0, 0), playback->attenuation_filter_cutoff_hz.get(), playback->highshelf_gain.get(), &playback->filter_process[channel_idx * 2], &playback->filter_process[channel_idx * 2 + 1]);
 			}
 		}
+
+		} // if (!all_volumes_zero)
 
 		// Copy the bus details we mixed with to the previous bus details to maintain volume ramps.
 		for (int i = 0; i < MAX_BUSES_PER_PLAYBACK; i++) {

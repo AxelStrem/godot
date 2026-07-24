@@ -304,6 +304,10 @@ private:
 		SafeNumeric<float> itd_samples;
 		AudioFrame itd_history[ITD_HISTORY_SIZE];
 		int itd_history_pos = 0;
+		// Cached ITD state for smooth delay-line interpolation across mix steps.
+		// Only accessed on the audio thread; no atomics needed.
+		float itd_last_value = 0.0f;
+		bool itd_was_active = false;
 		// Head-shadow per-ear lowpass cutoff for HRTF simulation.
 		// Near ear gets 20000 Hz (bypass); far ear drops to ~800 Hz at 90° azimuth.
 		SafeNumeric<float> head_shadow_cutoff_l;
