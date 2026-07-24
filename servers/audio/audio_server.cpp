@@ -577,7 +577,8 @@ void AudioServer::_mix_step() {
 			float cutoff_r = playback->head_shadow_cutoff_r.get();
 			if (cutoff_r <= 0.0f) { cutoff_r = nyquist_limit; }
 
-			bool should_bypass = (cutoff_l >= hs_bypass_threshold && cutoff_r >= hs_bypass_threshold) || !(mask & 2);
+			bool should_bypass = true; // FORCE BYPASS — diagnostic: does entering the block cause crackling?
+			(void)cutoff_l; (void)cutoff_r; (void)mask; // suppress unused warnings
 
 			if (!should_bypass) {
 				// Left ear — inline 1-pole lowpass
