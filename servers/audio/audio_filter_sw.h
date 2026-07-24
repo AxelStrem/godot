@@ -101,6 +101,12 @@ public:
 void AudioFilterSW::Processor::process_one(float &p_sample) {
 	float pre = p_sample;
 	p_sample = (p_sample * coeffs.b0 + hb1 * coeffs.b1 + hb2 * coeffs.b2 + ha1 * coeffs.a1 + ha2 * coeffs.a2);
+	// Anti-denormal: flush subnormal floats to zero to prevent CPU stalls on x86.
+	// When an IIR filter rings into silence, the feedback history can decay below
+	// the smallest normal float (~1.18e-38), causing hundredfold processing delays.
+	// Adding and subtracting a tiny constant flushes subnormals while leaving normals intact.
+	p_sample += 1e-20f;
+	p_sample -= 1e-20f;
 	ha2 = ha1;
 	hb2 = hb1;
 	hb1 = pre;
@@ -110,6 +116,9 @@ void AudioFilterSW::Processor::process_one(float &p_sample) {
 void AudioFilterSW::Processor::process_one_interp(float &p_sample) {
 	float pre = p_sample;
 	p_sample = (p_sample * coeffs.b0 + hb1 * coeffs.b1 + hb2 * coeffs.b2 + ha1 * coeffs.a1 + ha2 * coeffs.a2);
+	// Anti-denormal: flush subnormal floats to zero to prevent CPU stalls on x86.
+	p_sample += 1e-20f;
+	p_sample -= 1e-20f;
 	ha2 = ha1;
 	hb2 = hb1;
 	hb1 = pre;
