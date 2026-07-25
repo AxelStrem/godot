@@ -562,9 +562,9 @@ void AudioServer::_mix_step() {
 
 		if (!all_volumes_zero) {
 			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
-		// Apply head-shadow lowpass for HRTF simulation.
-		// DIAGNOSTIC: pass-through 1-pole (a=1.0). Tests whether state tracking
-		// or buffer writes themselves cause crackling vs actual lowpass filtering.
+		// DIAGNOSTIC: simple gain (no feedback, no state).
+		// Tests whether any attenuation of buf causes crackling,
+		// or if it's specific to IIR feedback.
 		{
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
 			float nyquist_limit = mix_rate * 0.49f;
@@ -578,33 +578,14 @@ void AudioServer::_mix_step() {
 			bool should_bypass = (cutoff_l >= hs_bypass_threshold && cutoff_r >= hs_bypass_threshold) || !(mask & 2);
 
 			if (!should_bypass) {
-				// Left ear — inline 1-pole lowpass
-				{
-					float a = 1.0f; // DIAGNOSTIC: pass-through (no filtering)
-					float y = playback->head_shadow_simple_l;
-					for (unsigned int i = 0; i < buffer_size; i++) {
-						y += a * (buf[i].left - y);
-						buf[i].left = y;
-					}
-					playback->head_shadow_simple_l = y;
+				// Left ear — simple gain, no feedback
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					buf[i].left *= 0.5f;
 				}
-
-				// Right ear — inline 1-pole lowpass
-				{
-					float a = 1.0f; // DIAGNOSTIC: pass-through (no filtering)
-					float y = playback->head_shadow_simple_r;
-					for (unsigned int i = 0; i < buffer_size; i++) {
-						y += a * (buf[i].right - y);
-						buf[i].right = y;
-					}
-					playback->head_shadow_simple_r = y;
+				// Right ear — simple gain, no feedback
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					buf[i].right *= 0.5f;
 				}
-			} else if (playback->head_shadow_was_bypassed && should_bypass) {
-				// No-op: still bypassed.
-			} else {
-				// Transition from active to bypassed — reset states.
-				playback->head_shadow_simple_l = 0.0f;
-				playback->head_shadow_simple_r = 0.0f;
 			}
 
 			playback->head_shadow_was_bypassed = should_bypass;
