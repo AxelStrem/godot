@@ -635,9 +635,9 @@ void AudioServer::_mix_step() {
 		// Apply pinna notch filters for HRTF simulation.
 		// Two narrow notches per ear whose center frequencies shift with
 		// source elevation, creating the spectral cues for vertical
-		// localization. 0 Hz disables a notch.
-		// Only reconfigures when frequency changes beyond threshold;
-		// clears history on disabled→enabled transitions to avoid clicks.
+		// localization. 0 Hz disables a notch (clamped to nyquist).
+		// Always runs when mask includes bit 4 — toggling the filter
+		// on/off causes audible artifacts, same as head shadow.
 		{
 			static constexpr float notch_resonance = 4.0f;
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
@@ -652,106 +652,102 @@ void AudioServer::_mix_step() {
 
 			// Left ear — notch 1
 			{
-				bool was_active = playback->pinna_notch1_l_was_active;
-				bool is_active = (n1l_freq > 0.0f && n1l_freq < nyquist_limit) && !pinna_masked;
-				if (is_active) {
-					bool need_clear = !was_active;
+				if (!pinna_masked) {
+					float freq = n1l_freq;
+					if (freq <= 0.0f || freq >= nyquist_limit) {
+						freq = nyquist_limit;
+					}
 
 					AudioFilterSW filter;
 					filter.set_mode(AudioFilterSW::NOTCH);
 					filter.set_sampling_rate(mix_rate);
-					filter.set_cutoff(n1l_freq);
+					filter.set_cutoff(freq);
 					filter.set_resonance(notch_resonance);
 					filter.set_stages(1);
 					filter.set_gain(0);
 
-					playback->pinna_notch1_l.set_filter(&filter, need_clear);
+					playback->pinna_notch1_l.set_filter(&filter, false);
 					playback->pinna_notch1_l.update_coeffs(buffer_size);
-					playback->pinna_notch1_last_l = n1l_freq;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
 						playback->pinna_notch1_l.process_one_interp(buf[i].left);
 					}
 				}
-				playback->pinna_notch1_l_was_active = is_active;
 			}
 
 			// Left ear — notch 2
 			{
-				bool was_active = playback->pinna_notch2_l_was_active;
-				bool is_active = (n2l_freq > 0.0f && n2l_freq < nyquist_limit) && !pinna_masked;
-				if (is_active) {
-					bool need_clear = !was_active;
+				if (!pinna_masked) {
+					float freq = n2l_freq;
+					if (freq <= 0.0f || freq >= nyquist_limit) {
+						freq = nyquist_limit;
+					}
 
 					AudioFilterSW filter;
 					filter.set_mode(AudioFilterSW::NOTCH);
 					filter.set_sampling_rate(mix_rate);
-					filter.set_cutoff(n2l_freq);
+					filter.set_cutoff(freq);
 					filter.set_resonance(notch_resonance);
 					filter.set_stages(1);
 					filter.set_gain(0);
 
-					playback->pinna_notch2_l.set_filter(&filter, need_clear);
+					playback->pinna_notch2_l.set_filter(&filter, false);
 					playback->pinna_notch2_l.update_coeffs(buffer_size);
-					playback->pinna_notch2_last_l = n2l_freq;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
 						playback->pinna_notch2_l.process_one_interp(buf[i].left);
 					}
 				}
-				playback->pinna_notch2_l_was_active = is_active;
 			}
 
 			// Right ear — notch 1
 			{
-				bool was_active = playback->pinna_notch1_r_was_active;
-				bool is_active = (n1r_freq > 0.0f && n1r_freq < nyquist_limit) && !pinna_masked;
-				if (is_active) {
-					bool need_clear = !was_active;
+				if (!pinna_masked) {
+					float freq = n1r_freq;
+					if (freq <= 0.0f || freq >= nyquist_limit) {
+						freq = nyquist_limit;
+					}
 
 					AudioFilterSW filter;
 					filter.set_mode(AudioFilterSW::NOTCH);
 					filter.set_sampling_rate(mix_rate);
-					filter.set_cutoff(n1r_freq);
+					filter.set_cutoff(freq);
 					filter.set_resonance(notch_resonance);
 					filter.set_stages(1);
 					filter.set_gain(0);
 
-					playback->pinna_notch1_r.set_filter(&filter, need_clear);
+					playback->pinna_notch1_r.set_filter(&filter, false);
 					playback->pinna_notch1_r.update_coeffs(buffer_size);
-					playback->pinna_notch1_last_r = n1r_freq;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
 						playback->pinna_notch1_r.process_one_interp(buf[i].right);
 					}
 				}
-				playback->pinna_notch1_r_was_active = is_active;
 			}
 
 			// Right ear — notch 2
 			{
-				bool was_active = playback->pinna_notch2_r_was_active;
-				bool is_active = (n2r_freq > 0.0f && n2r_freq < nyquist_limit) && !pinna_masked;
-				if (is_active) {
-					bool need_clear = !was_active;
+				if (!pinna_masked) {
+					float freq = n2r_freq;
+					if (freq <= 0.0f || freq >= nyquist_limit) {
+						freq = nyquist_limit;
+					}
 
 					AudioFilterSW filter;
 					filter.set_mode(AudioFilterSW::NOTCH);
 					filter.set_sampling_rate(mix_rate);
-					filter.set_cutoff(n2r_freq);
+					filter.set_cutoff(freq);
 					filter.set_resonance(notch_resonance);
 					filter.set_stages(1);
 					filter.set_gain(0);
 
-					playback->pinna_notch2_r.set_filter(&filter, need_clear);
+					playback->pinna_notch2_r.set_filter(&filter, false);
 					playback->pinna_notch2_r.update_coeffs(buffer_size);
-					playback->pinna_notch2_last_r = n2r_freq;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
 						playback->pinna_notch2_r.process_one_interp(buf[i].right);
 					}
 				}
-				playback->pinna_notch2_r_was_active = is_active;
 			}
 		}
 
