@@ -332,10 +332,8 @@ private:
 		// Only accessed on the audio thread; no atomics needed.
 		float head_shadow_last_cutoff_l = 0.0f;
 		float head_shadow_last_cutoff_r = 0.0f;
-		bool head_shadow_was_bypassed = true;
-		// Simple 1-pole lowpass test state (bypasses AudioFilterSW for debugging).
-		float head_shadow_simple_l = 0.0f;
-		float head_shadow_simple_r = 0.0f;
+		bool head_shadow_left_was_active = false;
+		bool head_shadow_right_was_active = false;
 		float pinna_notch1_last_l = 0.0f;
 		float pinna_notch1_last_r = 0.0f;
 		float pinna_notch2_last_l = 0.0f;
