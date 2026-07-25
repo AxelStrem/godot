@@ -563,10 +563,12 @@ void AudioServer::_mix_step() {
 
 		if (!all_volumes_zero) {
 			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
-		// DIAGNOSTIC: constant write (no FP multiply, no read-modify-write).
-		// Replaces samples with a fixed 0.25 value — audible as quiet hum.
-		// Tests whether writing ANY different value causes crackling,
-		// or if it's specifically the FP multiply (denormals/NaN/etc).
+		// DIAGNOSTIC: volatile-forced scalar *= 0.5f.
+		// Same attenuation as before, but volatile prevents the compiler
+		// from auto-vectorizing the loop into SSE/AVX stores.
+		// Tests hypothesis: auto-vectorized stores to the mix buffer
+		// cause the crackling (ITD is clean because its conditional
+		// loop prevents vectorization).
 		{
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
 			float nyquist_limit = mix_rate * 0.49f;
@@ -581,8 +583,10 @@ void AudioServer::_mix_step() {
 
 			if (!should_bypass) {
 				for (unsigned int i = 0; i < buffer_size; i++) {
-					buf[i].left = 0.25f;
-					buf[i].right = 0.25f;
+					volatile float *vl = &buf[i].left;
+					volatile float *vr = &buf[i].right;
+					*vl = *vl * 0.5f;
+					*vr = *vr * 0.5f;
 				}
 			}
 
