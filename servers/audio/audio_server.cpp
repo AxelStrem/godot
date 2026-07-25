@@ -563,21 +563,77 @@ void AudioServer::_mix_step() {
 
 		if (!all_volumes_zero) {
 			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
-		// DIAGNOSTIC: *= 0.5f with no cutoff-based toggling.
-		// Block is ALWAYS active when mask includes bit 2.
-		// Tests hypothesis: crackling is from rapid toggle when
-		// cutoff fluctuates near the 19000 Hz bypass threshold.
+		// Apply head shadow lowpass to simulate frequency-dependent
+		// attenuation from the head. The contralateral (far) ear gets a
+		// lowpass whose cutoff drops with source angle; the ipsilateral
+		// (near) ear gets full spectrum (cutoff at nyquist, effectively
+		// passthrough). Always runs when mask includes bit 2 — the LP is
+		// cheap at high cutoffs and toggling causes audible artifacts.
 		{
-			bool should_bypass = !(mask & 2);
+			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
+			float nyquist_limit = mix_rate * 0.49f;
+			static constexpr float hs_reconfig_hz = 100.0f;
 
-			if (!should_bypass) {
-				for (unsigned int i = 0; i < buffer_size; i++) {
-					buf[i].left *= 0.5f;
-					buf[i].right *= 0.5f;
+			float cutoff_l = playback->head_shadow_cutoff_l.get();
+			float cutoff_r = playback->head_shadow_cutoff_r.get();
+			if (cutoff_l <= 0.0f) { cutoff_l = nyquist_limit; }
+			if (cutoff_r <= 0.0f) { cutoff_r = nyquist_limit; }
+			cutoff_l = MIN(cutoff_l, nyquist_limit);
+			cutoff_r = MIN(cutoff_r, nyquist_limit);
+
+			bool is_active = (mask & 2);
+
+			// Left ear LP
+			{
+				bool was_active = playback->head_shadow_left_was_active;
+				if (is_active) {
+					bool freq_changed = Math::abs(cutoff_l - playback->head_shadow_last_cutoff_l) > hs_reconfig_hz;
+					bool need_clear = !was_active;
+
+					AudioFilterSW filter;
+					filter.set_mode(AudioFilterSW::LOWPASS);
+					filter.set_sampling_rate(mix_rate);
+					filter.set_cutoff(cutoff_l);
+					filter.set_resonance(1);
+					filter.set_stages(1);
+					filter.set_gain(0);
+
+					playback->head_shadow_lp_l.set_filter(&filter, freq_changed || need_clear);
+					playback->head_shadow_lp_l.update_coeffs(0);
+					playback->head_shadow_last_cutoff_l = cutoff_l;
+
+					for (unsigned int i = 0; i < buffer_size; i++) {
+						playback->head_shadow_lp_l.process_one(buf[i].left);
+					}
 				}
+				playback->head_shadow_left_was_active = is_active;
 			}
 
-			playback->head_shadow_was_bypassed = should_bypass;
+			// Right ear LP
+			{
+				bool was_active = playback->head_shadow_right_was_active;
+				if (is_active) {
+					bool freq_changed = Math::abs(cutoff_r - playback->head_shadow_last_cutoff_r) > hs_reconfig_hz;
+					bool need_clear = !was_active;
+
+					AudioFilterSW filter;
+					filter.set_mode(AudioFilterSW::LOWPASS);
+					filter.set_sampling_rate(mix_rate);
+					filter.set_cutoff(cutoff_r);
+					filter.set_resonance(1);
+					filter.set_stages(1);
+					filter.set_gain(0);
+
+					playback->head_shadow_lp_r.set_filter(&filter, freq_changed || need_clear);
+					playback->head_shadow_lp_r.update_coeffs(0);
+					playback->head_shadow_last_cutoff_r = cutoff_r;
+
+					for (unsigned int i = 0; i < buffer_size; i++) {
+						playback->head_shadow_lp_r.process_one(buf[i].right);
+					}
+				}
+				playback->head_shadow_right_was_active = is_active;
+			}
 		}
 
 		// Apply pinna notch filters for HRTF simulation.
