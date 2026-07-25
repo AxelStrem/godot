@@ -562,12 +562,11 @@ void AudioServer::_mix_step() {
 
 		if (!all_volumes_zero) {
 			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
-		// DIAGNOSTIC: volatile-forced scalar *= 0.5f.
-		// Same attenuation as before, but volatile prevents the compiler
-		// from auto-vectorizing the loop into SSE/AVX stores.
-		// Tests hypothesis: auto-vectorized stores to the mix buffer
-		// cause the crackling (ITD is clean because its conditional
-		// loop prevents vectorization).
+		// DIAGNOSTIC: *= 0.5 then *= 2.0 — net identity.
+		// The bus mixer downstream sees the original values (×1.0),
+		// but the buffer IS modified (×0.5 then restored).
+		// Tests whether crackling is from the write itself
+		// or from downstream effects of attenuated values.
 		{
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
 			float nyquist_limit = mix_rate * 0.49f;
@@ -582,10 +581,12 @@ void AudioServer::_mix_step() {
 
 			if (!should_bypass) {
 				for (unsigned int i = 0; i < buffer_size; i++) {
-					volatile float *vl = &buf[i].left;
-					volatile float *vr = &buf[i].right;
-					*vl = *vl * 0.5f;
-					*vr = *vr * 0.5f;
+					buf[i].left *= 0.5f;
+					buf[i].right *= 0.5f;
+				}
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					buf[i].left *= 2.0f;
+					buf[i].right *= 2.0f;
 				}
 			}
 
