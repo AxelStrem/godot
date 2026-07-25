@@ -597,7 +597,7 @@ void AudioServer::_mix_step() {
 					filter.set_stages(1);
 					filter.set_gain(0);
 
-					playback->head_shadow_lp_l.set_filter(&filter, freq_changed || need_clear);
+					playback->head_shadow_lp_l.set_filter(&filter, need_clear);
 					playback->head_shadow_lp_l.update_coeffs(0);
 					playback->head_shadow_last_cutoff_l = cutoff_l;
 
@@ -623,7 +623,7 @@ void AudioServer::_mix_step() {
 					filter.set_stages(1);
 					filter.set_gain(0);
 
-					playback->head_shadow_lp_r.set_filter(&filter, freq_changed || need_clear);
+					playback->head_shadow_lp_r.set_filter(&filter, need_clear);
 					playback->head_shadow_lp_r.update_coeffs(0);
 					playback->head_shadow_last_cutoff_r = cutoff_r;
 
@@ -670,7 +670,7 @@ void AudioServer::_mix_step() {
 					filter.set_stages(1);
 					filter.set_gain(0);
 
-					playback->pinna_notch1_l.set_filter(&filter, freq_changed || need_clear);
+					playback->pinna_notch1_l.set_filter(&filter, need_clear);
 					playback->pinna_notch1_l.update_coeffs(0);
 					playback->pinna_notch1_last_l = n1l_freq;
 
@@ -697,7 +697,7 @@ void AudioServer::_mix_step() {
 					filter.set_stages(1);
 					filter.set_gain(0);
 
-					playback->pinna_notch2_l.set_filter(&filter, freq_changed || need_clear);
+					playback->pinna_notch2_l.set_filter(&filter, need_clear);
 					playback->pinna_notch2_l.update_coeffs(0);
 					playback->pinna_notch2_last_l = n2l_freq;
 
@@ -724,7 +724,7 @@ void AudioServer::_mix_step() {
 					filter.set_stages(1);
 					filter.set_gain(0);
 
-					playback->pinna_notch1_r.set_filter(&filter, freq_changed || need_clear);
+					playback->pinna_notch1_r.set_filter(&filter, need_clear);
 					playback->pinna_notch1_r.update_coeffs(0);
 					playback->pinna_notch1_last_r = n1r_freq;
 
@@ -751,7 +751,7 @@ void AudioServer::_mix_step() {
 					filter.set_stages(1);
 					filter.set_gain(0);
 
-					playback->pinna_notch2_r.set_filter(&filter, freq_changed || need_clear);
+					playback->pinna_notch2_r.set_filter(&filter, need_clear);
 					playback->pinna_notch2_r.update_coeffs(0);
 					playback->pinna_notch2_last_r = n2r_freq;
 
