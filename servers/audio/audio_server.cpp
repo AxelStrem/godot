@@ -563,9 +563,8 @@ void AudioServer::_mix_step() {
 		if (!all_volumes_zero) {
 			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
 		// Apply head-shadow lowpass for HRTF simulation.
-		// DIAGNOSTIC: Using inline 1-pole IIR instead of AudioFilterSW to isolate
-		// whether the bug is in the filter infrastructure or elsewhere.
-		// y[n] = y[n-1] + a * (x[n] - y[n-1])  where a = 1 - exp(-2*PI*fc/fs)
+		// DIAGNOSTIC: pass-through 1-pole (a=1.0). Tests whether state tracking
+		// or buffer writes themselves cause crackling vs actual lowpass filtering.
 		{
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
 			float nyquist_limit = mix_rate * 0.49f;
@@ -576,13 +575,12 @@ void AudioServer::_mix_step() {
 			float cutoff_r = playback->head_shadow_cutoff_r.get();
 			if (cutoff_r <= 0.0f) { cutoff_r = nyquist_limit; }
 
-			bool should_bypass = true; // FORCE BYPASS — diagnostic: does entering the block cause crackling?
-			(void)cutoff_l; (void)cutoff_r; (void)mask; // suppress unused warnings
+			bool should_bypass = (cutoff_l >= hs_bypass_threshold && cutoff_r >= hs_bypass_threshold) || !(mask & 2);
 
 			if (!should_bypass) {
 				// Left ear — inline 1-pole lowpass
 				{
-					float a = 1.0f - expf(-Math::TAU * MIN(cutoff_l, nyquist_limit) / mix_rate);
+					float a = 1.0f; // DIAGNOSTIC: pass-through (no filtering)
 					float y = playback->head_shadow_simple_l;
 					for (unsigned int i = 0; i < buffer_size; i++) {
 						y += a * (buf[i].left - y);
@@ -593,7 +591,7 @@ void AudioServer::_mix_step() {
 
 				// Right ear — inline 1-pole lowpass
 				{
-					float a = 1.0f - expf(-Math::TAU * MIN(cutoff_r, nyquist_limit) / mix_rate);
+					float a = 1.0f; // DIAGNOSTIC: pass-through (no filtering)
 					float y = playback->head_shadow_simple_r;
 					for (unsigned int i = 0; i < buffer_size; i++) {
 						y += a * (buf[i].right - y);
