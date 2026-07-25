@@ -562,22 +562,12 @@ void AudioServer::_mix_step() {
 
 		if (!all_volumes_zero) {
 			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
-		// DIAGNOSTIC: *= 0.5f (same as original crackling test).
-		// Combined with high-shelf bypass in _mix_step_for_channel.
-		// Tests whether the crackling comes from the downstream
-		// high-shelf filter's IIR transient response to abrupt
-		// level changes.
+		// DIAGNOSTIC: *= 0.5f with no cutoff-based toggling.
+		// Block is ALWAYS active when mask includes bit 2.
+		// Tests hypothesis: crackling is from rapid toggle when
+		// cutoff fluctuates near the 19000 Hz bypass threshold.
 		{
-			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
-			float nyquist_limit = mix_rate * 0.49f;
-			static constexpr float hs_bypass_threshold = 19000.0f;
-
-			float cutoff_l = playback->head_shadow_cutoff_l.get();
-			if (cutoff_l <= 0.0f) { cutoff_l = nyquist_limit; }
-			float cutoff_r = playback->head_shadow_cutoff_r.get();
-			if (cutoff_r <= 0.0f) { cutoff_r = nyquist_limit; }
-
-			bool should_bypass = (cutoff_l >= hs_bypass_threshold && cutoff_r >= hs_bypass_threshold) || !(mask & 2);
+			bool should_bypass = !(mask & 2);
 
 			if (!should_bypass) {
 				for (unsigned int i = 0; i < buffer_size; i++) {
@@ -945,8 +935,7 @@ void AudioServer::_mix_step() {
 
 void AudioServer::_mix_step_for_channel(AudioFrame *p_out_buf, AudioFrame *p_source_buf, AudioFrame p_vol_start, AudioFrame p_vol_final, float p_attenuation_filter_cutoff_hz, float p_highshelf_gain, AudioFilterSW::Processor *p_processor_l, AudioFilterSW::Processor *p_processor_r) {
 	// TODO: In the future it could be nice to replace all of these hardcoded effects with something a bit cleaner and more flexible, but for now this is what we do to support 3D audio players.
-	// DIAGNOSTIC: force-bypass high-shelf filter to test if it causes crackling
-	if (false && p_highshelf_gain != 0) {
+	if (p_highshelf_gain != 0) {
 		AudioFilterSW filter;
 		filter.set_mode(AudioFilterSW::HIGHSHELF);
 		filter.set_sampling_rate(AudioServer::get_singleton()->get_mix_rate());
