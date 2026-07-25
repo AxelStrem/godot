@@ -568,67 +568,66 @@ void AudioServer::_mix_step() {
 		// (near) ear gets full spectrum (cutoff at nyquist, effectively
 		// passthrough). Always runs when mask includes bit 2 — the LP is
 		// cheap at high cutoffs and toggling causes audible artifacts.
+		// Smooths the cutoff frequency over time to reduce time-varying
+		// biquad filter artifacts during fast turns.
 		{
+			static constexpr float cutoff_smooth_alpha = 0.2f;
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
 			float nyquist_limit = mix_rate * 0.49f;
 
-			float cutoff_l = playback->head_shadow_cutoff_l.get();
-			float cutoff_r = playback->head_shadow_cutoff_r.get();
-			if (cutoff_l <= 0.0f) { cutoff_l = nyquist_limit; }
-			if (cutoff_r <= 0.0f) { cutoff_r = nyquist_limit; }
-			cutoff_l = MIN(cutoff_l, nyquist_limit);
-			cutoff_r = MIN(cutoff_r, nyquist_limit);
+			float target_l = playback->head_shadow_cutoff_l.get();
+			float target_r = playback->head_shadow_cutoff_r.get();
+			if (target_l <= 0.0f) { target_l = nyquist_limit; }
+			if (target_r <= 0.0f) { target_r = nyquist_limit; }
+			target_l = MIN(target_l, nyquist_limit);
+			target_r = MIN(target_r, nyquist_limit);
+
+			// First-order lowpass on the cutoff frequency itself to
+			// reduce per-frame coefficient delta and avoid exciting
+			// time-varying biquad transients.
+			float &smooth_l = playback->head_shadow_smoothed_cutoff_l;
+			float &smooth_r = playback->head_shadow_smoothed_cutoff_r;
+			if (smooth_l <= 0.0f) { smooth_l = target_l; }
+			if (smooth_r <= 0.0f) { smooth_r = target_r; }
+			smooth_l += cutoff_smooth_alpha * (target_l - smooth_l);
+			smooth_r += cutoff_smooth_alpha * (target_r - smooth_r);
 
 			bool is_active = (mask & 2);
 
 			// Left ear LP
-			{
-				bool was_active = playback->head_shadow_left_was_active;
-				if (is_active) {
-					bool need_clear = !was_active;
+			if (is_active) {
+				AudioFilterSW filter;
+				filter.set_mode(AudioFilterSW::LOWPASS);
+				filter.set_sampling_rate(mix_rate);
+				filter.set_cutoff(smooth_l);
+				filter.set_resonance(1);
+				filter.set_stages(1);
+				filter.set_gain(0);
 
-					AudioFilterSW filter;
-					filter.set_mode(AudioFilterSW::LOWPASS);
-					filter.set_sampling_rate(mix_rate);
-					filter.set_cutoff(cutoff_l);
-					filter.set_resonance(1);
-					filter.set_stages(1);
-					filter.set_gain(0);
+				playback->head_shadow_lp_l.set_filter(&filter, false);
+				playback->head_shadow_lp_l.update_coeffs(buffer_size);
 
-					playback->head_shadow_lp_l.set_filter(&filter, need_clear);
-					playback->head_shadow_lp_l.update_coeffs(buffer_size);
-					playback->head_shadow_last_cutoff_l = cutoff_l;
-
-					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->head_shadow_lp_l.process_one_interp(buf[i].left);
-					}
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->head_shadow_lp_l.process_one_interp(buf[i].left);
 				}
-				playback->head_shadow_left_was_active = is_active;
 			}
 
 			// Right ear LP
-			{
-				bool was_active = playback->head_shadow_right_was_active;
-				if (is_active) {
-					bool need_clear = !was_active;
+			if (is_active) {
+				AudioFilterSW filter;
+				filter.set_mode(AudioFilterSW::LOWPASS);
+				filter.set_sampling_rate(mix_rate);
+				filter.set_cutoff(smooth_r);
+				filter.set_resonance(1);
+				filter.set_stages(1);
+				filter.set_gain(0);
 
-					AudioFilterSW filter;
-					filter.set_mode(AudioFilterSW::LOWPASS);
-					filter.set_sampling_rate(mix_rate);
-					filter.set_cutoff(cutoff_r);
-					filter.set_resonance(1);
-					filter.set_stages(1);
-					filter.set_gain(0);
+				playback->head_shadow_lp_r.set_filter(&filter, false);
+				playback->head_shadow_lp_r.update_coeffs(buffer_size);
 
-					playback->head_shadow_lp_r.set_filter(&filter, need_clear);
-					playback->head_shadow_lp_r.update_coeffs(buffer_size);
-					playback->head_shadow_last_cutoff_r = cutoff_r;
-
-					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->head_shadow_lp_r.process_one_interp(buf[i].right);
-					}
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->head_shadow_lp_r.process_one_interp(buf[i].right);
 				}
-				playback->head_shadow_right_was_active = is_active;
 			}
 		}
 
