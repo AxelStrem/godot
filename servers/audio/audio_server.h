@@ -328,12 +328,11 @@ private:
 		AudioFilterSW::Processor pinna_notch1_r;
 		AudioFilterSW::Processor pinna_notch2_l;
 		AudioFilterSW::Processor pinna_notch2_r;
-		// Cached state to avoid redundant filter reconfiguration.
+		// Smoothed cutoff values for head shadow LP to reduce time-varying
+		// biquad transients during fast turns. 0 = uninitialized.
 		// Only accessed on the audio thread; no atomics needed.
-		float head_shadow_last_cutoff_l = 0.0f;
-		float head_shadow_last_cutoff_r = 0.0f;
-		bool head_shadow_left_was_active = false;
-		bool head_shadow_right_was_active = false;
+		float head_shadow_smoothed_cutoff_l = 0.0f;
+		float head_shadow_smoothed_cutoff_r = 0.0f;
 		// Updating this ref after the list node is created breaks consistency guarantees, don't do it!
 		Ref<AudioStreamPlayback> stream_playback;
 		// Playback state determines the fate of a particular AudioStreamListNode during the mix step. Must be atomically replaced.
