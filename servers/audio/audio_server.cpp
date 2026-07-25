@@ -572,7 +572,6 @@ void AudioServer::_mix_step() {
 		{
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
 			float nyquist_limit = mix_rate * 0.49f;
-			static constexpr float hs_reconfig_hz = 100.0f;
 
 			float cutoff_l = playback->head_shadow_cutoff_l.get();
 			float cutoff_r = playback->head_shadow_cutoff_r.get();
@@ -587,7 +586,6 @@ void AudioServer::_mix_step() {
 			{
 				bool was_active = playback->head_shadow_left_was_active;
 				if (is_active) {
-					bool freq_changed = Math::abs(cutoff_l - playback->head_shadow_last_cutoff_l) > hs_reconfig_hz;
 					bool need_clear = !was_active;
 
 					AudioFilterSW filter;
@@ -599,11 +597,11 @@ void AudioServer::_mix_step() {
 					filter.set_gain(0);
 
 					playback->head_shadow_lp_l.set_filter(&filter, need_clear);
-					playback->head_shadow_lp_l.update_coeffs(0);
+					playback->head_shadow_lp_l.update_coeffs(buffer_size);
 					playback->head_shadow_last_cutoff_l = cutoff_l;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->head_shadow_lp_l.process_one(buf[i].left);
+						playback->head_shadow_lp_l.process_one_interp(buf[i].left);
 					}
 				}
 				playback->head_shadow_left_was_active = is_active;
@@ -613,7 +611,6 @@ void AudioServer::_mix_step() {
 			{
 				bool was_active = playback->head_shadow_right_was_active;
 				if (is_active) {
-					bool freq_changed = Math::abs(cutoff_r - playback->head_shadow_last_cutoff_r) > hs_reconfig_hz;
 					bool need_clear = !was_active;
 
 					AudioFilterSW filter;
@@ -625,11 +622,11 @@ void AudioServer::_mix_step() {
 					filter.set_gain(0);
 
 					playback->head_shadow_lp_r.set_filter(&filter, need_clear);
-					playback->head_shadow_lp_r.update_coeffs(0);
+					playback->head_shadow_lp_r.update_coeffs(buffer_size);
 					playback->head_shadow_last_cutoff_r = cutoff_r;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->head_shadow_lp_r.process_one(buf[i].right);
+						playback->head_shadow_lp_r.process_one_interp(buf[i].right);
 					}
 				}
 				playback->head_shadow_right_was_active = is_active;
@@ -644,7 +641,6 @@ void AudioServer::_mix_step() {
 		// clears history on disabled→enabled transitions to avoid clicks.
 		{
 			static constexpr float notch_resonance = 4.0f;
-			static constexpr float pn_reconfig_delta = 20.0f;
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
 			float nyquist_limit = mix_rate * 0.49f;
 
@@ -660,7 +656,6 @@ void AudioServer::_mix_step() {
 				bool was_active = playback->pinna_notch1_l_was_active;
 				bool is_active = (n1l_freq > 0.0f && n1l_freq < nyquist_limit) && !pinna_masked;
 				if (is_active) {
-					bool freq_changed = Math::abs(n1l_freq - playback->pinna_notch1_last_l) > pn_reconfig_delta;
 					bool need_clear = !was_active;
 
 					AudioFilterSW filter;
@@ -672,11 +667,11 @@ void AudioServer::_mix_step() {
 					filter.set_gain(0);
 
 					playback->pinna_notch1_l.set_filter(&filter, need_clear);
-					playback->pinna_notch1_l.update_coeffs(0);
+					playback->pinna_notch1_l.update_coeffs(buffer_size);
 					playback->pinna_notch1_last_l = n1l_freq;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->pinna_notch1_l.process_one(buf[i].left);
+						playback->pinna_notch1_l.process_one_interp(buf[i].left);
 					}
 				}
 				playback->pinna_notch1_l_was_active = is_active;
@@ -687,7 +682,6 @@ void AudioServer::_mix_step() {
 				bool was_active = playback->pinna_notch2_l_was_active;
 				bool is_active = (n2l_freq > 0.0f && n2l_freq < nyquist_limit) && !pinna_masked;
 				if (is_active) {
-					bool freq_changed = Math::abs(n2l_freq - playback->pinna_notch2_last_l) > pn_reconfig_delta;
 					bool need_clear = !was_active;
 
 					AudioFilterSW filter;
@@ -699,11 +693,11 @@ void AudioServer::_mix_step() {
 					filter.set_gain(0);
 
 					playback->pinna_notch2_l.set_filter(&filter, need_clear);
-					playback->pinna_notch2_l.update_coeffs(0);
+					playback->pinna_notch2_l.update_coeffs(buffer_size);
 					playback->pinna_notch2_last_l = n2l_freq;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->pinna_notch2_l.process_one(buf[i].left);
+						playback->pinna_notch2_l.process_one_interp(buf[i].left);
 					}
 				}
 				playback->pinna_notch2_l_was_active = is_active;
@@ -714,7 +708,6 @@ void AudioServer::_mix_step() {
 				bool was_active = playback->pinna_notch1_r_was_active;
 				bool is_active = (n1r_freq > 0.0f && n1r_freq < nyquist_limit) && !pinna_masked;
 				if (is_active) {
-					bool freq_changed = Math::abs(n1r_freq - playback->pinna_notch1_last_r) > pn_reconfig_delta;
 					bool need_clear = !was_active;
 
 					AudioFilterSW filter;
@@ -726,11 +719,11 @@ void AudioServer::_mix_step() {
 					filter.set_gain(0);
 
 					playback->pinna_notch1_r.set_filter(&filter, need_clear);
-					playback->pinna_notch1_r.update_coeffs(0);
+					playback->pinna_notch1_r.update_coeffs(buffer_size);
 					playback->pinna_notch1_last_r = n1r_freq;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->pinna_notch1_r.process_one(buf[i].right);
+						playback->pinna_notch1_r.process_one_interp(buf[i].right);
 					}
 				}
 				playback->pinna_notch1_r_was_active = is_active;
@@ -741,7 +734,6 @@ void AudioServer::_mix_step() {
 				bool was_active = playback->pinna_notch2_r_was_active;
 				bool is_active = (n2r_freq > 0.0f && n2r_freq < nyquist_limit) && !pinna_masked;
 				if (is_active) {
-					bool freq_changed = Math::abs(n2r_freq - playback->pinna_notch2_last_r) > pn_reconfig_delta;
 					bool need_clear = !was_active;
 
 					AudioFilterSW filter;
@@ -753,11 +745,11 @@ void AudioServer::_mix_step() {
 					filter.set_gain(0);
 
 					playback->pinna_notch2_r.set_filter(&filter, need_clear);
-					playback->pinna_notch2_r.update_coeffs(0);
+					playback->pinna_notch2_r.update_coeffs(buffer_size);
 					playback->pinna_notch2_last_r = n2r_freq;
 
 					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->pinna_notch2_r.process_one(buf[i].right);
+						playback->pinna_notch2_r.process_one_interp(buf[i].right);
 					}
 				}
 				playback->pinna_notch2_r_was_active = is_active;
