@@ -563,10 +563,10 @@ void AudioServer::_mix_step() {
 
 		if (!all_volumes_zero) {
 			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
-		// DIAGNOSTIC: volatile identity pass-through.
-		// Forces actual read+write of each sample (volatile prevents
-		// compiler from optimizing away the store). Tests whether
-		// any real write to buf causes crackling, even identity.
+		// DIAGNOSTIC: constant write (no FP multiply, no read-modify-write).
+		// Replaces samples with a fixed 0.25 value — audible as quiet hum.
+		// Tests whether writing ANY different value causes crackling,
+		// or if it's specifically the FP multiply (denormals/NaN/etc).
 		{
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
 			float nyquist_limit = mix_rate * 0.49f;
@@ -581,12 +581,8 @@ void AudioServer::_mix_step() {
 
 			if (!should_bypass) {
 				for (unsigned int i = 0; i < buffer_size; i++) {
-					volatile float *vl = &buf[i].left;
-					volatile float *vr = &buf[i].right;
-					float l = *vl;
-					float r = *vr;
-					*vl = l;
-					*vr = r;
+					buf[i].left = 0.25f;
+					buf[i].right = 0.25f;
 				}
 			}
 
