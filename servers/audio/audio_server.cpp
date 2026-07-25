@@ -563,9 +563,9 @@ void AudioServer::_mix_step() {
 
 		if (!all_volumes_zero) {
 			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
-		// DIAGNOSTIC: simple gain (no feedback, no state).
-		// Tests whether any attenuation of buf causes crackling,
-		// or if it's specific to IIR feedback.
+		// DIAGNOSTIC: zero the buffer (no FP multiply, constant write).
+		// Tests whether any buffer write causes crackling vs only
+		// attenuated/FP-multiplied values.
 		{
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
 			float nyquist_limit = mix_rate * 0.49f;
@@ -579,13 +579,10 @@ void AudioServer::_mix_step() {
 			bool should_bypass = (cutoff_l >= hs_bypass_threshold && cutoff_r >= hs_bypass_threshold) || !(mask & 2);
 
 			if (!should_bypass) {
-				// Left ear — simple gain, no feedback
+				// Zero the buffer — actual write, no FP math
 				for (unsigned int i = 0; i < buffer_size; i++) {
-					buf[i].left *= 0.5f;
-				}
-				// Right ear — simple gain, no feedback
-				for (unsigned int i = 0; i < buffer_size; i++) {
-					buf[i].right *= 0.5f;
+					buf[i].left = 0.0f;
+					buf[i].right = 0.0f;
 				}
 			}
 
