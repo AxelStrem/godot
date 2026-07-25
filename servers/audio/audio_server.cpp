@@ -563,11 +563,11 @@ void AudioServer::_mix_step() {
 
 		if (!all_volumes_zero) {
 			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
-		// DIAGNOSTIC: *= 0.5 then *= 2.0 — net identity.
-		// The bus mixer downstream sees the original values (×1.0),
-		// but the buffer IS modified (×0.5 then restored).
-		// Tests whether crackling is from the write itself
-		// or from downstream effects of attenuated values.
+		// DIAGNOSTIC: *= 0.5f (same as original crackling test).
+		// Combined with high-shelf bypass in _mix_step_for_channel.
+		// Tests whether the crackling comes from the downstream
+		// high-shelf filter's IIR transient response to abrupt
+		// level changes.
 		{
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
 			float nyquist_limit = mix_rate * 0.49f;
@@ -584,10 +584,6 @@ void AudioServer::_mix_step() {
 				for (unsigned int i = 0; i < buffer_size; i++) {
 					buf[i].left *= 0.5f;
 					buf[i].right *= 0.5f;
-				}
-				for (unsigned int i = 0; i < buffer_size; i++) {
-					buf[i].left *= 2.0f;
-					buf[i].right *= 2.0f;
 				}
 			}
 
@@ -950,7 +946,8 @@ void AudioServer::_mix_step() {
 
 void AudioServer::_mix_step_for_channel(AudioFrame *p_out_buf, AudioFrame *p_source_buf, AudioFrame p_vol_start, AudioFrame p_vol_final, float p_attenuation_filter_cutoff_hz, float p_highshelf_gain, AudioFilterSW::Processor *p_processor_l, AudioFilterSW::Processor *p_processor_r) {
 	// TODO: In the future it could be nice to replace all of these hardcoded effects with something a bit cleaner and more flexible, but for now this is what we do to support 3D audio players.
-	if (p_highshelf_gain != 0) {
+	// DIAGNOSTIC: force-bypass high-shelf filter to test if it causes crackling
+	if (false && p_highshelf_gain != 0) {
 		AudioFilterSW filter;
 		filter.set_mode(AudioFilterSW::HIGHSHELF);
 		filter.set_sampling_rate(AudioServer::get_singleton()->get_mix_rate());
