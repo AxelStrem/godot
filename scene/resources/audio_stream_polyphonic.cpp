@@ -132,6 +132,21 @@ int AudioStreamPlaybackPolyphonic::mix(AudioFrame *p_buffer, float p_rate_scale,
 		return 0;
 	}
 
+	// When all streams have finished, return 0 to signal the audio server
+	// that we're done — this allows the server to clean up the playback
+	// node and stops the spatial pipeline from processing silence.
+	bool any_active = false;
+	for (const Stream &s : streams) {
+		if (s.active.is_set()) {
+			any_active = true;
+			break;
+		}
+	}
+	if (!any_active) {
+		active = false;
+		return 0;
+	}
+
 	// Pre-clear buffer.
 	for (int i = 0; i < p_frames; i++) {
 		p_buffer[i] = AudioFrame(0, 0);
