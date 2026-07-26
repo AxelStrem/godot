@@ -449,11 +449,38 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 				effective_global_pos = area_source_line_start + t * ab;
 			}
 		} else if (area_source_mode == AREA_SOURCE_BOX) {
-			// Closest point inside a box to the listener.
+			// Closest point on the box SURFACE to the listener.
+			// When inside, push to the nearest face so distance is always > 0
+			// and local_pos transitions smoothly across the boundary.
 			Vector3 listener_global = listener_node->get_global_transform().origin;
-			effective_global_pos.x = CLAMP(listener_global.x, area_source_box_min.x, area_source_box_max.x);
-			effective_global_pos.y = CLAMP(listener_global.y, area_source_box_min.y, area_source_box_max.y);
-			effective_global_pos.z = CLAMP(listener_global.z, area_source_box_min.z, area_source_box_max.z);
+			float min_x = MIN(area_source_box_min.x, area_source_box_max.x);
+			float max_x = MAX(area_source_box_min.x, area_source_box_max.x);
+			float min_y = MIN(area_source_box_min.y, area_source_box_max.y);
+			float max_y = MAX(area_source_box_min.y, area_source_box_max.y);
+			float min_z = MIN(area_source_box_min.z, area_source_box_max.z);
+			float max_z = MAX(area_source_box_min.z, area_source_box_max.z);
+
+			effective_global_pos.x = CLAMP(listener_global.x, min_x, max_x);
+			effective_global_pos.y = CLAMP(listener_global.y, min_y, max_y);
+			effective_global_pos.z = CLAMP(listener_global.z, min_z, max_z);
+
+			if (effective_global_pos == listener_global) {
+				// Listener is inside — push to the nearest face.
+				float dist_min_x = listener_global.x - min_x;
+				float dist_max_x = max_x - listener_global.x;
+				float dist_min_y = listener_global.y - min_y;
+				float dist_max_y = max_y - listener_global.y;
+				float dist_min_z = listener_global.z - min_z;
+				float dist_max_z = max_z - listener_global.z;
+
+				float nearest = dist_min_x;
+				effective_global_pos.x = min_x;
+				if (dist_max_x < nearest) { nearest = dist_max_x; effective_global_pos = listener_global; effective_global_pos.x = max_x; }
+				if (dist_min_y < nearest) { nearest = dist_min_y; effective_global_pos = listener_global; effective_global_pos.y = min_y; }
+				if (dist_max_y < nearest) { nearest = dist_max_y; effective_global_pos = listener_global; effective_global_pos.y = max_y; }
+				if (dist_min_z < nearest) { nearest = dist_min_z; effective_global_pos = listener_global; effective_global_pos.z = min_z; }
+				if (dist_max_z < nearest) {              effective_global_pos = listener_global; effective_global_pos.z = max_z; }
+			}
 		}
 
 		Vector3 local_pos = listener_node->get_global_transform().orthonormalized().affine_inverse().xform(effective_global_pos);
