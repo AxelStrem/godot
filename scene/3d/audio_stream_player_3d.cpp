@@ -453,7 +453,26 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 			listener_node = listener;
 		}
 
-		Vector3 local_pos = listener_node->get_global_transform().orthonormalized().affine_inverse().xform(global_pos);
+		Vector3 effective_global_pos = global_pos;
+		if (area_source_mode == AREA_SOURCE_LINE) {
+			// Closest point on a line segment to the listener.
+			Vector3 listener_global = listener_node->get_global_transform().origin;
+			Vector3 ab = area_source_line_end - area_source_line_start;
+			float ab_len_sq = ab.length_squared();
+			if (ab_len_sq > 0.0f) {
+				float t = (listener_global - area_source_line_start).dot(ab) / ab_len_sq;
+				t = CLAMP(t, 0.0f, 1.0f);
+				effective_global_pos = area_source_line_start + t * ab;
+			}
+		} else if (area_source_mode == AREA_SOURCE_BOX) {
+			// Closest point inside a box to the listener.
+			Vector3 listener_global = listener_node->get_global_transform().origin;
+			effective_global_pos.x = CLAMP(listener_global.x, area_source_box_min.x, area_source_box_max.x);
+			effective_global_pos.y = CLAMP(listener_global.y, area_source_box_min.y, area_source_box_max.y);
+			effective_global_pos.z = CLAMP(listener_global.z, area_source_box_min.z, area_source_box_max.z);
+		}
+
+		Vector3 local_pos = listener_node->get_global_transform().orthonormalized().affine_inverse().xform(effective_global_pos);
 
 		float dist = local_pos.length();
 
@@ -488,8 +507,8 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 
 		float db_att = (1.0 - MIN(1.0, multiplier)) * attenuation_filter_db;
 
-		if (emission_angle_enabled) {
-			Vector3 listenertopos = global_pos - listener_node->get_global_transform().origin;
+		if (emission_angle_enabled && area_source_mode == AREA_SOURCE_DISABLED) {
+			Vector3 listenertopos = effective_global_pos - listener_node->get_global_transform().origin;
 			float c = listenertopos.normalized().dot(get_global_transform().basis.get_column(2).normalized()); //it's z negative
 			float angle = Math::rad_to_deg(Math::acos(c));
 			if (angle > emission_angle) {
@@ -576,7 +595,7 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 		}
 #endif
 
-		if (doppler_tracking != DOPPLER_TRACKING_DISABLED) {
+		if (doppler_tracking != DOPPLER_TRACKING_DISABLED && area_source_mode == AREA_SOURCE_DISABLED) {
 			Vector3 listener_velocity;
 
 			if (listener) {
@@ -934,6 +953,47 @@ float AudioStreamPlayer3D::get_panning_strength() const {
 	return panning_strength;
 }
 
+void AudioStreamPlayer3D::set_area_source_mode(AreaSourceMode p_mode) {
+	area_source_mode = p_mode;
+	force_update_panning = true;
+}
+
+AudioStreamPlayer3D::AreaSourceMode AudioStreamPlayer3D::get_area_source_mode() const {
+	return area_source_mode;
+}
+
+void AudioStreamPlayer3D::set_area_source_line_start(const Vector3 &p_start) {
+	area_source_line_start = p_start;
+}
+
+Vector3 AudioStreamPlayer3D::get_area_source_line_start() const {
+	return area_source_line_start;
+}
+
+void AudioStreamPlayer3D::set_area_source_line_end(const Vector3 &p_end) {
+	area_source_line_end = p_end;
+}
+
+Vector3 AudioStreamPlayer3D::get_area_source_line_end() const {
+	return area_source_line_end;
+}
+
+void AudioStreamPlayer3D::set_area_source_box_min(const Vector3 &p_min) {
+	area_source_box_min = p_min;
+}
+
+Vector3 AudioStreamPlayer3D::get_area_source_box_min() const {
+	return area_source_box_min;
+}
+
+void AudioStreamPlayer3D::set_area_source_box_max(const Vector3 &p_max) {
+	area_source_box_max = p_max;
+}
+
+Vector3 AudioStreamPlayer3D::get_area_source_box_max() const {
+	return area_source_box_max;
+}
+
 AudioServer::PlaybackType AudioStreamPlayer3D::get_playback_type() const {
 	return internal->get_playback_type();
 }
@@ -1024,6 +1084,21 @@ void AudioStreamPlayer3D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_panning_strength", "panning_strength"), &AudioStreamPlayer3D::set_panning_strength);
 	ClassDB::bind_method(D_METHOD("get_panning_strength"), &AudioStreamPlayer3D::get_panning_strength);
 
+	ClassDB::bind_method(D_METHOD("set_area_source_mode", "mode"), &AudioStreamPlayer3D::set_area_source_mode);
+	ClassDB::bind_method(D_METHOD("get_area_source_mode"), &AudioStreamPlayer3D::get_area_source_mode);
+
+	ClassDB::bind_method(D_METHOD("set_area_source_line_start", "start"), &AudioStreamPlayer3D::set_area_source_line_start);
+	ClassDB::bind_method(D_METHOD("get_area_source_line_start"), &AudioStreamPlayer3D::get_area_source_line_start);
+
+	ClassDB::bind_method(D_METHOD("set_area_source_line_end", "end"), &AudioStreamPlayer3D::set_area_source_line_end);
+	ClassDB::bind_method(D_METHOD("get_area_source_line_end"), &AudioStreamPlayer3D::get_area_source_line_end);
+
+	ClassDB::bind_method(D_METHOD("set_area_source_box_min", "min"), &AudioStreamPlayer3D::set_area_source_box_min);
+	ClassDB::bind_method(D_METHOD("get_area_source_box_min"), &AudioStreamPlayer3D::get_area_source_box_min);
+
+	ClassDB::bind_method(D_METHOD("set_area_source_box_max", "max"), &AudioStreamPlayer3D::set_area_source_box_max);
+	ClassDB::bind_method(D_METHOD("get_area_source_box_max"), &AudioStreamPlayer3D::get_area_source_box_max);
+
 	ClassDB::bind_method(D_METHOD("has_stream_playback"), &AudioStreamPlayer3D::has_stream_playback);
 	ClassDB::bind_method(D_METHOD("get_stream_playback"), &AudioStreamPlayer3D::get_stream_playback);
 
@@ -1043,6 +1118,12 @@ void AudioStreamPlayer3D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "max_distance", PROPERTY_HINT_RANGE, "0,4096,0.01,or_greater,suffix:m"), "set_max_distance", "get_max_distance");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "max_polyphony", PROPERTY_HINT_NONE, ""), "set_max_polyphony", "get_max_polyphony");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "panning_strength", PROPERTY_HINT_RANGE, "0,3,0.01,or_greater"), "set_panning_strength", "get_panning_strength");
+	ADD_GROUP("Area Source", "area_source_");
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "area_source_mode", PROPERTY_HINT_ENUM, "Disabled,Line,Box"), "set_area_source_mode", "get_area_source_mode");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "area_source_line_start", PROPERTY_HINT_NONE, "suffix:m"), "set_area_source_line_start", "get_area_source_line_start");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "area_source_line_end", PROPERTY_HINT_NONE, "suffix:m"), "set_area_source_line_end", "get_area_source_line_end");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "area_source_box_min", PROPERTY_HINT_NONE, "suffix:m"), "set_area_source_box_min", "get_area_source_box_min");
+	ADD_PROPERTY(PropertyInfo(Variant::VECTOR3, "area_source_box_max", PROPERTY_HINT_NONE, "suffix:m"), "set_area_source_box_max", "get_area_source_box_max");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING_NAME, "bus", PROPERTY_HINT_ENUM, ""), "set_bus", "get_bus");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "area_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_area_mask", "get_area_mask");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "playback_type", PROPERTY_HINT_ENUM, "Default,Stream,Sample"), "set_playback_type", "get_playback_type");
@@ -1064,6 +1145,10 @@ void AudioStreamPlayer3D::_bind_methods() {
 	BIND_ENUM_CONSTANT(DOPPLER_TRACKING_DISABLED);
 	BIND_ENUM_CONSTANT(DOPPLER_TRACKING_IDLE_STEP);
 	BIND_ENUM_CONSTANT(DOPPLER_TRACKING_PHYSICS_STEP);
+
+	BIND_ENUM_CONSTANT(AREA_SOURCE_DISABLED);
+	BIND_ENUM_CONSTANT(AREA_SOURCE_LINE);
+	BIND_ENUM_CONSTANT(AREA_SOURCE_BOX);
 
 	ADD_SIGNAL(MethodInfo("finished"));
 }

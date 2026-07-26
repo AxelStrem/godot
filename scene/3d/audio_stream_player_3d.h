@@ -60,6 +60,12 @@ public:
 		DOPPLER_TRACKING_PHYSICS_STEP
 	};
 
+	enum AreaSourceMode {
+		AREA_SOURCE_DISABLED,
+		AREA_SOURCE_LINE,
+		AREA_SOURCE_BOX,
+	};
+
 private:
 	enum {
 		MAX_OUTPUTS = 8,
@@ -119,6 +125,12 @@ private:
 	float emission_angle_filter_attenuation_db = -12.0;
 	float attenuation_filter_cutoff_hz = 5000.0;
 	float attenuation_filter_db = -24.0;
+
+	AreaSourceMode area_source_mode = AREA_SOURCE_DISABLED;
+	Vector3 area_source_line_start = Vector3();
+	Vector3 area_source_line_end = Vector3();
+	Vector3 area_source_box_min = Vector3();
+	Vector3 area_source_box_max = Vector3();
 
 	float linear_attenuation = 0;
 
@@ -219,6 +231,21 @@ public:
 	void set_panning_strength(float p_panning_strength);
 	float get_panning_strength() const;
 
+	void set_area_source_mode(AreaSourceMode p_mode);
+	AreaSourceMode get_area_source_mode() const;
+
+	void set_area_source_line_start(const Vector3 &p_start);
+	Vector3 get_area_source_line_start() const;
+
+	void set_area_source_line_end(const Vector3 &p_end);
+	Vector3 get_area_source_line_end() const;
+
+	void set_area_source_box_min(const Vector3 &p_min);
+	Vector3 get_area_source_box_min() const;
+
+	void set_area_source_box_max(const Vector3 &p_max);
+	Vector3 get_area_source_box_max() const;
+
 	bool has_stream_playback();
 	Ref<AudioStreamPlayback> get_stream_playback();
 
@@ -231,3 +258,4 @@ public:
 
 VARIANT_ENUM_CAST(AudioStreamPlayer3D::AttenuationModel)
 VARIANT_ENUM_CAST(AudioStreamPlayer3D::DopplerTracking)
+VARIANT_ENUM_CAST(AudioStreamPlayer3D::AreaSourceMode)
