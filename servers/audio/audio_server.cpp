@@ -467,9 +467,8 @@ void AudioServer::_mix_step() {
 		// The delay value is interpolated across the buffer to avoid clicks when
 		// the ITD changes between mix steps.
 		{
-			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
 			float itd = playback->itd_samples.get();
-			bool is_active = (itd >= 0.5f || itd <= -0.5f) && (mask & 1);
+			bool is_active = (itd >= 0.5f || itd <= -0.5f);
 			float itd_start = playback->itd_last_value;
 			float itd_step = (itd - itd_start) / (float)buffer_size;
 
@@ -561,7 +560,6 @@ void AudioServer::_mix_step() {
 		}
 
 		if (!all_volumes_zero) {
-			int mask = AudioServer::get_singleton()->hrtf_debug_mask;
 		// Apply head shadow lowpass to simulate frequency-dependent
 		// attenuation from the head. The contralateral (far) ear gets a
 		// lowpass whose cutoff drops with source angle; the ipsilateral
@@ -592,10 +590,8 @@ void AudioServer::_mix_step() {
 			smooth_l += cutoff_smooth_alpha * (target_l - smooth_l);
 			smooth_r += cutoff_smooth_alpha * (target_r - smooth_r);
 
-			bool is_active = (mask & 2);
-
 			// Left ear LP
-			if (is_active) {
+			{
 				AudioFilterSW filter;
 				filter.set_mode(AudioFilterSW::LOWPASS);
 				filter.set_sampling_rate(mix_rate);
@@ -613,7 +609,7 @@ void AudioServer::_mix_step() {
 			}
 
 			// Right ear LP
-			if (is_active) {
+			{
 				AudioFilterSW filter;
 				filter.set_mode(AudioFilterSW::LOWPASS);
 				filter.set_sampling_rate(mix_rate);
@@ -635,8 +631,6 @@ void AudioServer::_mix_step() {
 		// Two narrow notches per ear whose center frequencies shift with
 		// source elevation, creating the spectral cues for vertical
 		// localization. 0 Hz disables a notch (clamped to nyquist).
-		// Always runs when mask includes bit 4 — toggling the filter
-		// on/off causes audible artifacts, same as head shadow.
 		{
 			static constexpr float notch_resonance = 4.0f;
 			float mix_rate = AudioServer::get_singleton()->get_mix_rate();
@@ -647,105 +641,95 @@ void AudioServer::_mix_step() {
 			float n2l_freq = playback->pinna_notch2_freq_l.get();
 			float n2r_freq = playback->pinna_notch2_freq_r.get();
 
-			bool pinna_masked = !(mask & 4);
-
 			// Left ear — notch 1
 			{
-				if (!pinna_masked) {
-					float freq = n1l_freq;
-					if (freq <= 0.0f || freq >= nyquist_limit) {
-						freq = nyquist_limit;
-					}
+				float freq = n1l_freq;
+				if (freq <= 0.0f || freq >= nyquist_limit) {
+					freq = nyquist_limit;
+				}
 
-					AudioFilterSW filter;
-					filter.set_mode(AudioFilterSW::NOTCH);
-					filter.set_sampling_rate(mix_rate);
-					filter.set_cutoff(freq);
-					filter.set_resonance(notch_resonance);
-					filter.set_stages(1);
-					filter.set_gain(0);
+				AudioFilterSW filter;
+				filter.set_mode(AudioFilterSW::NOTCH);
+				filter.set_sampling_rate(mix_rate);
+				filter.set_cutoff(freq);
+				filter.set_resonance(notch_resonance);
+				filter.set_stages(1);
+				filter.set_gain(0);
 
-					playback->pinna_notch1_l.set_filter(&filter, false);
-					playback->pinna_notch1_l.update_coeffs(buffer_size);
+				playback->pinna_notch1_l.set_filter(&filter, false);
+				playback->pinna_notch1_l.update_coeffs(buffer_size);
 
-					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->pinna_notch1_l.process_one_interp(buf[i].left);
-					}
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->pinna_notch1_l.process_one_interp(buf[i].left);
 				}
 			}
 
 			// Left ear — notch 2
 			{
-				if (!pinna_masked) {
-					float freq = n2l_freq;
-					if (freq <= 0.0f || freq >= nyquist_limit) {
-						freq = nyquist_limit;
-					}
+				float freq = n2l_freq;
+				if (freq <= 0.0f || freq >= nyquist_limit) {
+					freq = nyquist_limit;
+				}
 
-					AudioFilterSW filter;
-					filter.set_mode(AudioFilterSW::NOTCH);
-					filter.set_sampling_rate(mix_rate);
-					filter.set_cutoff(freq);
-					filter.set_resonance(notch_resonance);
-					filter.set_stages(1);
-					filter.set_gain(0);
+				AudioFilterSW filter;
+				filter.set_mode(AudioFilterSW::NOTCH);
+				filter.set_sampling_rate(mix_rate);
+				filter.set_cutoff(freq);
+				filter.set_resonance(notch_resonance);
+				filter.set_stages(1);
+				filter.set_gain(0);
 
-					playback->pinna_notch2_l.set_filter(&filter, false);
-					playback->pinna_notch2_l.update_coeffs(buffer_size);
+				playback->pinna_notch2_l.set_filter(&filter, false);
+				playback->pinna_notch2_l.update_coeffs(buffer_size);
 
-					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->pinna_notch2_l.process_one_interp(buf[i].left);
-					}
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->pinna_notch2_l.process_one_interp(buf[i].left);
 				}
 			}
 
 			// Right ear — notch 1
 			{
-				if (!pinna_masked) {
-					float freq = n1r_freq;
-					if (freq <= 0.0f || freq >= nyquist_limit) {
-						freq = nyquist_limit;
-					}
+				float freq = n1r_freq;
+				if (freq <= 0.0f || freq >= nyquist_limit) {
+					freq = nyquist_limit;
+				}
 
-					AudioFilterSW filter;
-					filter.set_mode(AudioFilterSW::NOTCH);
-					filter.set_sampling_rate(mix_rate);
-					filter.set_cutoff(freq);
-					filter.set_resonance(notch_resonance);
-					filter.set_stages(1);
-					filter.set_gain(0);
+				AudioFilterSW filter;
+				filter.set_mode(AudioFilterSW::NOTCH);
+				filter.set_sampling_rate(mix_rate);
+				filter.set_cutoff(freq);
+				filter.set_resonance(notch_resonance);
+				filter.set_stages(1);
+				filter.set_gain(0);
 
-					playback->pinna_notch1_r.set_filter(&filter, false);
-					playback->pinna_notch1_r.update_coeffs(buffer_size);
+				playback->pinna_notch1_r.set_filter(&filter, false);
+				playback->pinna_notch1_r.update_coeffs(buffer_size);
 
-					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->pinna_notch1_r.process_one_interp(buf[i].right);
-					}
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->pinna_notch1_r.process_one_interp(buf[i].right);
 				}
 			}
 
 			// Right ear — notch 2
 			{
-				if (!pinna_masked) {
-					float freq = n2r_freq;
-					if (freq <= 0.0f || freq >= nyquist_limit) {
-						freq = nyquist_limit;
-					}
+				float freq = n2r_freq;
+				if (freq <= 0.0f || freq >= nyquist_limit) {
+					freq = nyquist_limit;
+				}
 
-					AudioFilterSW filter;
-					filter.set_mode(AudioFilterSW::NOTCH);
-					filter.set_sampling_rate(mix_rate);
-					filter.set_cutoff(freq);
-					filter.set_resonance(notch_resonance);
-					filter.set_stages(1);
-					filter.set_gain(0);
+				AudioFilterSW filter;
+				filter.set_mode(AudioFilterSW::NOTCH);
+				filter.set_sampling_rate(mix_rate);
+				filter.set_cutoff(freq);
+				filter.set_resonance(notch_resonance);
+				filter.set_stages(1);
+				filter.set_gain(0);
 
-					playback->pinna_notch2_r.set_filter(&filter, false);
-					playback->pinna_notch2_r.update_coeffs(buffer_size);
+				playback->pinna_notch2_r.set_filter(&filter, false);
+				playback->pinna_notch2_r.update_coeffs(buffer_size);
 
-					for (unsigned int i = 0; i < buffer_size; i++) {
-						playback->pinna_notch2_r.process_one_interp(buf[i].right);
-					}
+				for (unsigned int i = 0; i < buffer_size; i++) {
+					playback->pinna_notch2_r.process_one_interp(buf[i].right);
 				}
 			}
 		}
@@ -1778,14 +1762,6 @@ void AudioServer::set_playback_pinna_notch_params(Ref<AudioStreamPlayback> p_pla
 	playback_node->pinna_notch2_freq_r.set(p_notch2_r);
 }
 
-void AudioServer::set_hrtf_debug_mask(int p_mask) {
-	hrtf_debug_mask = p_mask;
-}
-
-int AudioServer::get_hrtf_debug_mask() const {
-	return hrtf_debug_mask;
-}
-
 bool AudioServer::is_playback_active(Ref<AudioStreamPlayback> p_playback) {
 	ERR_FAIL_COND_V(p_playback.is_null(), false);
 
@@ -2425,9 +2401,6 @@ void AudioServer::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_playback_speed_scale", "scale"), &AudioServer::set_playback_speed_scale);
 	ClassDB::bind_method(D_METHOD("get_playback_speed_scale"), &AudioServer::get_playback_speed_scale);
-
-	ClassDB::bind_method(D_METHOD("set_hrtf_debug_mask", "mask"), &AudioServer::set_hrtf_debug_mask);
-	ClassDB::bind_method(D_METHOD("get_hrtf_debug_mask"), &AudioServer::get_hrtf_debug_mask);
 
 	ClassDB::bind_method(D_METHOD("lock"), &AudioServer::lock);
 	ClassDB::bind_method(D_METHOD("unlock"), &AudioServer::unlock);
