@@ -63,6 +63,18 @@ public:
 		float hb2 = 0.0f;
 		Coeffs incr_coeffs;
 
+		// Cached filter parameters. When these match the filter's current
+		// parameters, prepare_coefficients() can be skipped because the
+		// coefficients haven't changed. coeffs_valid is false when history
+		// was cleared and the cache must be forced to recompute.
+		Mode cached_mode = Mode(-1);
+		float cached_cutoff = -1.0f;
+		float cached_resonance = -1.0f;
+		float cached_gain = -1.0f;
+		float cached_sampling_rate = -1.0f;
+		int cached_stages = -1;
+		bool coeffs_valid = false;
+
 	public:
 		void set_filter(AudioFilterSW *p_filter, bool p_clear_history = true);
 		void process(float *p_samples, int p_amount, int p_stride = 1, bool p_interpolate = false);
