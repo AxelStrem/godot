@@ -220,12 +220,37 @@ AudioFilterSW::Processor::Processor() {
 void AudioFilterSW::Processor::set_filter(AudioFilterSW *p_filter, bool p_clear_history) {
 	if (p_clear_history) {
 		ha1 = ha2 = hb1 = hb2 = 0;
+		coeffs_valid = false; // Force coefficient recompute after history clear.
 	}
 	filter = p_filter;
 }
 
 void AudioFilterSW::Processor::update_coeffs(int p_interp_buffer_len) {
 	if (!filter) {
+		return;
+	}
+
+	// Check whether filter parameters have changed since the last
+	// coefficient computation. prepare_coefficients() involves
+	// double-precision trigonometric calls (Math::sin/Math::cos)
+	// that are expensive when called every frame for many sources.
+	bool params_changed = !coeffs_valid ||
+			cached_mode != filter->mode ||
+			cached_cutoff != filter->cutoff ||
+			cached_resonance != filter->resonance ||
+			cached_gain != filter->gain ||
+			cached_sampling_rate != filter->sampling_rate ||
+			cached_stages != filter->stages;
+
+	if (!params_changed) {
+		// Parameters unchanged — coefficients are already at target.
+		// Zero out interpolation deltas (they were fully consumed
+		// last frame) and skip the expensive prepare_coefficients().
+		incr_coeffs.a1 = 0.0;
+		incr_coeffs.a2 = 0.0;
+		incr_coeffs.b0 = 0.0;
+		incr_coeffs.b1 = 0.0;
+		incr_coeffs.b2 = 0.0;
 		return;
 	}
 
@@ -241,6 +266,16 @@ void AudioFilterSW::Processor::update_coeffs(int p_interp_buffer_len) {
 	} else {
 		filter->prepare_coefficients(&coeffs);
 	}
+
+	// Cache the parameters that produced these coefficients so we can
+	// skip prepare_coefficients() on the next call if nothing changed.
+	cached_mode = filter->mode;
+	cached_cutoff = filter->cutoff;
+	cached_resonance = filter->resonance;
+	cached_gain = filter->gain;
+	cached_sampling_rate = filter->sampling_rate;
+	cached_stages = filter->stages;
+	coeffs_valid = true;
 }
 
 void AudioFilterSW::Processor::process(float *p_samples, int p_amount, int p_stride, bool p_interpolate) {
