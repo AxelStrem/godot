@@ -4461,16 +4461,6 @@ void SceneTreeDock::open_shader_dialog(const Ref<ShaderMaterial> &p_for_material
 	open_shader_dialog(resource, p_preferred_mode);
 }
 
-void SceneTreeDock::open_add_child_dialog() {
-	create_dialog->set_base_type("CanvasItem");
-	_tool_selected(TOOL_NEW, true);
-	reset_create_dialog = true;
-}
-
-void SceneTreeDock::open_instance_child_dialog() {
-	_tool_selected(TOOL_INSTANTIATE, true);
-}
-
 List<Node *> SceneTreeDock::paste_nodes(bool p_paste_as_sibling) {
 	List<Node *> pasted_nodes;
 

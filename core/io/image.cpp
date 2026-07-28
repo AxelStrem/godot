@@ -3633,12 +3633,12 @@ Color Image::_get_color_at_ofs(const uint8_t *p_ptr, uint32_t p_ofs) const {
 			return Color(l, l, l, a);
 		}
 		case FORMAT_L16: {
-			float l = ((uint16_t *)ptr)[ofs] / 65535.0f;
+			float l = ((uint16_t *)p_ptr)[p_ofs] / 65535.0f;
 			return Color(l, l, l, 1.0f);
 		}
 		case FORMAT_LA16: {
-			float l = ((uint16_t *)ptr)[ofs * 2 + 0] / 65535.0f;
-			float a = ((uint16_t *)ptr)[ofs * 2 + 1] / 65535.0f;
+			float l = ((uint16_t *)p_ptr)[p_ofs * 2 + 0] / 65535.0f;
+			float a = ((uint16_t *)p_ptr)[p_ofs * 2 + 1] / 65535.0f;
 			return Color(l, l, l, a);
 		}
 		case FORMAT_R8: {
@@ -3714,12 +3714,12 @@ Color Image::_get_color_at_ofs(const uint8_t *p_ptr, uint32_t p_ofs) const {
 			return Color(Math::half_to_float(r), Math::half_to_float(g), Math::half_to_float(b), Math::half_to_float(a));
 		}
 		case FORMAT_LH: {
-			float l = Math::half_to_float(((uint16_t *)ptr)[ofs]);
+			float l = Math::half_to_float(((uint16_t *)p_ptr)[p_ofs]);
 			return Color(l, l, l, 1.0f);
 		}
 		case FORMAT_LAH: {
-			float l = Math::half_to_float(((uint16_t *)ptr)[ofs * 2 + 0]);
-			float a = Math::half_to_float(((uint16_t *)ptr)[ofs * 2 + 1]);
+			float l = Math::half_to_float(((uint16_t *)p_ptr)[p_ofs * 2 + 0]);
+			float a = Math::half_to_float(((uint16_t *)p_ptr)[p_ofs * 2 + 1]);
 			return Color(l, l, l, a);
 		}
 		case FORMAT_RGBE9995: {
@@ -3770,7 +3770,7 @@ Color Image::_get_color_at_ofs(const uint8_t *p_ptr, uint32_t p_ofs) const {
 			return Color(r, g, b, a);
 		}
 		case FORMAT_LF: {
-			float l = ((float *)ptr)[ofs];
+			float l = ((float *)p_ptr)[p_ofs];
 			return Color(l, l, l, 1.0f);
 		}
 
@@ -3790,11 +3790,11 @@ void Image::_set_color_at_ofs(uint8_t *r_ptr, uint32_t p_ofs, const Color &p_col
 			r_ptr[p_ofs * 2 + 1] = uint8_t(CLAMP(p_color.a * 255.0, 0, 255));
 		} break;
 		case FORMAT_L16: {
-			((uint16_t *)ptr)[ofs] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
+			r_ptr[p_ofs] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
 		} break;
 		case FORMAT_LA16: {
-			((uint16_t *)ptr)[ofs * 2 + 0] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
-			((uint16_t *)ptr)[ofs * 2 + 1] = uint16_t(CLAMP(p_color.a * 65535.0, 0, 65535));
+			r_ptr[p_ofs * 2 + 0] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
+			r_ptr[p_ofs * 2 + 1] = uint16_t(CLAMP(p_color.a * 65535.0, 0, 65535));
 		} break;
 		case FORMAT_R8: {
 			r_ptr[p_ofs] = uint8_t(CLAMP(p_color.r * 255.0, 0, 255));
@@ -3857,11 +3857,11 @@ void Image::_set_color_at_ofs(uint8_t *r_ptr, uint32_t p_ofs, const Color &p_col
 			((uint16_t *)r_ptr)[p_ofs * 4 + 3] = Math::make_half_float(p_color.a);
 		} break;
 		case FORMAT_LH: {
-			((uint16_t *)ptr)[ofs] = Math::make_half_float(p_color.get_v());
+			((uint16_t *)r_ptr)[p_ofs] = Math::make_half_float(p_color.get_v());
 		} break;
 		case FORMAT_LAH: {
-			((uint16_t *)ptr)[ofs * 2 + 0] = Math::make_half_float(p_color.get_v());
-			((uint16_t *)ptr)[ofs * 2 + 1] = Math::make_half_float(p_color.a);
+			((uint16_t *)r_ptr)[p_ofs * 2 + 0] = Math::make_half_float(p_color.get_v());
+			((uint16_t *)r_ptr)[p_ofs * 2 + 1] = Math::make_half_float(p_color.a);
 		} break;
 		case FORMAT_RGBE9995: {
 			((uint32_t *)r_ptr)[p_ofs] = p_color.to_rgbe9995();
@@ -3903,7 +3903,7 @@ void Image::_set_color_at_ofs(uint8_t *r_ptr, uint32_t p_ofs, const Color &p_col
 			((uint16_t *)r_ptr)[p_ofs * 4 + 3] = uint16_t(CLAMP(p_color.a, 0, 65535));
 		} break;
 		case FORMAT_LF: {
-			((float *)ptr)[ofs] = p_color.get_v();
+			((float *)r_ptr)[p_ofs] = p_color.get_v();
 		} break;
 
 		default: {
@@ -4333,54 +4333,6 @@ Ref<Image> Image::get_image_from_mipmap(int p_mipmap) const {
 
 	image->mipmaps = false;
 	return image;
-}
-
-void Image::bump_map_to_normal_map(float p_bump_scale) {
-	ERR_FAIL_COND(is_compressed());
-	clear_mipmaps();
-	convert(Image::FORMAT_RF);
-
-	Vector<uint8_t> result_image; //rgba output
-	result_image.resize(width * height * 4);
-
-	{
-		const uint8_t *rp = data.ptr();
-		uint8_t *wp = result_image.ptrw();
-
-		ERR_FAIL_NULL(rp);
-
-		unsigned char *write_ptr = wp;
-		float *read_ptr = (float *)rp;
-
-		for (int ty = 0; ty < height; ty++) {
-			int py = ty + 1;
-			if (py >= height) {
-				py -= height;
-			}
-
-			for (int tx = 0; tx < width; tx++) {
-				int px = tx + 1;
-				if (px >= width) {
-					px -= width;
-				}
-				float here = read_ptr[ty * width + tx];
-				float to_right = read_ptr[ty * width + px];
-				float above = read_ptr[py * width + tx];
-				Vector3 up = Vector3(0, 1, (here - above) * p_bump_scale);
-				Vector3 across = Vector3(1, 0, (to_right - here) * p_bump_scale);
-
-				Vector3 normal = across.cross(up);
-				normal.normalize();
-
-				write_ptr[((ty * width + tx) << 2) + 0] = (127.5 + normal.x * 127.5);
-				write_ptr[((ty * width + tx) << 2) + 1] = (127.5 + normal.y * 127.5);
-				write_ptr[((ty * width + tx) << 2) + 2] = (127.5 + normal.z * 127.5);
-				write_ptr[((ty * width + tx) << 2) + 3] = 255;
-			}
-		}
-	}
-	format = FORMAT_RGBA8;
-	data = result_image;
 }
 
 bool Image::detect_signed(bool p_include_mips) const {

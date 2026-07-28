@@ -574,7 +574,7 @@ Vector<AudioFrame> AudioStreamPlayer3D::_update_panning() {
 
 		// Compute ITD from horizontal source angle (Woodworth's formula for a spherical head).
 		// Only meaningful in stereo mode; surround speaker layouts rely on individual speaker placement.
-		if (AudioServer::get_singleton()->get_speaker_mode() == AudioServer::SPEAKER_MODE_STEREO) {
+		if (AudioServer::get_singleton()->get_speaker_mode() == AuSE::SPEAKER_MODE_STEREO) {
 			float azimuth = Math::atan2(local_pos.x, -local_pos.z);
 			float abs_azimuth = Math::abs(azimuth);
 			static constexpr float head_radius = 0.0875f; // Average human head radius in meters.

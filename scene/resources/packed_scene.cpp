@@ -132,6 +132,8 @@ static Variant _get_storable_property_base_value(Node *p_node, const StringName 
 #endif
 
 	return value;
+}
+
 Variant SceneState::_duplicate_recursive(const Variant &p_variant, HashMap<Node *, HashMap<Ref<Resource>, Ref<Resource>>> &p_remap_cache, const Variant &p_fallback, Node *p_for_scene) {
 	switch (p_variant.get_type()) {
 		case Variant::OBJECT: {

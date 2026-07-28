@@ -76,15 +76,6 @@ class GDScript : public Script {
 		PropertyInfo property_info; // Placeholder info; resolved at runtime from target.
 	};
 
-	struct ClearData {
-		RBSet<GDScriptFunction *> functions;
-		RBSet<Ref<Script>> scripts;
-		void clear() {
-			functions.clear();
-			scripts.clear();
-		}
-	};
-
 	friend class GDScriptInstance;
 	friend class GDScriptFunction;
 	friend class GDScriptAnalyzer;

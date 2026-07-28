@@ -4555,7 +4555,7 @@ bool GDScriptParser::onready_annotation(AnnotationNode *p_annotation, Node *p_ta
 bool GDScriptParser::tweakable_annotation(AnnotationNode *p_annotation, Node *p_target, ClassNode *p_class) {
 	ERR_FAIL_COND_V_MSG(p_target->type != Node::VARIABLE, false, R"("@tweakable" annotation can only be applied to class variables.)");
 
-	if (current_class && !ClassDB::is_parent_class(current_class->get_datatype().native_type, SNAME("Node"))) {
+	if (current_class && !ClassDB::is_parent_class(current_class->self_type.native_type, SNAME("Node"))) {
 		push_error(R"("@tweakable" can only be used in classes that inherit "Node".)", p_annotation);
 		return false;
 	}

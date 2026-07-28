@@ -291,11 +291,11 @@ void AudioServer::_mix_step() {
 		// Check if this playback is completely silent on all buses.
 		// If so, skip head shadow, pinna notches, and bus mixing entirely.
 		bool all_volumes_zero = true;
-		for (int chk = 0; chk < MAX_BUSES_PER_PLAYBACK; chk++) {
+		for (int chk = 0; chk < AudioServerConstants::MAX_BUSES_PER_PLAYBACK; chk++) {
 			if (!bus_details.bus_active[chk]) {
 				continue;
 			}
-			for (int ch = 0; ch < MAX_CHANNELS_PER_BUS; ch++) {
+			for (int ch = 0; ch < AudioServerConstants::MAX_CHANNELS_PER_BUS; ch++) {
 				if (bus_details.volume[chk][ch].left != 0.0f || bus_details.volume[chk][ch].right != 0.0f) {
 					all_volumes_zero = false;
 					break;
@@ -307,11 +307,11 @@ void AudioServer::_mix_step() {
 		}
 		// Also check prev volumes — if any were non-zero, we need to fade out.
 		if (all_volumes_zero) {
-			for (int chk = 0; chk < MAX_BUSES_PER_PLAYBACK; chk++) {
+			for (int chk = 0; chk < AudioServerConstants::MAX_BUSES_PER_PLAYBACK; chk++) {
 				if (!playback->prev_bus_details->bus_active[chk]) {
 					continue;
 				}
-				for (int ch = 0; ch < MAX_CHANNELS_PER_BUS; ch++) {
+				for (int ch = 0; ch < AudioServerConstants::MAX_CHANNELS_PER_BUS; ch++) {
 					if (playback->prev_bus_details->volume[chk][ch].left != 0.0f || playback->prev_bus_details->volume[chk][ch].right != 0.0f) {
 						all_volumes_zero = false;
 						break;
