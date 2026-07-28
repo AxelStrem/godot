@@ -156,7 +156,7 @@ struct ObjectGDExtension {
  * much alone defines the object model.
  */
 
-/// `GDSOFTCLASS` provides `Object` functionality, such as being able to use `Object::cast_to()`.
+/// Provides `Object` functionality, such as being able to use `Object::cast_to()`.
 /// Use this for `Object` subclasses that are not registered in `ClassDB` (use `GDCLASS` otherwise).
 #define GDSOFTCLASS(m_class, m_inherits) \
 public: \
@@ -243,8 +243,8 @@ protected: \
 \
 private:
 
-/// `GDSOFTCLASS` provides `Object` functionality, such as being able to use `Object::cast_to()`.
-/// Use this for `Object` subclasses that are registered in `ObjectDB` (use `GDSOFTCLASS` otherwise).
+/// Provides `Object` functionality, such as being able to use `Object::cast_to()`, and `ClassDB` integration.
+/// Use this for `Object` subclasses that are registered in `ClassDB` (use `GDSOFTCLASS` otherwise).
 #define GDCLASS(m_class, m_inherits) \
 	GDSOFTCLASS(m_class, m_inherits) \
 private: \
@@ -347,6 +347,12 @@ class ClassDB;
 class ScriptInstance;
 class ObjectTweaker;
 
+/**
+ * Base class for all OBJECT Variant types.
+ *
+ * For documentation, see:
+ * https://docs.godotengine.org/en/latest/engine_details/architecture/object_class.html
+ */
 class Object {
 public:
 	typedef Object self_type;
@@ -1033,12 +1039,12 @@ public:
 	}
 
 	template <typename U = T, std::enable_if_t<std::is_base_of_v<RefCounted, U>, int> = 0>
-	_FORCE_INLINE_ element_type *ptr() const {
+	_FORCE_INLINE_ T *ptr() const {
 		return *_value;
 	}
 
 	template <typename U = T, std::enable_if_t<!std::is_base_of_v<RefCounted, U>, int> = 0>
-	_FORCE_INLINE_ element_type *ptr() const {
+	_FORCE_INLINE_ T *ptr() const {
 		return _value;
 	}
 
@@ -1051,11 +1057,11 @@ public:
 		return Ref<T_Other>(_value);
 	}
 
-	_FORCE_INLINE_ element_type *operator*() const {
+	_FORCE_INLINE_ T *operator*() const {
 		return ptr();
 	}
 
-	_FORCE_INLINE_ element_type *operator->() const {
+	_FORCE_INLINE_ T *operator->() const {
 		return ptr();
 	}
 };

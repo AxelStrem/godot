@@ -238,7 +238,7 @@ layout(std140) uniform SceneDataBlock { // ubo:2
 scene_data_block;
 
 #ifdef RENDER_MOTION_VECTORS
-layout(std140) uniform PrevSceneDataBlock { // ubo:12
+layout(std140) uniform PrevSceneDataBlock { // ubo:13
 	SceneData data;
 }
 prev_scene_data_block;
@@ -482,13 +482,13 @@ struct MultiviewData {
 	highp vec4 eye_offset[MAX_VIEWS];
 };
 
-layout(std140) uniform MultiviewDataBlock { // ubo:8
+layout(std140) uniform MultiviewDataBlock { // ubo:9
 	MultiviewData data;
 }
 multiview_data_block;
 
 #ifdef RENDER_MOTION_VECTORS
-layout(std140) uniform PrevMultiviewDataBlock { // ubo:13
+layout(std140) uniform PrevMultiviewDataBlock { // ubo:14
 	MultiviewData data;
 }
 prev_multiview_data_block;
@@ -681,6 +681,7 @@ void vertex_shader(vec4 vertex_angle_attrib_input,
 #ifndef USE_MULTIVIEW
 	mat4 projection_matrix = scene_data_input.projection_matrix;
 	mat4 inv_projection_matrix = scene_data_input.inv_projection_matrix;
+	vec3 eye_offset = vec3(0.0, 0.0, 0.0);
 #endif //!USE_MULTIVIEW
 
 #ifdef USE_INSTANCING
@@ -1227,7 +1228,7 @@ struct MultiviewData {
 	highp vec4 eye_offset[MAX_VIEWS];
 };
 
-layout(std140) uniform MultiviewDataBlock { // ubo:8
+layout(std140) uniform MultiviewDataBlock { // ubo:9
 	MultiviewData data;
 }
 multiview_data_block;
@@ -1873,7 +1874,7 @@ void light_process_area(uint idx, vec3 vertex, vec3 eye_vec, vec3 normal, vec3 f
 	float cc_specular_ltc = 0.0;
 	vec2 cc_fresnel = vec2(0.0);
 	ltc_evaluate_specular(vertex_normal, eye_vec, sqrt(mix(0.001, 0.1, float(clearcoat_roughness))), points, ltc_lut1, ltc_lut2, cc_specular_ltc, cc_fresnel);
-	float Fr = 0.04 * max(cc_fresnel.x, 0.0) + (1.0 - 0.04) * max(cc_fresnel.y, 0.0) * clearcoat;
+	float Fr = (0.04 * max(cc_fresnel.x, 0.0) + (1.0 - 0.04) * max(cc_fresnel.y, 0.0)) * clearcoat;
 	cc_attenuation = 1.0 - Fr;
 	specular_light += cc_specular_ltc * Fr * light_color * light_attenuation_ltc * specular_amount;
 #endif // LIGHT_CLEARCOAT_USED
@@ -2777,6 +2778,10 @@ void main() {
 #else
 
 	diffuse_light *= albedo;
+
+	diffuse_light *= ao;
+	specular_light *= ao;
+
 	diffuse_light *= 1.0 - metallic;
 	ambient_light *= 1.0 - metallic;
 
@@ -3053,6 +3058,8 @@ void main() {
 #endif // ADDITIVE_SPOT
 
 	diffuse_light *= albedo;
+	diffuse_light *= ao;
+	specular_light *= ao;
 	diffuse_light *= 1.0 - metallic;
 	vec3 additive_light_color = diffuse_light + specular_light;
 

@@ -33,6 +33,8 @@
 #include "core/config/engine.h"
 #include "core/math/math_funcs.h"
 #include "core/object/class_db.h"
+#include "servers/audio/audio_driver.h"
+#include "servers/audio/audio_server.h"
 
 AudioStreamInteractive::AudioStreamInteractive() {
 }
@@ -42,10 +44,6 @@ Ref<AudioStreamPlayback> AudioStreamInteractive::instantiate_playback() {
 	playback_transitioner.instantiate();
 	playback_transitioner->stream = Ref<AudioStreamInteractive>(this);
 	return playback_transitioner;
-}
-
-String AudioStreamInteractive::get_stream_name() const {
-	return "Transitioner";
 }
 
 void AudioStreamInteractive::set_clip_count(int p_count) {
@@ -522,6 +520,7 @@ void AudioStreamInteractive::_bind_methods() {
 
 	BIND_ENUM_CONSTANT(TRANSITION_TO_TIME_SAME_POSITION);
 	BIND_ENUM_CONSTANT(TRANSITION_TO_TIME_START);
+	BIND_ENUM_CONSTANT(TRANSITION_TO_TIME_PREVIOUS_POSITION);
 
 	BIND_ENUM_CONSTANT(FADE_DISABLED);
 	BIND_ENUM_CONSTANT(FADE_IN);
@@ -887,12 +886,19 @@ void AudioStreamPlaybackInteractive::_mix_internal(int p_frames, float p_rate_sc
 		mix_buffer[i] = AudioFrame(0, 0);
 	}
 
+	bool any_active = false;
 	for (int i = 0; i < stream->clip_count; i++) {
 		if (!states[i].active) {
 			continue;
 		}
 
 		_mix_internal_state(i, p_frames, p_rate_scale);
+
+		any_active = states[i].active || any_active;
+	}
+	if (!any_active) {
+		active = false;
+		playback_current = -1;
 	}
 }
 
