@@ -375,6 +375,15 @@ void ResourceLoader::_run_load_task(void *p_userdata) {
 		ThreadLoadStatus status;
 		LocalVector<int> chain;
 
+		// How many consecutive poll iterations (see the wait below) to allow before
+		// assuming forward progress is not actually happening and escalating to a yield.
+		constexpr uint32_t POLLS_BEFORE_YIELD = 1000; // ~1 second.
+		uint32_t polls_without_yield = 0;
+
+		// Upper bound on how long to stay parked in a single yield before re-checking
+		// the status ourselves. See the yield call below for why this must be bounded.
+		constexpr uint64_t YIELD_RECHECK_INTERVAL_USEC = 50000; // 50 ms.
+
 		do {
 			chain.clear();
 
@@ -460,7 +469,26 @@ void ResourceLoader::_run_load_task(void *p_userdata) {
 			// Only yield if we ultimately found a task that we are waiting on.
 			bool should_yield = progress_blocked && wait && waiting_on_task && thread_index != -1;
 
+			// The cycle detection above can only see threads blocked inside the resource
+			// loader, since that's all `thread_waiting_on` tracks. A thread we depend on
+			// may instead be blocked on a lock *we* are holding, which is invisible here,
+			// so `progress_blocked` stays false and we take the polling wait below --
+			// forever, because we never release that lock.
+			// The common case is the GDScript cache mutex: `GDScriptCache::get_full_script()`
+			// holds it across `GDScript::reload()`, and analyzing a `preload()` re-enters
+			// the resource loader from under it.
+			// Escalate to a yield once polling has clearly stopped paying off. Yielding
+			// runs the worker pool's unlock allowance zones, releasing such mutexes and
+			// letting the thread we are waiting on finish, which in turn wakes us back up.
+			if (!should_yield && wait && thread_index != -1 && polls_without_yield >= POLLS_BEFORE_YIELD) {
+				should_yield = true;
+			}
+
 			if (should_yield) {
+				// Deliberately not resetting `polls_without_yield` here: once polling has
+				// been shown not to pay off, stay escalated. Dropping back to the polling
+				// wait would re-acquire the locks we are holding for another second at a
+				// time, which is the situation the escalation exists to get out of.
 				// We need to make sure we yield on our actual current task. If we are
 				// waiting we are certainly not the the task being ran.
 				yielders.push_back(WorkerThreadPool::get_singleton()->get_caller_task_id());
@@ -474,7 +502,13 @@ void ResourceLoader::_run_load_task(void *p_userdata) {
 				// If we yield we give the WTP a free thread to solve the problem.
 				int load_nesting_backup = load_nesting;
 				load_nesting = 0;
-				WorkerThreadPool::get_singleton()->yield();
+				// Bounded on purpose. The only caller of `notify_yield_over()` for us is
+				// the tail of this same function on another thread, so if every thread
+				// holding a load task ends up parked here, there is nobody left to run a
+				// task to completion and nobody left to wake us -- a state that sustains
+				// itself. Re-checking the status on a timer costs a little latency and
+				// makes liveness independent of any other thread still being runnable.
+				WorkerThreadPool::get_singleton()->yield(YIELD_RECHECK_INTERVAL_USEC);
 				DEV_ASSERT(load_nesting == 0);
 				load_nesting = load_nesting_backup;
 
@@ -489,6 +523,7 @@ void ResourceLoader::_run_load_task(void *p_userdata) {
 				// This is not the most optimal thing to do, but it is safe. Either the
 				// dependency will complete soon, or will block soon when we can safely
 				// yield.
+				polls_without_yield++;
 				OS::get_singleton()->delay_usec(1000);
 			}
 		} while (wait && status == THREAD_LOAD_IN_PROGRESS && !cleaning_tasks);
