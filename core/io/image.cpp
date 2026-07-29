@@ -3633,12 +3633,12 @@ Color Image::_get_color_at_ofs(const uint8_t *p_ptr, uint32_t p_ofs) const {
 			return Color(l, l, l, a);
 		}
 		case FORMAT_L16: {
-			float l = ((uint16_t *)p_ptr)[p_ofs] / 65535.0f;
+			float l = ((const uint16_t *)p_ptr)[p_ofs] / 65535.0f;
 			return Color(l, l, l, 1.0f);
 		}
 		case FORMAT_LA16: {
-			float l = ((uint16_t *)p_ptr)[p_ofs * 2 + 0] / 65535.0f;
-			float a = ((uint16_t *)p_ptr)[p_ofs * 2 + 1] / 65535.0f;
+			float l = ((const uint16_t *)p_ptr)[p_ofs * 2 + 0] / 65535.0f;
+			float a = ((const uint16_t *)p_ptr)[p_ofs * 2 + 1] / 65535.0f;
 			return Color(l, l, l, a);
 		}
 		case FORMAT_R8: {
@@ -3714,12 +3714,12 @@ Color Image::_get_color_at_ofs(const uint8_t *p_ptr, uint32_t p_ofs) const {
 			return Color(Math::half_to_float(r), Math::half_to_float(g), Math::half_to_float(b), Math::half_to_float(a));
 		}
 		case FORMAT_LH: {
-			float l = Math::half_to_float(((uint16_t *)p_ptr)[p_ofs]);
+			float l = Math::half_to_float(((const uint16_t *)p_ptr)[p_ofs]);
 			return Color(l, l, l, 1.0f);
 		}
 		case FORMAT_LAH: {
-			float l = Math::half_to_float(((uint16_t *)p_ptr)[p_ofs * 2 + 0]);
-			float a = Math::half_to_float(((uint16_t *)p_ptr)[p_ofs * 2 + 1]);
+			float l = Math::half_to_float(((const uint16_t *)p_ptr)[p_ofs * 2 + 0]);
+			float a = Math::half_to_float(((const uint16_t *)p_ptr)[p_ofs * 2 + 1]);
 			return Color(l, l, l, a);
 		}
 		case FORMAT_RGBE9995: {
@@ -3770,7 +3770,7 @@ Color Image::_get_color_at_ofs(const uint8_t *p_ptr, uint32_t p_ofs) const {
 			return Color(r, g, b, a);
 		}
 		case FORMAT_LF: {
-			float l = ((float *)p_ptr)[p_ofs];
+			float l = ((const float *)p_ptr)[p_ofs];
 			return Color(l, l, l, 1.0f);
 		}
 
@@ -3790,11 +3790,11 @@ void Image::_set_color_at_ofs(uint8_t *r_ptr, uint32_t p_ofs, const Color &p_col
 			r_ptr[p_ofs * 2 + 1] = uint8_t(CLAMP(p_color.a * 255.0, 0, 255));
 		} break;
 		case FORMAT_L16: {
-			r_ptr[p_ofs] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
+			((uint16_t *)r_ptr)[p_ofs] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
 		} break;
 		case FORMAT_LA16: {
-			r_ptr[p_ofs * 2 + 0] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
-			r_ptr[p_ofs * 2 + 1] = uint16_t(CLAMP(p_color.a * 65535.0, 0, 65535));
+			((uint16_t *)r_ptr)[p_ofs * 2 + 0] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
+			((uint16_t *)r_ptr)[p_ofs * 2 + 1] = uint16_t(CLAMP(p_color.a * 65535.0, 0, 65535));
 		} break;
 		case FORMAT_R8: {
 			r_ptr[p_ofs] = uint8_t(CLAMP(p_color.r * 255.0, 0, 255));
