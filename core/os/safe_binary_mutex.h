@@ -81,6 +81,14 @@ public:
 		return const_cast<THREADING_NAMESPACE::unique_lock<THREADING_NAMESPACE::mutex> &>(tls_data.lock);
 	}
 
+	// The recursion count lives in thread-local storage, so releasing this mutex on
+	// behalf of a blocked thread has to clear the count as well. Leaving it set would
+	// make anything else that runs on that thread believe it already holds the mutex
+	// and skip locking it for real.
+	_ALWAYS_INLINE_ uint32_t *_get_lock_count() const {
+		return &tls_data.count;
+	}
+
 	_ALWAYS_INLINE_ SafeBinaryMutex() {
 	}
 

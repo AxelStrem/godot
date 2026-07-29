@@ -190,6 +190,13 @@ private:
 	struct UnlockableLocks {
 		THREADING_NAMESPACE::unique_lock<THREADING_NAMESPACE::mutex> *ulock = nullptr;
 		uint32_t rc = 0;
+		// For SafeBinaryMutex, its thread-local recursion count, so releasing the lock
+		// can clear it and restore it afterwards. Null for plain mutexes.
+		uint32_t *lock_count = nullptr;
+		uint32_t saved_lock_count = 0;
+		// Set while the lock is released so this thread can run an unrelated task.
+		// Nested waits must leave such a lock alone; only the release site restores it.
+		bool released_for_task = false;
 	};
 	static thread_local UnlockableLocks unlockable_locks[MAX_UNLOCKABLE_LOCKS];
 #endif
@@ -217,17 +224,19 @@ private:
 		}
 	};
 
-	void _wait_collaboratively(ThreadData *p_caller_pool_thread, Task *p_task);
+	void _wait_collaboratively(ThreadData *p_caller_pool_thread, Task *p_task, uint64_t p_max_wait_usec = 0);
 
 	void _switch_runlevel(Runlevel p_runlevel);
 	bool _handle_runlevel(ThreadData *p_thread_data, MutexLock<BinaryMutex> &p_lock);
 
 #ifdef THREADS_ENABLED
-	static uint32_t _thread_enter_unlock_allowance_zone(THREADING_NAMESPACE::unique_lock<THREADING_NAMESPACE::mutex> &p_ulock);
+	static uint32_t _thread_enter_unlock_allowance_zone(THREADING_NAMESPACE::unique_lock<THREADING_NAMESPACE::mutex> &p_ulock, uint32_t *p_lock_count = nullptr);
 #endif
 
 	void _lock_unlockable_mutexes();
 	void _unlock_unlockable_mutexes();
+	void _release_unlockable_mutexes_for_task();
+	void _reacquire_unlockable_mutexes_after_task();
 
 protected:
 	static void _bind_methods();
@@ -249,7 +258,10 @@ public:
 	bool is_task_completed(TaskID p_task_id) const;
 	Error wait_for_task_completion(TaskID p_task_id);
 
-	void yield();
+	// With `p_max_wait_usec` non-zero, the wait is bounded: yield() may return before
+	// notify_yield_over() has been called, so the caller must loop on its own condition.
+	// Callers that can be starved of a notifier need this; the rest can pass 0.
+	void yield(uint64_t p_max_wait_usec = 0);
 	void notify_yield_over(TaskID p_task_id);
 
 	template <typename C, typename M, typename U>
@@ -286,7 +298,7 @@ public:
 #ifdef THREADS_ENABLED
 	_ALWAYS_INLINE_ static uint32_t thread_enter_unlock_allowance_zone(const MutexLock<BinaryMutex> &p_lock) { return _thread_enter_unlock_allowance_zone(p_lock._get_lock()); }
 	template <int Tag>
-	_ALWAYS_INLINE_ static uint32_t thread_enter_unlock_allowance_zone(const SafeBinaryMutex<Tag> &p_mutex) { return _thread_enter_unlock_allowance_zone(p_mutex._get_lock()); }
+	_ALWAYS_INLINE_ static uint32_t thread_enter_unlock_allowance_zone(const SafeBinaryMutex<Tag> &p_mutex) { return _thread_enter_unlock_allowance_zone(p_mutex._get_lock(), p_mutex._get_lock_count()); }
 	static void thread_exit_unlock_allowance_zone(uint32_t p_zone_id);
 #else
 	static uint32_t thread_enter_unlock_allowance_zone(const MutexLock<BinaryMutex> &p_lock) { return UINT32_MAX; }

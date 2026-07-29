@@ -468,8 +468,15 @@ Error WorkerThreadPool::wait_for_task_completion(TaskID p_task_id) {
 void WorkerThreadPool::_lock_unlockable_mutexes() {
 #ifdef THREADS_ENABLED
 	for (uint32_t i = 0; i < MAX_UNLOCKABLE_LOCKS; i++) {
-		if (unlockable_locks[i].ulock) {
-			unlockable_locks[i].ulock->lock();
+		UnlockableLocks &ul = unlockable_locks[i];
+		// A lock released so this thread could run an unrelated task belongs to that
+		// release site until it takes it back. A nested wait must not reclaim it.
+		if (ul.ulock && !ul.released_for_task) {
+			ul.ulock->lock();
+			if (ul.lock_count) {
+				*ul.lock_count = ul.saved_lock_count;
+				ul.saved_lock_count = 0;
+			}
 		}
 	}
 #endif
@@ -478,19 +485,61 @@ void WorkerThreadPool::_lock_unlockable_mutexes() {
 void WorkerThreadPool::_unlock_unlockable_mutexes() {
 #ifdef THREADS_ENABLED
 	for (uint32_t i = 0; i < MAX_UNLOCKABLE_LOCKS; i++) {
-		if (unlockable_locks[i].ulock) {
-			unlockable_locks[i].ulock->unlock();
+		UnlockableLocks &ul = unlockable_locks[i];
+		if (ul.ulock && !ul.released_for_task) {
+			if (ul.lock_count) {
+				ul.saved_lock_count = *ul.lock_count;
+				*ul.lock_count = 0;
+			}
+			ul.ulock->unlock();
 		}
 	}
 #endif
 }
 
-void WorkerThreadPool::_wait_collaboratively(ThreadData *p_caller_pool_thread, Task *p_task) {
+// Same as the above pair, but for the case where this thread goes on to run an
+// unrelated task instead of blocking. The recursion count has to be cleared too, or
+// that task would see a non-zero count on a mutex nobody holds and skip locking it.
+// The flag keeps nested waits inside that task from touching these locks.
+void WorkerThreadPool::_release_unlockable_mutexes_for_task() {
+#ifdef THREADS_ENABLED
+	for (uint32_t i = 0; i < MAX_UNLOCKABLE_LOCKS; i++) {
+		UnlockableLocks &ul = unlockable_locks[i];
+		if (ul.ulock && !ul.released_for_task) {
+			if (ul.lock_count) {
+				ul.saved_lock_count = *ul.lock_count;
+				*ul.lock_count = 0;
+			}
+			ul.ulock->unlock();
+			ul.released_for_task = true;
+		}
+	}
+#endif
+}
+
+void WorkerThreadPool::_reacquire_unlockable_mutexes_after_task() {
+#ifdef THREADS_ENABLED
+	for (uint32_t i = 0; i < MAX_UNLOCKABLE_LOCKS; i++) {
+		UnlockableLocks &ul = unlockable_locks[i];
+		if (ul.ulock && ul.released_for_task) {
+			ul.ulock->lock();
+			if (ul.lock_count) {
+				*ul.lock_count = ul.saved_lock_count;
+				ul.saved_lock_count = 0;
+			}
+			ul.released_for_task = false;
+		}
+	}
+#endif
+}
+
+void WorkerThreadPool::_wait_collaboratively(ThreadData *p_caller_pool_thread, Task *p_task, uint64_t p_max_wait_usec) {
 	// Keep processing tasks until the condition to stop waiting is met.
 
 	while (true) {
 		Task *task_to_process = nullptr;
 		bool relock_unlockables = false;
+		bool wait_timed_out = false;
 		{
 			MutexLock lock(task_mutex);
 
@@ -554,7 +603,15 @@ void WorkerThreadPool::_wait_collaboratively(ThreadData *p_caller_pool_thread, T
 				}
 				relock_unlockables = true;
 
-				p_caller_pool_thread->cond_var.wait(lock);
+				if (p_max_wait_usec) {
+					p_caller_pool_thread->cond_var.wait_for(lock, p_max_wait_usec);
+					// May be a real notification, a spurious wake or a timeout; we can't
+					// tell, and it doesn't matter. Hand control back either way and let
+					// the caller decide whether it still needs to wait.
+					wait_timed_out = true;
+				} else {
+					p_caller_pool_thread->cond_var.wait(lock);
+				}
 
 				p_caller_pool_thread->awaited_task = nullptr;
 			}
@@ -564,8 +621,32 @@ void WorkerThreadPool::_wait_collaboratively(ThreadData *p_caller_pool_thread, T
 			_lock_unlockable_mutexes();
 		}
 
+		if (wait_timed_out) {
+			// Bounded wait elapsed without the stop condition being met. Return so the
+			// caller re-evaluates it; if it still holds, it will call back in. This is
+			// what keeps a waiter alive when the thread that would have notified it is
+			// itself blocked -- notification is an optimization, not a requirement.
+			break;
+		}
+
 		if (task_to_process) {
+			// This thread may be inside an unlock allowance zone, i.e. holding locks on
+			// behalf of the task it is waiting on. Running a stolen task on top of those
+			// locks deadlocks as soon as that task -- or anything it in turn waits for --
+			// needs one of them. A nested resource load blocking on the GDScript cache
+			// mutex held further up this same stack is the case seen in practice.
+			// Release them for the duration, so the stolen task can take them for real.
+			bool released_for_task = false;
+			if (this == singleton) {
+				_release_unlockable_mutexes_for_task();
+				released_for_task = true;
+			}
+
 			_process_task(task_to_process);
+
+			if (released_for_task) {
+				_reacquire_unlockable_mutexes_after_task();
+			}
 		}
 	}
 }
@@ -613,10 +694,10 @@ bool WorkerThreadPool::_handle_runlevel(ThreadData *p_thread_data, MutexLock<Bin
 	return exit;
 }
 
-void WorkerThreadPool::yield() {
+void WorkerThreadPool::yield(uint64_t p_max_wait_usec) {
 	int th_index = get_thread_index();
 	ERR_FAIL_COND_MSG(th_index == -1, "This function can only be called from a worker thread.");
-	_wait_collaboratively(&threads[th_index], ThreadData::YIELDING);
+	_wait_collaboratively(&threads[th_index], ThreadData::YIELDING, p_max_wait_usec);
 
 	task_mutex.lock();
 	if (runlevel < RUNLEVEL_EXIT_LANGUAGES) {
@@ -781,7 +862,7 @@ WorkerThreadPool::GroupID WorkerThreadPool::get_caller_group_id() const {
 }
 
 #ifdef THREADS_ENABLED
-uint32_t WorkerThreadPool::_thread_enter_unlock_allowance_zone(THREADING_NAMESPACE::unique_lock<THREADING_NAMESPACE::mutex> &p_ulock) {
+uint32_t WorkerThreadPool::_thread_enter_unlock_allowance_zone(THREADING_NAMESPACE::unique_lock<THREADING_NAMESPACE::mutex> &p_ulock, uint32_t *p_lock_count) {
 	for (uint32_t i = 0; i < MAX_UNLOCKABLE_LOCKS; i++) {
 		DEV_ASSERT((bool)unlockable_locks[i].ulock == (bool)unlockable_locks[i].rc);
 		if (unlockable_locks[i].ulock == &p_ulock) {
@@ -790,6 +871,9 @@ uint32_t WorkerThreadPool::_thread_enter_unlock_allowance_zone(THREADING_NAMESPA
 			return i;
 		} else if (!unlockable_locks[i].ulock) {
 			unlockable_locks[i].ulock = &p_ulock;
+			unlockable_locks[i].lock_count = p_lock_count;
+			unlockable_locks[i].saved_lock_count = 0;
+			unlockable_locks[i].released_for_task = false;
 			unlockable_locks[i].rc = 1;
 			return i;
 		}
@@ -802,6 +886,9 @@ void WorkerThreadPool::thread_exit_unlock_allowance_zone(uint32_t p_zone_id) {
 	unlockable_locks[p_zone_id].rc--;
 	if (unlockable_locks[p_zone_id].rc == 0) {
 		unlockable_locks[p_zone_id].ulock = nullptr;
+		unlockable_locks[p_zone_id].lock_count = nullptr;
+		unlockable_locks[p_zone_id].saved_lock_count = 0;
+		unlockable_locks[p_zone_id].released_for_task = false;
 	}
 }
 #endif
