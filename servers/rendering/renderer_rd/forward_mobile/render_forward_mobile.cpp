@@ -3193,12 +3193,17 @@ void RenderForwardMobile::_geometry_instance_update(RenderGeometryInstance *p_ge
 		if (!particles_storage->particles_is_using_local_coords(ginstance->data->base)) {
 			store_transform = false;
 		}
-		ginstance->transforms_uniform_set = particles_storage->particles_get_instance_buffer_uniform_set(ginstance->data->base, scene_shader.default_shader_rd, TRANSFORMS_UNIFORM_SET);
-
 		if (particles_storage->particles_get_frame_counter(ginstance->data->base) == 0) {
 			// Particles haven't been cleared or updated, update once now to ensure they are ready to render.
+			// This has to happen before the instance buffer uniform set is retrieved below. The first
+			// update can enable motion vectors, which reallocates the instance buffer and frees the
+			// uniform set built from it. Retrieving it first would leave this instance holding a freed
+			// set, and the dependency notification meant to refresh it is lost because we are already
+			// inside this instance's own update.
 			particles_storage->update_particles();
 		}
+
+		ginstance->transforms_uniform_set = particles_storage->particles_get_instance_buffer_uniform_set(ginstance->data->base, scene_shader.default_shader_rd, TRANSFORMS_UNIFORM_SET);
 
 		if (ginstance->data->dirty_dependencies) {
 			particles_storage->particles_update_dependency(ginstance->data->base, &ginstance->data->dependency_tracker);
