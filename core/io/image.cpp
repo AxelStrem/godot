@@ -3511,6 +3511,15 @@ Color Image::_get_color_at_ofs(const uint8_t *p_ptr, uint32_t p_ofs) const {
 			float a = ((const uint16_t *)p_ptr)[p_ofs * 2 + 1] / 65535.0f;
 			return Color(l, l, l, a);
 		}
+		case FORMAT_L16: {
+			float l = ((uint16_t *)ptr)[ofs] / 65535.0f;
+			return Color(l, l, l, 1.0f);
+		}
+		case FORMAT_LA16: {
+			float l = ((uint16_t *)ptr)[ofs * 2 + 0] / 65535.0f;
+			float a = ((uint16_t *)ptr)[ofs * 2 + 1] / 65535.0f;
+			return Color(l, l, l, a);
+		}
 		case FORMAT_R8: {
 			float r = p_ptr[p_ofs] / 255.0;
 			return Color(r, 0, 0, 1);
@@ -3666,6 +3675,13 @@ void Image::_set_color_at_ofs(uint8_t *r_ptr, uint32_t p_ofs, const Color &p_col
 			((uint16_t *)r_ptr)[p_ofs * 2 + 0] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
 			((uint16_t *)r_ptr)[p_ofs * 2 + 1] = uint16_t(CLAMP(p_color.a * 65535.0, 0, 65535));
 		} break;
+		case FORMAT_L16: {
+			((uint16_t *)ptr)[ofs] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
+		} break;
+		case FORMAT_LA16: {
+			((uint16_t *)ptr)[ofs * 2 + 0] = uint16_t(CLAMP(p_color.get_v() * 65535.0, 0, 65535));
+			((uint16_t *)ptr)[ofs * 2 + 1] = uint16_t(CLAMP(p_color.a * 65535.0, 0, 65535));
+		} break;
 		case FORMAT_R8: {
 			r_ptr[p_ofs] = uint8_t(CLAMP(p_color.r * 255.0, 0, 255));
 		} break;
@@ -3733,6 +3749,13 @@ void Image::_set_color_at_ofs(uint8_t *r_ptr, uint32_t p_ofs, const Color &p_col
 			((uint16_t *)r_ptr)[p_ofs * 2 + 0] = Math::make_half_float(p_color.get_v());
 			((uint16_t *)r_ptr)[p_ofs * 2 + 1] = Math::make_half_float(p_color.a);
 		} break;
+		case FORMAT_LH: {
+			((uint16_t *)ptr)[ofs] = Math::make_half_float(p_color.get_v());
+		} break;
+		case FORMAT_LAH: {
+			((uint16_t *)ptr)[ofs * 2 + 0] = Math::make_half_float(p_color.get_v());
+			((uint16_t *)ptr)[ofs * 2 + 1] = Math::make_half_float(p_color.a);
+		} break;
 		case FORMAT_RGBE9995: {
 			((uint32_t *)r_ptr)[p_ofs] = p_color.to_rgbe9995();
 		} break;
@@ -3774,6 +3797,9 @@ void Image::_set_color_at_ofs(uint8_t *r_ptr, uint32_t p_ofs, const Color &p_col
 		} break;
 		case FORMAT_LF: {
 			((float *)r_ptr)[p_ofs] = p_color.get_v();
+		} break;
+		case FORMAT_LF: {
+			((float *)ptr)[ofs] = p_color.get_v();
 		} break;
 
 		default: {

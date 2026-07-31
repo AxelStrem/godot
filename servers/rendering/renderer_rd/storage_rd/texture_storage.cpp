@@ -1457,6 +1457,21 @@ RID TextureStorage::texture_create_from_native_handle(RSE::TextureType p_type, I
 
 		case Image::FORMAT_RGB8:
 			format = RD::DATA_FORMAT_R8G8B8_UNORM;
+		case Image::FORMAT_L16:
+			format = RD::DATA_FORMAT_R16_UNORM;
+			break;
+		case Image::FORMAT_LA16:
+			format = RD::DATA_FORMAT_R16G16_UNORM;
+			break;
+		case Image::FORMAT_LH:
+			format = RD::DATA_FORMAT_R16_SFLOAT;
+			break;
+		case Image::FORMAT_LAH:
+			format = RD::DATA_FORMAT_R16G16_SFLOAT;
+			break;
+		case Image::FORMAT_LF:
+			format = RD::DATA_FORMAT_R32_SFLOAT;
+			break;
 			break;
 
 		case Image::FORMAT_L16:
