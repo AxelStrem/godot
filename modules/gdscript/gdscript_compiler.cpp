@@ -1069,7 +1069,14 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				/* Chain of gets */
 
 				// Get at (potential) root stack pos, so it can be returned.
-				GDScriptCodeGenerator::Address base = _parse_expression(codegen, r_error, chain.back()->get()->base);
+				GDScriptCodeGenerator::Address base;
+				if (assign_class_member_property != StringName()) {
+					// The result is written back to the property, so start from its base value: a tweaked one would become the new base.
+					base = codegen.add_temporary(_gdtype_from_datatype(chain.back()->get()->base->get_datatype(), codegen.script));
+					gen->write_get_member_base(base, assign_class_member_property);
+				} else {
+					base = _parse_expression(codegen, r_error, chain.back()->get()->base);
+				}
 				const bool base_known_type = base.type.has_type();
 				const bool base_is_shared = Variant::is_type_shared(base.type.builtin_type);
 
@@ -1265,7 +1272,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				if (has_operation) {
 					GDScriptCodeGenerator::Address op_result = codegen.add_temporary(_gdtype_from_datatype(assignment->type_constraint, codegen.script));
 					GDScriptCodeGenerator::Address member = codegen.add_temporary(_gdtype_from_datatype(assignment->assignee->type_constraint, codegen.script));
-					gen->write_get_member(member, name);
+					gen->write_get_member_base(member, name);
 					gen->write_binary_operator(op_result, assignment->variant_op, member, assigned_value);
 					gen->pop_temporary(); // Pop member temp.
 					to_assign = op_result;

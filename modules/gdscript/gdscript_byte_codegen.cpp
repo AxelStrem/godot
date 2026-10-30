@@ -906,6 +906,12 @@ void GDScriptByteCodeGenerator::write_get_tweakable_member_base(const Address &p
 	append(p_name);
 }
 
+void GDScriptByteCodeGenerator::write_get_member_base(const Address &p_target, const StringName &p_name) {
+	append_opcode(GDScriptFunction::OPCODE_GET_MEMBER_BASE);
+	append(p_target);
+	append(p_name);
+}
+
 void GDScriptByteCodeGenerator::write_set_static_variable(const Address &p_value, const Address &p_class, int p_index) {
 	append_opcode(GDScriptFunction::OPCODE_SET_STATIC_VARIABLE);
 	append(p_value);

@@ -35,6 +35,7 @@
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/profiling/profiling.h"
+#include "scene/animation/tweak.h"
 
 #ifdef DEBUG_ENABLED
 
@@ -275,6 +276,7 @@ void (*type_init_function_table[])(Variant *) = {
 		&&OPCODE_GET_MEMBER, \
 		&&OPCODE_SET_TWEAKABLE_MEMBER, \
 		&&OPCODE_GET_TWEAKABLE_MEMBER_BASE, \
+		&&OPCODE_GET_MEMBER_BASE, \
 		&&OPCODE_SET_STATIC_VARIABLE, \
 		&&OPCODE_GET_STATIC_VARIABLE, \
 		&&OPCODE_ASSIGN, \
@@ -1312,6 +1314,14 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				GD_ERR_BREAK(indexname < 0 || indexname >= _global_names_count);
 				const StringName *index = &_global_names_ptr[indexname];
 
+				// Self-assignment doesn't pass through Object::set(), so the tweaker has to be told here.
+				Variant tweaked;
+				ObjectTweaker *tweaker = p_instance->owner->get_object_tweaker();
+				if (tweaker) {
+					tweaked = tweaker->set_base(*index, *src);
+					src = &tweaked;
+				}
+
 				bool valid;
 #ifndef DEBUG_ENABLED
 				ClassDB::set_property(p_instance->owner, *index, *src, &valid);
@@ -1376,6 +1386,30 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 				*dst = p_instance->owner->get_base_value(*index);
 
+				ip += 3;
+			}
+			DISPATCH_OPCODE;
+
+			OPCODE(OPCODE_GET_MEMBER_BASE) {
+				CHECK_SPACE(3);
+				GET_VARIANT_PTR(dst, 0);
+				int indexname = _code_ptr[ip + 2];
+				GD_ERR_BREAK(indexname < 0 || indexname >= _global_names_count);
+				const StringName *index = &_global_names_ptr[indexname];
+
+				// Unlike OPCODE_GET_TWEAKABLE_MEMBER_BASE, this must not reach the script's _get().
+				const ObjectTweaker *tweaker = p_instance->owner->get_object_tweaker();
+				if (!tweaker || !tweaker->try_get_base_value(*index, *dst)) {
+#ifndef DEBUG_ENABLED
+					ClassDB::get_property(p_instance->owner, *index, *dst);
+#else
+					bool ok = ClassDB::get_property(p_instance->owner, *index, *dst);
+					if (!ok) {
+						err_text = "Internal error getting property: " + String(*index);
+						OPCODE_BREAK;
+					}
+#endif
+				}
 				ip += 3;
 			}
 			DISPATCH_OPCODE;

@@ -149,6 +149,7 @@ public:
 	void set_owning_object(Object* p_object);
 	Variant get_tweaked(const StringName& property, const Variant& add_to_base);
 	Variant get_base_value(const StringName& property) const;
+	bool try_get_base_value(const StringName& property, Variant& r_value) const;
 
 	~ObjectTweaker();
 };
