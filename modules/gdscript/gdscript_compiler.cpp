@@ -1124,7 +1124,12 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 
 					if (subscript_elem->is_attribute) {
 						name = subscript_elem->attribute->name;
-						gen->write_get_named(value, name, prev_base);
+						// A value that is written back has to start from its base value, or the tweak on it becomes part of the base.
+						if (value.type.has_type() && Variant::is_type_shared(value.type.builtin_type)) {
+							gen->write_get_named(value, name, prev_base);
+						} else {
+							gen->write_get_named_base(value, name, prev_base);
+						}
 					} else {
 						key = _parse_expression(codegen, r_error, subscript_elem->index);
 						if (r_error) {
@@ -1160,7 +1165,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 					GDScriptCodeGenerator::Address op_result = codegen.add_temporary(_gdtype_from_datatype(assignment->type_constraint, codegen.script));
 					GDScriptCodeGenerator::Address value = codegen.add_temporary(_gdtype_from_datatype(subscript->type_constraint, codegen.script));
 					if (subscript->is_attribute) {
-						gen->write_get_named(value, name, prev_base);
+						gen->write_get_named_base(value, name, prev_base);
 					} else {
 						gen->write_get(value, key, prev_base);
 					}

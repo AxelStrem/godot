@@ -277,6 +277,7 @@ void (*type_init_function_table[])(Variant *) = {
 		&&OPCODE_SET_TWEAKABLE_MEMBER, \
 		&&OPCODE_GET_TWEAKABLE_MEMBER_BASE, \
 		&&OPCODE_GET_MEMBER_BASE, \
+		&&OPCODE_GET_NAMED_BASE, \
 		&&OPCODE_SET_STATIC_VARIABLE, \
 		&&OPCODE_GET_STATIC_VARIABLE, \
 		&&OPCODE_ASSIGN, \
@@ -1411,6 +1412,41 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 #endif
 				}
 				ip += 3;
+			}
+			DISPATCH_OPCODE;
+
+			OPCODE(OPCODE_GET_NAMED_BASE) {
+				CHECK_SPACE(4);
+
+				GET_VARIANT_PTR(src, 0);
+				GET_VARIANT_PTR(dst, 1);
+
+				int indexname = _code_ptr[ip + 3];
+
+				GD_ERR_BREAK(indexname < 0 || indexname >= _global_names_count);
+				const StringName *index = &_global_names_ptr[indexname];
+
+				// The source's type may be unknown at compile time, so only a tweaked property of an Object differs from OPCODE_GET_NAMED.
+				const Object *obj = src->get_validated_object();
+				const ObjectTweaker *tweaker = obj ? obj->get_object_tweaker() : nullptr;
+				if (!tweaker || !tweaker->try_get_base_value(*index, *dst)) {
+					bool valid;
+#ifdef DEBUG_ENABLED
+					//allow better error message in cases where src and dst are the same stack position
+					Variant ret = src->get_named(*index, valid);
+
+#else
+					*dst = src->get_named(*index, valid);
+#endif
+#ifdef DEBUG_ENABLED
+					if (!valid) {
+						err_text = "Invalid access to property or key '" + index->operator String() + "' on a base object of type '" + _get_var_type(src) + "'.";
+						OPCODE_BREAK;
+					}
+					*dst = ret;
+#endif
+				}
+				ip += 4;
 			}
 			DISPATCH_OPCODE;
 

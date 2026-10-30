@@ -391,6 +391,17 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 
 				incr += 3;
 			} break;
+			case OPCODE_GET_NAMED_BASE: {
+				text += "get_named_base ";
+				text += DADDR(2);
+				text += " = ";
+				text += DADDR(1);
+				text += "[\"";
+				text += _global_names_ptr[_code_ptr[ip + 3]];
+				text += "\"]";
+
+				incr += 4;
+			} break;
 			case OPCODE_SET_STATIC_VARIABLE: {
 				Ref<GDScript> gdscript;
 				if (_code_ptr[ip + 2] == ADDR_CLASS) {
