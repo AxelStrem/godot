@@ -1072,7 +1072,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 
 				// Get at (potential) root stack pos, so it can be returned.
 				GDScriptCodeGenerator::Address base;
-				const GDScriptDataType root_type = _gdtype_from_datatype(chain.back()->get()->base->get_datatype(), codegen.script);
+				const GDScriptDataType root_type = _gdtype_from_datatype(chain.back()->get()->base->type_constraint, codegen.script);
 				// A shared value is changed in place and never written back, so it stays out of the tweak pipeline.
 				const bool use_tweakable = member_property_is_tweakable && !member_property_is_in_setter && !(root_type.has_type() && Variant::is_type_shared(root_type.builtin_type));
 				if (use_tweakable) {
@@ -1080,7 +1080,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 					gen->write_get_tweakable_member_base(base, var_name);
 				} else if (assign_class_member_property != StringName()) {
 					// The result is written back to the property, so start from its base value: a tweaked one would become the new base.
-					base = codegen.add_temporary(_gdtype_from_datatype(chain.back()->get()->base->get_datatype(), codegen.script));
+					base = codegen.add_temporary(_gdtype_from_datatype(chain.back()->get()->base->type_constraint, codegen.script));
 					gen->write_get_member_base(base, assign_class_member_property);
 				} else {
 					base = _parse_expression(codegen, r_error, chain.back()->get()->base);

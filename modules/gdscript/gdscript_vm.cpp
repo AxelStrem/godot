@@ -1440,7 +1440,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 #endif
 #ifdef DEBUG_ENABLED
 					if (!valid) {
-						err_text = "Invalid access to property or key '" + index->operator String() + "' on a base object of type '" + _get_var_type(src) + "'.";
+						err_text = "Invalid access to property or key '" + String(*index) + "' on a base object of type '" + _get_var_type(src) + "'.";
 						OPCODE_BREAK;
 					}
 					*dst = ret;
