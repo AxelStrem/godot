@@ -402,6 +402,17 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 
 				incr += 4;
 			} break;
+			case OPCODE_GET_KEYED_BASE: {
+				text += "get_keyed_base ";
+				text += DADDR(3);
+				text += " = ";
+				text += DADDR(1);
+				text += "[";
+				text += DADDR(2);
+				text += "]";
+
+				incr += 4;
+			} break;
 			case OPCODE_SET_STATIC_VARIABLE: {
 				Ref<GDScript> gdscript;
 				if (_code_ptr[ip + 2] == ADDR_CLASS) {

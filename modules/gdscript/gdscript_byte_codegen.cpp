@@ -924,6 +924,20 @@ void GDScriptByteCodeGenerator::write_get_named_base(const Address &p_target, co
 	append(p_name);
 }
 
+void GDScriptByteCodeGenerator::write_get_keyed_base(const Address &p_target, const Address &p_index, const Address &p_source) {
+	// Only an Object keyed by a string can have a base value, so anything else keeps its validated getter.
+	const bool source_not_object = HAS_BUILTIN_TYPE(p_source) && p_source.type.builtin_type != Variant::OBJECT;
+	const bool index_not_string = HAS_BUILTIN_TYPE(p_index) && p_index.type.builtin_type != Variant::STRING && p_index.type.builtin_type != Variant::STRING_NAME;
+	if (source_not_object || index_not_string) {
+		write_get(p_target, p_index, p_source);
+		return;
+	}
+	append_opcode(GDScriptFunction::OPCODE_GET_KEYED_BASE);
+	append(p_source);
+	append(p_index);
+	append(p_target);
+}
+
 void GDScriptByteCodeGenerator::write_set_static_variable(const Address &p_value, const Address &p_class, int p_index) {
 	append_opcode(GDScriptFunction::OPCODE_SET_STATIC_VARIABLE);
 	append(p_value);
