@@ -46,6 +46,10 @@ Error PackedData::add_pack(const String &p_path, bool p_replace_files, uint64_t 
 	return ERR_FILE_UNRECOGNIZED;
 }
 
+void PackedData::mount_directory(const String &p_path, const String &p_mount_point, bool p_replace_files) {
+	mount_source->mount_directory(p_path, p_mount_point, p_replace_files);
+}
+
 void PackedData::add_path(const String &p_pkg_path, const String &p_path, uint64_t p_ofs, uint64_t p_size, const uint8_t *p_md5, PackSource *p_src, bool p_replace_files, bool p_encrypted, bool p_bundle, bool p_delta, const String &p_salt) {
 	String simplified_path = p_path.simplify_path().trim_prefix("res://");
 	PathMD5 pmd5(simplified_path.md5_buffer());
@@ -193,6 +197,8 @@ PackedData::PackedData() {
 	root = memnew(PackedDir);
 
 	add_pack_source(memnew(PackedSourcePCK));
+	mount_source = memnew(PackedSourceMount);
+	add_pack_source(mount_source);
 }
 
 void PackedData::_free_packed_dirs(PackedDir *p_dir) {
@@ -423,6 +429,39 @@ void PackedSourceDirectory::add_directory(const String &p_path, bool p_replace_f
 		String sub_dir_path = p_path.path_join(sub_dir_name);
 		add_directory(sub_dir_path, p_replace_files);
 	}
+}
+
+//////////////////////////////////////////////////////////////////
+
+void PackedSourceMount::mount_directory(const String &p_path, const String &p_mount_point, bool p_replace_files) {
+	Ref<DirAccess> da = DirAccess::open(p_path);
+	if (da.is_null()) {
+		return;
+	}
+	da->set_include_hidden(true);
+
+	for (const String &file_name : da->get_files()) {
+		const String file_path = p_path.path_join(file_name);
+		uint8_t md5[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+		// An offset of zero would mean the file was erased.
+		PackedData::get_singleton()->add_path(file_path, p_mount_point.path_join(file_name), 1, FileAccess::get_size(file_path), md5, this, p_replace_files);
+	}
+
+	for (const String &sub_dir_name : da->get_directories()) {
+		// Dot folders are version control and tool data, not part of what is being mounted.
+		if (!sub_dir_name.begins_with(".")) {
+			mount_directory(p_path.path_join(sub_dir_name), p_mount_point.path_join(sub_dir_name), p_replace_files);
+		}
+	}
+}
+
+Ref<FileAccess> PackedSourceMount::get_file(const String &p_path, PackedData::PackedFile *p_file, const Vector<uint8_t> &p_decryption_key) {
+	Ref<FileAccess> ret = FileAccess::create_for_path(p_file->pack);
+	if (ret->reopen(p_file->pack, FileAccess::READ) != OK) {
+		// Gone since it was mounted: let whatever is under it at this path answer.
+		return Ref<FileAccess>();
+	}
+	return ret;
 }
 
 //////////////////////////////////////////////////////////////////

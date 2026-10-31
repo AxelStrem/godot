@@ -60,6 +60,7 @@ enum PackFileFlags {
 };
 
 class PackSource;
+class PackedSourceMount;
 
 class PackedData {
 	friend class FileAccessPack;
@@ -111,6 +112,7 @@ private:
 	HashMap<PathMD5, Vector<PackedFile>, PathMD5> delta_patches;
 
 	Vector<PackSource *> sources;
+	PackedSourceMount *mount_source = nullptr;
 
 	PackedDir *root = nullptr;
 
@@ -143,6 +145,7 @@ public:
 
 	static PackedData *get_singleton() { return singleton; }
 	Error add_pack(const String &p_path, bool p_replace_files, uint64_t p_offset, const Vector<uint8_t> &p_decryption_key = Vector<uint8_t>());
+	void mount_directory(const String &p_path, const String &p_mount_point, bool p_replace_files);
 
 	void clear();
 
@@ -176,6 +179,15 @@ class PackedSourceDirectory : public PackSource {
 
 public:
 	virtual bool try_open_pack(const String &p_path, bool p_replace_files, uint64_t p_offset, const Vector<uint8_t> &p_decryption_key = Vector<uint8_t>()) override;
+	virtual Ref<FileAccess> get_file(const String &p_path, PackedData::PackedFile *p_file, const Vector<uint8_t> &p_decryption_key = Vector<uint8_t>()) override;
+};
+
+// Serves a folder on disk under a res:// prefix. PackedFile::pack holds each file's real path.
+class PackedSourceMount : public PackSource {
+public:
+	void mount_directory(const String &p_path, const String &p_mount_point, bool p_replace_files);
+
+	virtual bool try_open_pack(const String &p_path, bool p_replace_files, uint64_t p_offset, const Vector<uint8_t> &p_decryption_key = Vector<uint8_t>()) override { return false; }
 	virtual Ref<FileAccess> get_file(const String &p_path, PackedData::PackedFile *p_file, const Vector<uint8_t> &p_decryption_key = Vector<uint8_t>()) override;
 };
 

@@ -185,6 +185,20 @@
 				Returns the localized path (starting with [code]res://[/code]) corresponding to the absolute, native OS [param path]. See also [method globalize_path].
 			</description>
 		</method>
+		<method name="mount_directory">
+			<return type="bool" />
+			<param index="0" name="path" type="String" />
+			<param index="1" name="mount_point" type="String" />
+			<param index="2" name="replace_files" type="bool" default="true" />
+			<description>
+				Makes the files of the folder [param path] available in the resource filesystem under [param mount_point], without packing them: [code]path/a/b.gd[/code] can then be loaded as [code]mount_point/a/b.gd[/code]. [param path] must be a [code]user://[/code] or absolute path, and [param mount_point] a path in [code]res://[/code], or [code]res://[/code] itself. Folders whose name starts with a dot are skipped. Returns [code]true[/code] on success.
+				[b]Note:[/b] If a file from [param path] shares the same path as a file already in the resource filesystem, any attempts to load that file will use the file from [param path] unless [param replace_files] is set to [code]false[/code].
+				[b]Note:[/b] The list of files is read once, by this call. A change to a file's content is seen the next time it is opened, and a file deleted later stops being served, but new files only appear after calling this method again.
+				[b]Note:[/b] A resource that is already loaded stays loaded; mounting does not replace it.
+				[b]Note:[/b] [DirAccess] will not show changes made to the contents of [code]res://[/code] after calling this function, and cannot write there.
+				[b]Note:[/b] A plain folder has no import data or cached lists: [code]class_name[/code] in a mounted script is not registered, [code]uid://[/code] paths to mounted files are not known, and images and other assets that need importing can be read with [FileAccess] or methods such as [method Image.load_from_file], but not with [method @GDScript.load].
+			</description>
+		</method>
 		<method name="save">
 			<return type="int" enum="Error" />
 			<description>
