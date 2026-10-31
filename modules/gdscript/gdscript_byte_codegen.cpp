@@ -906,6 +906,24 @@ void GDScriptByteCodeGenerator::write_get_tweakable_member_base(const Address &p
 	append(p_name);
 }
 
+void GDScriptByteCodeGenerator::write_get_member_base(const Address &p_target, const StringName &p_name) {
+	append_opcode(GDScriptFunction::OPCODE_GET_MEMBER_BASE);
+	append(p_target);
+	append(p_name);
+}
+
+void GDScriptByteCodeGenerator::write_get_named_base(const Address &p_target, const StringName &p_name, const Address &p_source) {
+	// A source with a validated getter cannot be an Object, so it has no base value.
+	if (HAS_BUILTIN_TYPE(p_source) && Variant::get_member_validated_getter(p_source.type.builtin_type, p_name)) {
+		write_get_named(p_target, p_name, p_source);
+		return;
+	}
+	append_opcode(GDScriptFunction::OPCODE_GET_NAMED_BASE);
+	append(p_source);
+	append(p_target);
+	append(p_name);
+}
+
 void GDScriptByteCodeGenerator::write_set_static_variable(const Address &p_value, const Address &p_class, int p_index) {
 	append_opcode(GDScriptFunction::OPCODE_SET_STATIC_VARIABLE);
 	append(p_value);

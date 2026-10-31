@@ -238,6 +238,15 @@ Variant ObjectTweaker::get_base_value(const StringName &property) const {
 	return ptr->get_base();
 }
 
+bool ObjectTweaker::try_get_base_value(const StringName &property, Variant &r_value) const {
+	const PropertyTweaker *ptr = props.getptr(property);
+	if (ptr == nullptr) {
+		return false;
+	}
+	r_value = ptr->get_base();
+	return true;
+}
+
 ObjectTweaker::~ObjectTweaker() {
 	for(auto& p : props)
 	{

@@ -149,6 +149,7 @@ public:
 	void set_owning_object(Object* p_object);
 	Variant get_tweaked(const StringName& property, const Variant& add_to_base);
 	Variant get_base_value(const StringName& property) const;
+	bool try_get_base_value(const StringName& property, Variant& r_value) const;
 
 	~ObjectTweaker();
 };
@@ -160,15 +161,15 @@ private:
 	bool valid = false;
 	TweakImpl* pImpl = nullptr;
 public:
-	enum ActionType {
-		ACTION_SET,
-		ACTION_ADD,
-		ACTION_SUBTRACT,
-		ACTION_MULTIPLY,
-		ACTION_DIVIDE,
-		ACTION_AND,
-		ACTION_OR
-	};
+enum ActionType {
+	ACTION_SET,
+	ACTION_ADD,
+	ACTION_SUBTRACT,
+	ACTION_MULTIPLY,
+	ACTION_DIVIDE,
+	ACTION_AND,
+	ACTION_OR
+};
 
 	Tweak();
 	Tweak(Object* p_object, const StringName& p_property, const Variant &p_value, Tweak::ActionType action, int priority);
@@ -179,6 +180,7 @@ public:
 
 	_FORCE_INLINE_ const Variant& get_value() const { return pImpl->get_value(); };
 	void set_value(const Variant& value);
+	
 	_FORCE_INLINE_ int get_order() const { return pImpl->order; }
 	_FORCE_INLINE_ int get_priority() const { return pImpl->priority; }
 

@@ -1007,6 +1007,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				bool is_member_property = false;
 				bool member_property_has_setter = false;
 				bool member_property_is_in_setter = false;
+				bool member_property_is_tweakable = false;
 				bool is_static = false;
 				GDScriptCodeGenerator::Address static_var_class;
 				int static_var_index = 0;
@@ -1036,6 +1037,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 										member_property_setter_function = minfo.setter;
 										member_property_has_setter = member_property_setter_function != StringName();
 										member_property_is_in_setter = member_property_has_setter && member_property_setter_function == codegen.function_name;
+										member_property_is_tweakable = minfo.tweakable;
 										target_member_property.mode = GDScriptCodeGenerator::Address::MEMBER;
 										target_member_property.address = minfo.index;
 										target_member_property.type = minfo.data_type;
@@ -1069,7 +1071,20 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				/* Chain of gets */
 
 				// Get at (potential) root stack pos, so it can be returned.
-				GDScriptCodeGenerator::Address base = _parse_expression(codegen, r_error, chain.back()->get()->base);
+				GDScriptCodeGenerator::Address base;
+				const GDScriptDataType root_type = _gdtype_from_datatype(chain.back()->get()->base->type_constraint, codegen.script);
+				// A shared value is changed in place and never written back, so it stays out of the tweak pipeline.
+				const bool use_tweakable = member_property_is_tweakable && !member_property_is_in_setter && !(root_type.has_type() && Variant::is_type_shared(root_type.builtin_type));
+				if (use_tweakable) {
+					base = codegen.add_temporary(root_type);
+					gen->write_get_tweakable_member_base(base, var_name);
+				} else if (assign_class_member_property != StringName()) {
+					// The result is written back to the property, so start from its base value: a tweaked one would become the new base.
+					base = codegen.add_temporary(_gdtype_from_datatype(chain.back()->get()->base->type_constraint, codegen.script));
+					gen->write_get_member_base(base, assign_class_member_property);
+				} else {
+					base = _parse_expression(codegen, r_error, chain.back()->get()->base);
+				}
 				const bool base_known_type = base.type.has_type();
 				const bool base_is_shared = Variant::is_type_shared(base.type.builtin_type);
 
@@ -1109,7 +1124,12 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 
 					if (subscript_elem->is_attribute) {
 						name = subscript_elem->attribute->name;
-						gen->write_get_named(value, name, prev_base);
+						// A value that is written back has to start from its base value, or the tweak on it becomes part of the base.
+						if (value.type.has_type() && Variant::is_type_shared(value.type.builtin_type)) {
+							gen->write_get_named(value, name, prev_base);
+						} else {
+							gen->write_get_named_base(value, name, prev_base);
+						}
 					} else {
 						key = _parse_expression(codegen, r_error, subscript_elem->index);
 						if (r_error) {
@@ -1145,7 +1165,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 					GDScriptCodeGenerator::Address op_result = codegen.add_temporary(_gdtype_from_datatype(assignment->type_constraint, codegen.script));
 					GDScriptCodeGenerator::Address value = codegen.add_temporary(_gdtype_from_datatype(subscript->type_constraint, codegen.script));
 					if (subscript->is_attribute) {
-						gen->write_get_named(value, name, prev_base);
+						gen->write_get_named_base(value, name, prev_base);
 					} else {
 						gen->write_get(value, key, prev_base);
 					}
@@ -1219,7 +1239,9 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 						if (!known_type) {
 							gen->write_jump_if_shared(assigned);
 						}
-						if (member_property_has_setter && !member_property_is_in_setter) {
+						if (use_tweakable) {
+							gen->write_set_tweakable_member(assigned, var_name);
+						} else if (member_property_has_setter && !member_property_is_in_setter) {
 							Vector<GDScriptCodeGenerator::Address> args;
 							args.push_back(assigned);
 							GDScriptCodeGenerator::Address call_base = is_static ? GDScriptCodeGenerator::Address(GDScriptCodeGenerator::Address::CLASS) : GDScriptCodeGenerator::Address(GDScriptCodeGenerator::Address::SELF);
@@ -1265,7 +1287,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				if (has_operation) {
 					GDScriptCodeGenerator::Address op_result = codegen.add_temporary(_gdtype_from_datatype(assignment->type_constraint, codegen.script));
 					GDScriptCodeGenerator::Address member = codegen.add_temporary(_gdtype_from_datatype(assignment->assignee->type_constraint, codegen.script));
-					gen->write_get_member(member, name);
+					gen->write_get_member_base(member, name);
 					gen->write_binary_operator(op_result, assignment->variant_op, member, assigned_value);
 					gen->pop_temporary(); // Pop member temp.
 					to_assign = op_result;

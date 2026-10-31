@@ -37,7 +37,6 @@
 #include "core/os/thread_safe.h"
 #include "core/templates/iterable.h"
 #include "core/variant/typed_array.h"
-#include "scene/main/scene_tree.h"
 #include "scene/scene_string_names.h" // IWYU pragma: export. Make available to all Nodes.
 #include "scene/animation/tweak.h"
 
@@ -624,9 +623,9 @@ public:
 		}
 	}
 
+	RequiredResult<Tween> create_tween();
 	RequiredResult<Tweak> create_tweak(Object* p_owner, const StringName& p_property, const Variant &p_value, Tweak::ActionType action, int priority);
 	RequiredResult<Tweak> create_tweak_dynamic(Object* p_owner, const StringName& p_property, Object* p_source, const StringName& p_source_property, Tweak::ActionType action, int priority);
-	RequiredResult<Tween> create_tween();
 
 	void print_tree();
 	void print_tree_pretty();

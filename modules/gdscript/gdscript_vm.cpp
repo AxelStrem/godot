@@ -35,6 +35,7 @@
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/profiling/profiling.h"
+#include "scene/animation/tweak.h"
 
 #ifdef DEBUG_ENABLED
 
@@ -275,6 +276,8 @@ void (*type_init_function_table[])(Variant *) = {
 		&&OPCODE_GET_MEMBER, \
 		&&OPCODE_SET_TWEAKABLE_MEMBER, \
 		&&OPCODE_GET_TWEAKABLE_MEMBER_BASE, \
+		&&OPCODE_GET_MEMBER_BASE, \
+		&&OPCODE_GET_NAMED_BASE, \
 		&&OPCODE_SET_STATIC_VARIABLE, \
 		&&OPCODE_GET_STATIC_VARIABLE, \
 		&&OPCODE_ASSIGN, \
@@ -1317,6 +1320,14 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				GD_ERR_BREAK(indexname < 0 || indexname >= _global_names_count);
 				const StringName *index = &_global_names_ptr[indexname];
 
+				// Self-assignment doesn't pass through Object::set(), so the tweaker has to be told here.
+				Variant tweaked;
+				ObjectTweaker *tweaker = p_instance->owner->get_object_tweaker();
+				if (tweaker) {
+					tweaked = tweaker->set_base(*index, *src);
+					src = &tweaked;
+				}
+
 				bool valid;
 #ifndef DEBUG_ENABLED
 				ClassDB::set_property(p_instance->owner, *index, *src, &valid);
@@ -1382,6 +1393,65 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				*dst = p_instance->owner->get_base_value(*index);
 
 				ip += 3;
+			}
+			DISPATCH_OPCODE;
+
+			OPCODE(OPCODE_GET_MEMBER_BASE) {
+				CHECK_SPACE(3);
+				GET_VARIANT_PTR(dst, 0);
+				int indexname = _code_ptr[ip + 2];
+				GD_ERR_BREAK(indexname < 0 || indexname >= _global_names_count);
+				const StringName *index = &_global_names_ptr[indexname];
+
+				// Unlike OPCODE_GET_TWEAKABLE_MEMBER_BASE, this must not reach the script's _get().
+				const ObjectTweaker *tweaker = p_instance->owner->get_object_tweaker();
+				if (!tweaker || !tweaker->try_get_base_value(*index, *dst)) {
+#ifndef DEBUG_ENABLED
+					ClassDB::get_property(p_instance->owner, *index, *dst);
+#else
+					bool ok = ClassDB::get_property(p_instance->owner, *index, *dst);
+					if (!ok) {
+						err_text = "Internal error getting property: " + String(*index);
+						OPCODE_BREAK;
+					}
+#endif
+				}
+				ip += 3;
+			}
+			DISPATCH_OPCODE;
+
+			OPCODE(OPCODE_GET_NAMED_BASE) {
+				CHECK_SPACE(4);
+
+				GET_VARIANT_PTR(src, 0);
+				GET_VARIANT_PTR(dst, 1);
+
+				int indexname = _code_ptr[ip + 3];
+
+				GD_ERR_BREAK(indexname < 0 || indexname >= _global_names_count);
+				const StringName *index = &_global_names_ptr[indexname];
+
+				// The source's type may be unknown at compile time, so only a tweaked property of an Object differs from OPCODE_GET_NAMED.
+				const Object *obj = src->get_validated_object();
+				const ObjectTweaker *tweaker = obj ? obj->get_object_tweaker() : nullptr;
+				if (!tweaker || !tweaker->try_get_base_value(*index, *dst)) {
+					bool valid;
+#ifdef DEBUG_ENABLED
+					//allow better error message in cases where src and dst are the same stack position
+					Variant ret = src->get_named(*index, valid);
+
+#else
+					*dst = src->get_named(*index, valid);
+#endif
+#ifdef DEBUG_ENABLED
+					if (!valid) {
+						err_text = "Invalid access to property or key '" + String(*index) + "' on a base object of type '" + _get_var_type(src) + "'.";
+						OPCODE_BREAK;
+					}
+					*dst = ret;
+#endif
+				}
+				ip += 4;
 			}
 			DISPATCH_OPCODE;
 

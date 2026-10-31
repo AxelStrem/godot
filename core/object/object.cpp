@@ -277,16 +277,8 @@ void Object::set_direct(const StringName &p_name, const Variant &p_value, bool *
 		return;
 
 	} else {
-		Variant **V = metadata_properties.getptr(p_name);
-		if (V) {
-			**V = p_value;
-			if (r_valid) {
-				*r_valid = true;
-			}
-			return;
-		} else if (p_name.string().begins_with("metadata/")) {
-			// Must exist, otherwise duplicate() will not work.
-			set_meta(p_name.string().replace_first("metadata/", ""), p_value);
+		if (p_name.string().begins_with("metadata/")) {
+			set_meta(p_name.string().substr(strlen("metadata/")), p_value);
 			if (r_valid) {
 				*r_valid = true;
 			}
@@ -359,14 +351,21 @@ Variant Object::get(const StringName &p_name, bool *r_valid) const {
 		return ret;
 	}
 
-	const Variant *const *V = metadata_properties.getptr(p_name);
-
-	if (V) {
-		ret = **V;
-		if (r_valid) {
-			*r_valid = true;
+	if (p_name.string().begins_with("metadata/")) {
+		const StringName meta_key = p_name.string().substr(strlen("metadata/"));
+		const Variant *V = metadata.getptr(meta_key);
+		if (V) {
+			ret = *V;
+			if (r_valid) {
+				*r_valid = true;
+			}
+			return ret;
+		} else {
+			if (r_valid) {
+				*r_valid = false;
+			}
+			return Variant();
 		}
-		return ret;
 
 	} else {
 #ifdef TOOLS_ENABLED
@@ -1049,7 +1048,6 @@ void Object::set_meta(const StringName &p_name, const Variant &p_value) {
 			metadata.erase(p_name);
 
 			const String &sname = p_name;
-			metadata_properties.erase("metadata/" + sname);
 			if (!sname.begins_with("_")) {
 				// Metadata starting with _ don't show up in the inspector, so no need to update.
 				notify_property_list_changed();
@@ -1063,10 +1061,9 @@ void Object::set_meta(const StringName &p_name, const Variant &p_value) {
 		E->value = p_value;
 	} else {
 		ERR_FAIL_COND_MSG(!p_name.string().is_valid_unicode_identifier(), vformat("Invalid metadata identifier: '%s'.", p_name));
-		Variant *V = &metadata.insert(p_name, p_value)->value;
+		metadata.insert(p_name, p_value);
 
 		const String &sname = p_name;
-		metadata_properties["metadata/" + sname] = V;
 		if (!sname.begins_with("_")) {
 			notify_property_list_changed();
 		}
@@ -2353,35 +2350,6 @@ Object::~Object() {
 		memdelete(object_tweaker);
 	}
 	object_tweaker = nullptr;
-
-	if (script_instance) {
-		memdelete(script_instance);
-	}
-	script_instance = nullptr;
-
-	if (_extension) {
-#ifdef TOOLS_ENABLED
-		if (_extension->untrack_instance) {
-			_extension->untrack_instance(_extension->tracking_userdata, this);
-		}
-#endif
-		if (_extension->free_instance) {
-			_extension->free_instance(_extension->class_userdata, _extension_instance);
-		}
-		_extension = nullptr;
-		_extension_instance = nullptr;
-	}
-#ifdef TOOLS_ENABLED
-	else if (_instance_bindings != nullptr) {
-		Engine *engine = Engine::get_singleton();
-		GDExtensionManager *gdextension_manager = GDExtensionManager::get_singleton();
-		if (engine && gdextension_manager && engine->is_extension_reloading_enabled()) {
-			for (uint32_t i = 0; i < _instance_binding_count; i++) {
-				gdextension_manager->untrack_instance_binding(_instance_bindings[i].token, this);
-			}
-		}
-	}
-#endif
 
 	if (_emitting) {
 		//@todo this may need to actually reach the debugger prioritarily somehow because it may crash before
