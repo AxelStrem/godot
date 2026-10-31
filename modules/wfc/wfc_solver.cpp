@@ -25,8 +25,6 @@ namespace {
 #define WFC_NONE_CONNECTION SNAME("none")
 static constexpr int WFC_LOOKUP_RANGE = 3;
 
-static const StringName WFC_WALL_PANEL_TYPE = SNAME("wall_panel");
-
 static int _count_bits_u64(uint64_t p_value) {
 	int count = 0;
 	while (p_value != 0) {
