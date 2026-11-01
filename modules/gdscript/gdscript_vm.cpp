@@ -278,6 +278,7 @@ void (*type_init_function_table[])(Variant *) = {
 		&&OPCODE_GET_TWEAKABLE_MEMBER_BASE, \
 		&&OPCODE_GET_MEMBER_BASE, \
 		&&OPCODE_GET_NAMED_BASE, \
+		&&OPCODE_GET_KEYED_BASE, \
 		&&OPCODE_SET_STATIC_VARIABLE, \
 		&&OPCODE_GET_STATIC_VARIABLE, \
 		&&OPCODE_ASSIGN, \
@@ -1446,6 +1447,47 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 #ifdef DEBUG_ENABLED
 					if (!valid) {
 						err_text = "Invalid access to property or key '" + String(*index) + "' on a base object of type '" + _get_var_type(src) + "'.";
+						OPCODE_BREAK;
+					}
+					*dst = ret;
+#endif
+				}
+				ip += 4;
+			}
+			DISPATCH_OPCODE;
+
+			OPCODE(OPCODE_GET_KEYED_BASE) {
+				CHECK_SPACE(4);
+
+				GET_VARIANT_PTR(src, 0);
+				GET_VARIANT_PTR(index, 1);
+				GET_VARIANT_PTR(dst, 2);
+
+				// The types may be unknown at compile time, so only a tweaked property of an Object differs from OPCODE_GET_KEYED.
+				const Object *obj = src->get_validated_object();
+				const ObjectTweaker *tweaker = obj ? obj->get_object_tweaker() : nullptr;
+				if (!tweaker || !index->is_string() || !tweaker->try_get_base_value(*index, *dst)) {
+					bool valid;
+#ifdef DEBUG_ENABLED
+					// Allow better error message in cases where src and dst are the same stack position.
+					Variant::VariantGetError err_code;
+					Variant ret = src->get(*index, &valid, &err_code);
+#else
+					*dst = src->get(*index, &valid);
+
+#endif
+#ifdef DEBUG_ENABLED
+					if (!valid) {
+						String v = index->operator String();
+						if (!v.is_empty()) {
+							v = "'" + v + "'";
+						} else {
+							v = "of type '" + _get_var_type(index) + "'";
+						}
+						err_text = "Invalid access to property or key " + v + " on a base object of type '" + _get_var_type(src) + "'.";
+						if (err_code == Variant::VariantGetError::GET_INDEXED_ERR) {
+							err_text = "Invalid access of index " + v + " on a base object of type: '" + _get_var_type(src) + "'.";
+						}
 						OPCODE_BREAK;
 					}
 					*dst = ret;

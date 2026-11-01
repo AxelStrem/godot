@@ -1135,7 +1135,11 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 						if (r_error) {
 							return GDScriptCodeGenerator::Address();
 						}
-						gen->write_get(value, key, prev_base);
+						if (value.type.has_type() && Variant::is_type_shared(value.type.builtin_type)) {
+							gen->write_get(value, key, prev_base);
+						} else {
+							gen->write_get_keyed_base(value, key, prev_base);
+						}
 					}
 
 					// Store base and key for setting it back later.
@@ -1167,7 +1171,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 					if (subscript->is_attribute) {
 						gen->write_get_named_base(value, name, prev_base);
 					} else {
-						gen->write_get(value, key, prev_base);
+						gen->write_get_keyed_base(value, key, prev_base);
 					}
 					gen->write_binary_operator(op_result, assignment->variant_op, value, assigned);
 					gen->pop_temporary();

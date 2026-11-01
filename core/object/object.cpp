@@ -176,7 +176,12 @@ bool Object::_predelete() {
 		return false;
 	}
 
-	_deleting = true;
+	// Detach tweaks before teardown: a Tweak released from here on must not recalculate into a half-destroyed object.
+	if (object_tweaker) {
+		memdelete(object_tweaker);
+		object_tweaker = nullptr;
+	}
+
 	_gdtype_ptr = nullptr; // Must restore, so constructors/destructors have proper class name access at each stage.
 	notification(NOTIFICATION_PREDELETE_CLEANUP, true);
 
