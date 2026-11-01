@@ -592,13 +592,8 @@ bool ProjectSettings::_load_resource_pack(const String &p_pack, bool p_replace_f
 		return false;
 	}
 
-	if (!p_main_pack && !using_datapack && !OS::get_singleton()->get_resource_dir().is_empty()) {
-		// Add the project's resource file system to PackedData so directory access keeps working when
-		// the game is running without a main pack, like in the editor or on Android.
-		PackedData::get_singleton()->add_pack_source(memnew(PackedSourceDirectory));
-		PackedData::get_singleton()->add_pack("res://", false, 0);
-		DirAccess::make_default<DirAccessPack>(DirAccess::ACCESS_RESOURCES);
-		using_datapack = true;
+	if (!p_main_pack) {
+		_add_resource_dir_to_packed_data();
 	}
 
 	bool ok = PackedData::get_singleton()->add_pack(p_pack, p_replace_files, p_offset) == OK;
@@ -606,6 +601,23 @@ bool ProjectSettings::_load_resource_pack(const String &p_pack, bool p_replace_f
 		return false;
 	}
 
+	_on_resource_pack_added();
+
+	return true;
+}
+
+void ProjectSettings::_add_resource_dir_to_packed_data() {
+	if (!using_datapack && !OS::get_singleton()->get_resource_dir().is_empty()) {
+		// Add the project's resource file system to PackedData so directory access keeps working when
+		// the game is running without a main pack, like in the editor or on Android.
+		PackedData::get_singleton()->add_pack_source(memnew(PackedSourceDirectory));
+		PackedData::get_singleton()->add_pack("res://", false, 0);
+		DirAccess::make_default<DirAccessPack>(DirAccess::ACCESS_RESOURCES);
+		using_datapack = true;
+	}
+}
+
+void ProjectSettings::_on_resource_pack_added() {
 	if (project_loaded) {
 		// This pack may have declared new global classes (make sure they are picked up).
 		refresh_global_class_list();
@@ -619,6 +631,24 @@ bool ProjectSettings::_load_resource_pack(const String &p_pack, bool p_replace_f
 		DirAccess::make_default<DirAccessPack>(DirAccess::ACCESS_RESOURCES);
 		using_datapack = true;
 	}
+}
+
+bool ProjectSettings::mount_directory(const String &p_path, const String &p_mount_point, bool p_replace_files) {
+	if (PackedData::get_singleton()->is_disabled()) {
+		return false;
+	}
+
+	const String path = p_path.replace_char('\\', '/').simplify_path();
+	const String mount_point = p_mount_point.replace_char('\\', '/').simplify_path();
+
+	// A folder under res:// is refused because mounting one onto itself would make its files open themselves.
+	ERR_FAIL_COND_V_MSG(path.begins_with("res://") || path.begins_with("uid://"), false, vformat("Cannot mount \"%s\": the folder must be a user:// or absolute path.", p_path));
+	ERR_FAIL_COND_V_MSG(!mount_point.begins_with("res://") || mount_point.trim_prefix("res://").begins_with(".."), false, vformat("Cannot mount at \"%s\": the mount point must be inside res://.", p_mount_point));
+	ERR_FAIL_COND_V_MSG(!DirAccess::dir_exists_absolute(path), false, vformat("Cannot mount \"%s\": the folder does not exist.", p_path));
+
+	_add_resource_dir_to_packed_data();
+	PackedData::get_singleton()->mount_directory(path, mount_point, p_replace_files);
+	_on_resource_pack_added();
 
 	return true;
 }
@@ -1648,6 +1678,7 @@ void ProjectSettings::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("globalize_path", "path"), &ProjectSettings::globalize_path);
 	ClassDB::bind_method(D_METHOD("save"), &ProjectSettings::save);
 	ClassDB::bind_method(D_METHOD("load_resource_pack", "pack", "replace_files", "offset"), &ProjectSettings::load_resource_pack, DEFVAL(true), DEFVAL(0));
+	ClassDB::bind_method(D_METHOD("mount_directory", "path", "mount_point", "replace_files"), &ProjectSettings::mount_directory, DEFVAL(true));
 
 	ClassDB::bind_method(D_METHOD("save_custom", "file"), &ProjectSettings::_save_custom_bnd);
 

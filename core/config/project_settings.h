@@ -150,6 +150,9 @@ protected:
 
 	bool load_resource_pack(const String &p_pack, bool p_replace_files, int p_offset);
 	bool _load_resource_pack(const String &p_pack, bool p_replace_files = true, int p_offset = 0, bool p_main_pack = false);
+	void _add_resource_dir_to_packed_data();
+	void _on_resource_pack_added();
+	bool mount_directory(const String &p_path, const String &p_mount_point, bool p_replace_files);
 
 	void _add_property_info_bind(const Dictionary &p_info);
 
