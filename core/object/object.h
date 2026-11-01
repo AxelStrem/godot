@@ -445,7 +445,6 @@ private:
 	bool _predelete_ok : 1;
 
 public:
-	bool _deleting : 1;
 	bool _is_queued_for_deletion : 1; // Set to true by SceneTree::queue_delete().
 
 private:

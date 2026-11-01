@@ -593,8 +593,6 @@ void register_scene_types() {
 	GDREGISTER_CLASS(SubtweenTweener);
 	GDREGISTER_CLASS(AwaitTweener);
 
-	GDREGISTER_CLASS(Tweak);
-
 	GDREGISTER_ABSTRACT_CLASS(AnimationMixer);
 	GDREGISTER_CLASS(AnimationPlayer);
 	GDREGISTER_CLASS(AnimationTree);

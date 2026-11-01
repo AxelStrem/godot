@@ -2335,11 +2335,11 @@ void Object::_construct_object(bool p_reference) {
 #endif
 }
 
-Object::Object(bool p_reference) : _deleting(false) {
+Object::Object(bool p_reference) {
 	_construct_object(p_reference);
 }
 
-Object::Object() : _deleting(false) {
+Object::Object() {
 	_construct_object(false);
 }
 
